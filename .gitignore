@@ -1,0 +1,12 @@
+# CharaPicker/.gitignore
+.vscode/
+
+models/
+bin/
+projects/
+
+*.txt
+*.log
+
+init_prompt.md
+memo.txt
