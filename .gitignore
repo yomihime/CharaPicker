@@ -6,9 +6,12 @@
 .codex/
 
 # Generated/runtime assets
-bin/
-models/
-projects/
+bin/*
+!bin/ARCHITECTURE.md
+models/*
+!models/ARCHITECTURE.md
+projects/*
+!projects/ARCHITECTURE.md
 
 # Local notes and logs
 *.txt
