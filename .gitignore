@@ -2,6 +2,7 @@
 
 # Local editor and agent state
 .vscode/
+.VSCodeCounter/
 .codex/
 
 # Generated/runtime assets
