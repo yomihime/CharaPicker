@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
-from qfluentwidgets import BodyLabel, CaptionLabel, CardWidget, ScrollArea, StrongBodyLabel
+from qfluentwidgets import BodyLabel, CaptionLabel, CardWidget, ScrollArea, StrongBodyLabel, isDarkTheme
 
 from core.models import InsightStatus
 from utils.i18n import t
@@ -80,6 +80,7 @@ class InsightCard(CardWidget):
 class InsightStreamPanel(ScrollArea):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("insightStreamPanel")
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setMinimumHeight(180)
@@ -96,6 +97,7 @@ class InsightStreamPanel(ScrollArea):
         self.layout.setAlignment(self.empty_label, Qt.AlignmentFlag.AlignCenter)
 
         self.setWidget(self.container)
+        self.apply_theme_colors()
 
     def append_event(self, event: dict) -> None:
         if self.empty_label.isVisible():
@@ -114,3 +116,25 @@ class InsightStreamPanel(ScrollArea):
         self.empty_label.setMinimumHeight(160)
         self.layout.addWidget(self.empty_label, 1)
         self.layout.setAlignment(self.empty_label, Qt.AlignmentFlag.AlignCenter)
+        self.apply_theme_colors()
+
+    def apply_theme_colors(self) -> None:
+        if isDarkTheme():
+            panel_background = "#202020"
+            empty_color = "#c9c9c9"
+        else:
+            panel_background = "#ffffff"
+            empty_color = "#5f6670"
+
+        self.setStyleSheet(
+            f"""
+            ScrollArea#insightStreamPanel {{
+                background: {panel_background};
+                border: 1px solid {'#3d3d3d' if isDarkTheme() else '#d8dde6'};
+                border-radius: 6px;
+            }}
+            """
+        )
+        self.viewport().setStyleSheet(f"background: {panel_background}; border: none;")
+        self.container.setStyleSheet(f"background: {panel_background};")
+        self.empty_label.setStyleSheet(f"color: {empty_color};")

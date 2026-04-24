@@ -19,6 +19,7 @@ from gui.pages.project_page import ProjectPage
 from gui.pages.settings_page import SettingsPage
 from utils.i18n import t
 from utils.state_manager import save_project_config
+from utils.theme import apply_theme_preference
 
 
 class MainWindow(FluentWindow):
@@ -61,6 +62,7 @@ class MainWindow(FluentWindow):
         self.extractor.insightGenerated.connect(self.project_page.append_event)
         self.extractor.progressChanged.connect(self.project_page.set_progress)
         self.settings_page.languageChanged.connect(self.show_language_changed)
+        self.settings_page.themeChanged.connect(self.apply_theme_changed)
 
     def save_config(self, config: ProjectConfig) -> None:
         path = save_project_config(config)
@@ -98,4 +100,15 @@ class MainWindow(FluentWindow):
             parent=self,
             position=InfoBarPosition.TOP_RIGHT,
             duration=4500,
+        )
+
+    def apply_theme_changed(self, theme: str) -> None:
+        apply_theme_preference(theme)
+        self.project_page.apply_theme_colors()
+        InfoBar.info(
+            title=t("settings.theme.changed.title"),
+            content=t("settings.theme.changed.content"),
+            parent=self,
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=3000,
         )

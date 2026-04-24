@@ -12,16 +12,25 @@ from utils.i18n import (
     set_locale_preference,
     t,
 )
+from utils.theme import (
+    SUPPORTED_THEMES,
+    THEME_NAMES,
+    set_theme_preference,
+    theme_preference,
+)
 
 
 class SettingsPage(QWidget):
     languageChanged = pyqtSignal(str)
+    themeChanged = pyqtSignal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("settingsPage")
         self._language_values = [SYSTEM_LOCALE, *SUPPORTED_LOCALES]
         self._loading_language = False
+        self._theme_values = list(SUPPORTED_THEMES)
+        self._loading_theme = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 24, 28, 24)
@@ -52,14 +61,19 @@ class SettingsPage(QWidget):
         self.language_combo = ComboBox(card)
         self._load_language_options()
 
+        self.theme_combo = ComboBox(card)
+        self._load_theme_options()
+
         form.addRow(t("settings.field.modelPath"), self.model_path)
         form.addRow(t("settings.field.runner"), self.runner_combo)
         form.addRow(t("settings.field.cache"), self.use_cache)
         form.addRow(t("settings.field.language"), self.language_combo)
+        form.addRow(t("settings.field.theme"), self.theme_combo)
         root.addWidget(card)
         root.addStretch(1)
 
         self.language_combo.currentIndexChanged.connect(self._change_language)
+        self.theme_combo.currentIndexChanged.connect(self._change_theme)
 
     def _load_language_options(self) -> None:
         self._loading_language = True
@@ -81,3 +95,24 @@ class SettingsPage(QWidget):
         locale = self._language_values[index]
         set_locale_preference(locale)
         self.languageChanged.emit(locale)
+
+    def _load_theme_options(self) -> None:
+        self._loading_theme = True
+        self.theme_combo.clear()
+        for theme in self._theme_values:
+            self.theme_combo.addItem(t(THEME_NAMES[theme]))
+
+        preference = theme_preference()
+        index = self._theme_values.index(preference) if preference in self._theme_values else 0
+        self.theme_combo.setCurrentIndex(index)
+        self._loading_theme = False
+
+    def _change_theme(self) -> None:
+        if self._loading_theme:
+            return
+        index = self.theme_combo.currentIndex()
+        if not 0 <= index < len(self._theme_values):
+            return
+        theme = self._theme_values[index]
+        set_theme_preference(theme)
+        self.themeChanged.emit(theme)

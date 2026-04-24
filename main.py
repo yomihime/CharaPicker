@@ -3,9 +3,9 @@ from __future__ import annotations
 import sys
 
 from PyQt6.QtWidgets import QApplication
-from qfluentwidgets import setTheme, Theme
 
 from gui.splash_screen import StartupController
+from utils.theme import apply_theme_preference
 
 
 def main() -> int:
@@ -14,7 +14,7 @@ def main() -> int:
     app.setOrganizationName("CharaPicker")
     app.setQuitOnLastWindowClosed(False)
 
-    setTheme(Theme.AUTO)
+    apply_theme_preference()
 
     startup = StartupController()
     app.startup_controller = startup

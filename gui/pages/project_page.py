@@ -21,6 +21,7 @@ from qfluentwidgets import (
     ProgressBar,
     PushButton,
     SubtitleLabel,
+    isDarkTheme,
 )
 
 from core.models import ExtractionMode, ProjectConfig
@@ -78,6 +79,7 @@ class ProjectPage(QWidget):
         source_actions.addStretch(1)
 
         self.sources_list = QListWidget(form_card)
+        self.sources_list.setObjectName("sourcesList")
         self.sources_list.setMinimumHeight(116)
         self.sources_list.setAlternatingRowColors(True)
         source_area.addWidget(self.sources_list, 1)
@@ -132,6 +134,7 @@ class ProjectPage(QWidget):
         self.save_button.clicked.connect(self._emit_save)
         self.preview_button.clicked.connect(self._emit_preview)
         self._refresh_project_combo()
+        self.apply_theme_colors()
 
     def current_config(self) -> ProjectConfig:
         targets = [
@@ -163,6 +166,55 @@ class ProjectPage(QWidget):
 
     def set_progress(self, value: int) -> None:
         self.progress.setValue(value)
+
+    def apply_theme_colors(self) -> None:
+        if isDarkTheme():
+            self.sources_list.setStyleSheet(
+                """
+                QListWidget#sourcesList {
+                    background: #2b2b2b;
+                    border: 1px solid #3d3d3d;
+                    border-radius: 6px;
+                    color: #f1f1f1;
+                    alternate-background-color: #303030;
+                    outline: none;
+                }
+
+                QListWidget#sourcesList::item {
+                    padding: 6px 8px;
+                    border-radius: 4px;
+                }
+
+                QListWidget#sourcesList::item:selected {
+                    background: #005fb8;
+                    color: #ffffff;
+                }
+                """
+            )
+        else:
+            self.sources_list.setStyleSheet(
+                """
+                QListWidget#sourcesList {
+                    background: #ffffff;
+                    border: 1px solid #d8dde6;
+                    border-radius: 6px;
+                    color: #202020;
+                    alternate-background-color: #f6f8fb;
+                    outline: none;
+                }
+
+                QListWidget#sourcesList::item {
+                    padding: 6px 8px;
+                    border-radius: 4px;
+                }
+
+                QListWidget#sourcesList::item:selected {
+                    background: #dbeafe;
+                    color: #1a1a1a;
+                }
+                """
+            )
+        self.stream_panel.apply_theme_colors()
 
     def _emit_save(self) -> None:
         config = self.current_config()
