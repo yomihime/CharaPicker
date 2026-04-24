@@ -5,6 +5,15 @@ from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, CaptionLabel, CardWidget, ScrollArea, StrongBodyLabel, isDarkTheme
 
 from core.models import InsightStatus
+from res.colors import (
+    INSIGHT_PANEL_DARK_BACKGROUND,
+    INSIGHT_PANEL_DARK_BORDER,
+    INSIGHT_PANEL_DARK_EMPTY_TEXT,
+    INSIGHT_PANEL_LIGHT_BACKGROUND,
+    INSIGHT_PANEL_LIGHT_BORDER,
+    INSIGHT_PANEL_LIGHT_EMPTY_TEXT,
+    INSIGHT_STATUS_COLORS,
+)
 from utils.i18n import t
 
 
@@ -14,14 +23,6 @@ STATUS_TEXT = {
     InsightStatus.DONE.value: "insight.status.done",
     InsightStatus.WARNING.value: "insight.status.warning",
 }
-
-STATUS_COLOR = {
-    InsightStatus.QUEUED.value: "#8A8F98",
-    InsightStatus.RUNNING.value: "#0078D4",
-    InsightStatus.DONE.value: "#107C10",
-    InsightStatus.WARNING.value: "#C19C00",
-}
-
 
 class TimelineMarker(QLabel):
     def __init__(self, color: str, parent: QWidget | None = None) -> None:
@@ -37,7 +38,10 @@ class InsightCard(CardWidget):
     def __init__(self, event: dict, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         status = event.get("status", InsightStatus.QUEUED.value)
-        color = STATUS_COLOR.get(status, STATUS_COLOR[InsightStatus.QUEUED.value])
+        color = INSIGHT_STATUS_COLORS.get(
+            status,
+            INSIGHT_STATUS_COLORS[InsightStatus.QUEUED.value],
+        )
 
         self.setBorderRadius(8)
         self.setMinimumHeight(92)
@@ -120,17 +124,19 @@ class InsightStreamPanel(ScrollArea):
 
     def apply_theme_colors(self) -> None:
         if isDarkTheme():
-            panel_background = "#202020"
-            empty_color = "#c9c9c9"
+            panel_background = INSIGHT_PANEL_DARK_BACKGROUND
+            panel_border = INSIGHT_PANEL_DARK_BORDER
+            empty_color = INSIGHT_PANEL_DARK_EMPTY_TEXT
         else:
-            panel_background = "#ffffff"
-            empty_color = "#5f6670"
+            panel_background = INSIGHT_PANEL_LIGHT_BACKGROUND
+            panel_border = INSIGHT_PANEL_LIGHT_BORDER
+            empty_color = INSIGHT_PANEL_LIGHT_EMPTY_TEXT
 
         self.setStyleSheet(
             f"""
             ScrollArea#insightStreamPanel {{
                 background: {panel_background};
-                border: 1px solid {'#3d3d3d' if isDarkTheme() else '#d8dde6'};
+                border: 1px solid {panel_border};
                 border-radius: 6px;
             }}
             """

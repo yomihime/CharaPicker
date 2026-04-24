@@ -19,6 +19,26 @@ except ImportError:
     isDarkTheme = None
 
 from gui.main_window import MainWindow
+from res.colors import (
+    SPLASH_DARK_CARD_BACKGROUND,
+    SPLASH_DARK_CARD_BORDER,
+    SPLASH_DARK_PROGRESS_BACKGROUND,
+    SPLASH_DARK_PROGRESS_CHUNK,
+    SPLASH_DARK_STATUS_TEXT,
+    SPLASH_DARK_SUBTITLE_TEXT,
+    SPLASH_DARK_TITLE_TEXT,
+    SPLASH_LIGHT_CARD_BACKGROUND,
+    SPLASH_LIGHT_CARD_BORDER,
+    SPLASH_LIGHT_PROGRESS_BACKGROUND,
+    SPLASH_LIGHT_PROGRESS_CHUNK,
+    SPLASH_LIGHT_STATUS_TEXT,
+    SPLASH_LIGHT_SUBTITLE_TEXT,
+    SPLASH_LIGHT_TITLE_TEXT,
+    SPLASH_LOADER_ARC_DARK_RGB,
+    SPLASH_LOADER_ARC_LIGHT_RGB,
+    SPLASH_LOADER_TRACK_DARK_RGBA,
+    SPLASH_LOADER_TRACK_LIGHT_RGBA,
+)
 from utils.i18n import t
 
 
@@ -27,8 +47,8 @@ class OrbitLoader(QWidget):
         super().__init__(parent)
         self.setFixedSize(74, 74)
         self._angle = 0
-        self._track_color = QColor(118, 185, 237, 46)
-        self._arc_color = QColor(0, 120, 212)
+        self._track_color = QColor(*SPLASH_LOADER_TRACK_LIGHT_RGBA)
+        self._arc_color = QColor(*SPLASH_LOADER_ARC_LIGHT_RGB)
 
         self._timer = QTimer(self)
         self._timer.setInterval(16)
@@ -36,8 +56,12 @@ class OrbitLoader(QWidget):
         self._timer.start()
 
     def set_dark_mode(self, enabled: bool) -> None:
-        self._track_color = QColor(96, 205, 255, 52) if enabled else QColor(118, 185, 237, 46)
-        self._arc_color = QColor(96, 205, 255) if enabled else QColor(0, 120, 212)
+        self._track_color = QColor(
+            *(SPLASH_LOADER_TRACK_DARK_RGBA if enabled else SPLASH_LOADER_TRACK_LIGHT_RGBA)
+        )
+        self._arc_color = QColor(
+            *(SPLASH_LOADER_ARC_DARK_RGB if enabled else SPLASH_LOADER_ARC_LIGHT_RGB)
+        )
         self.update()
 
     def paintEvent(self, _event) -> None:  # type: ignore[override]
@@ -122,76 +146,76 @@ class SplashScreen(QWidget):
 
     def _style_sheet(self) -> str:
         if self._dark_mode:
-            return """
-            #splashCard {
-                background: rgba(31, 31, 31, 246);
-                border: 1px solid rgba(96, 205, 255, 58);
+            return f"""
+            #splashCard {{
+                background: {SPLASH_DARK_CARD_BACKGROUND};
+                border: 1px solid {SPLASH_DARK_CARD_BORDER};
                 border-radius: 18px;
-            }
+            }}
 
-            #splashTitle {
-                color: #f3f6fa;
+            #splashTitle {{
+                color: {SPLASH_DARK_TITLE_TEXT};
                 font-size: 28px;
                 font-weight: 650;
-            }
+            }}
 
-            #splashSubtitle {
-                color: #c8cdd4;
+            #splashSubtitle {{
+                color: {SPLASH_DARK_SUBTITLE_TEXT};
                 font-size: 13px;
-            }
+            }}
 
-            #splashStatus {
-                color: #8fdcff;
+            #splashStatus {{
+                color: {SPLASH_DARK_STATUS_TEXT};
                 font-size: 13px;
-            }
+            }}
 
-            QProgressBar {
+            QProgressBar {{
                 height: 5px;
                 border: none;
                 border-radius: 3px;
-                background: rgba(96, 205, 255, 36);
-            }
+                background: {SPLASH_DARK_PROGRESS_BACKGROUND};
+            }}
 
-            QProgressBar::chunk {
+            QProgressBar::chunk {{
                 border-radius: 3px;
-                background: #60cdff;
-            }
+                background: {SPLASH_DARK_PROGRESS_CHUNK};
+            }}
             """
 
-        return """
-            #splashCard {
-                background: rgba(250, 252, 255, 244);
-                border: 1px solid rgba(0, 120, 212, 52);
+        return f"""
+            #splashCard {{
+                background: {SPLASH_LIGHT_CARD_BACKGROUND};
+                border: 1px solid {SPLASH_LIGHT_CARD_BORDER};
                 border-radius: 18px;
-            }
+            }}
 
-            #splashTitle {
-                color: #162033;
+            #splashTitle {{
+                color: {SPLASH_LIGHT_TITLE_TEXT};
                 font-size: 28px;
                 font-weight: 650;
-            }
+            }}
 
-            #splashSubtitle {
-                color: #5c6470;
+            #splashSubtitle {{
+                color: {SPLASH_LIGHT_SUBTITLE_TEXT};
                 font-size: 13px;
-            }
+            }}
 
-            #splashStatus {
-                color: #2f5f8f;
+            #splashStatus {{
+                color: {SPLASH_LIGHT_STATUS_TEXT};
                 font-size: 13px;
-            }
+            }}
 
-            QProgressBar {
+            QProgressBar {{
                 height: 5px;
                 border: none;
                 border-radius: 3px;
-                background: rgba(0, 120, 212, 34);
-            }
+                background: {SPLASH_LIGHT_PROGRESS_BACKGROUND};
+            }}
 
-            QProgressBar::chunk {
+            QProgressBar::chunk {{
                 border-radius: 3px;
-                background: #0078d4;
-            }
+                background: {SPLASH_LIGHT_PROGRESS_CHUNK};
+            }}
             """
 
     def _detect_dark_mode(self) -> bool:

@@ -26,6 +26,20 @@ from qfluentwidgets import (
 
 from core.models import ExtractionMode, ProjectConfig
 from gui.widgets.insight_stream_panel import InsightStreamPanel
+from res.colors import (
+    PROJECT_SOURCE_LIST_DARK_ALTERNATE_BACKGROUND,
+    PROJECT_SOURCE_LIST_DARK_BACKGROUND,
+    PROJECT_SOURCE_LIST_DARK_BORDER,
+    PROJECT_SOURCE_LIST_DARK_SELECTED_BACKGROUND,
+    PROJECT_SOURCE_LIST_DARK_SELECTED_TEXT,
+    PROJECT_SOURCE_LIST_DARK_TEXT,
+    PROJECT_SOURCE_LIST_LIGHT_ALTERNATE_BACKGROUND,
+    PROJECT_SOURCE_LIST_LIGHT_BACKGROUND,
+    PROJECT_SOURCE_LIST_LIGHT_BORDER,
+    PROJECT_SOURCE_LIST_LIGHT_SELECTED_BACKGROUND,
+    PROJECT_SOURCE_LIST_LIGHT_SELECTED_TEXT,
+    PROJECT_SOURCE_LIST_LIGHT_TEXT,
+)
 from utils.i18n import t
 from utils.state_manager import list_project_configs
 
@@ -170,48 +184,48 @@ class ProjectPage(QWidget):
     def apply_theme_colors(self) -> None:
         if isDarkTheme():
             self.sources_list.setStyleSheet(
-                """
-                QListWidget#sourcesList {
-                    background: #2b2b2b;
-                    border: 1px solid #3d3d3d;
+                f"""
+                QListWidget#sourcesList {{
+                    background: {PROJECT_SOURCE_LIST_DARK_BACKGROUND};
+                    border: 1px solid {PROJECT_SOURCE_LIST_DARK_BORDER};
                     border-radius: 6px;
-                    color: #f1f1f1;
-                    alternate-background-color: #303030;
+                    color: {PROJECT_SOURCE_LIST_DARK_TEXT};
+                    alternate-background-color: {PROJECT_SOURCE_LIST_DARK_ALTERNATE_BACKGROUND};
                     outline: none;
-                }
+                }}
 
-                QListWidget#sourcesList::item {
+                QListWidget#sourcesList::item {{
                     padding: 6px 8px;
                     border-radius: 4px;
-                }
+                }}
 
-                QListWidget#sourcesList::item:selected {
-                    background: #005fb8;
-                    color: #ffffff;
-                }
+                QListWidget#sourcesList::item:selected {{
+                    background: {PROJECT_SOURCE_LIST_DARK_SELECTED_BACKGROUND};
+                    color: {PROJECT_SOURCE_LIST_DARK_SELECTED_TEXT};
+                }}
                 """
             )
         else:
             self.sources_list.setStyleSheet(
-                """
-                QListWidget#sourcesList {
-                    background: #ffffff;
-                    border: 1px solid #d8dde6;
+                f"""
+                QListWidget#sourcesList {{
+                    background: {PROJECT_SOURCE_LIST_LIGHT_BACKGROUND};
+                    border: 1px solid {PROJECT_SOURCE_LIST_LIGHT_BORDER};
                     border-radius: 6px;
-                    color: #202020;
-                    alternate-background-color: #f6f8fb;
+                    color: {PROJECT_SOURCE_LIST_LIGHT_TEXT};
+                    alternate-background-color: {PROJECT_SOURCE_LIST_LIGHT_ALTERNATE_BACKGROUND};
                     outline: none;
-                }
+                }}
 
-                QListWidget#sourcesList::item {
+                QListWidget#sourcesList::item {{
                     padding: 6px 8px;
                     border-radius: 4px;
-                }
+                }}
 
-                QListWidget#sourcesList::item:selected {
-                    background: #dbeafe;
-                    color: #1a1a1a;
-                }
+                QListWidget#sourcesList::item:selected {{
+                    background: {PROJECT_SOURCE_LIST_LIGHT_SELECTED_BACKGROUND};
+                    color: {PROJECT_SOURCE_LIST_LIGHT_SELECTED_TEXT};
+                }}
                 """
             )
         self.stream_panel.apply_theme_colors()
