@@ -3,6 +3,7 @@ from __future__ import annotations
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from core.models import InsightEvent, InsightStatus, ProjectConfig
+from utils.i18n import t
 
 
 class Extractor(QObject):
@@ -10,21 +11,21 @@ class Extractor(QObject):
     progressChanged = pyqtSignal(int)
 
     def run_preview(self, config: ProjectConfig) -> None:
-        targets = ", ".join(config.target_characters) or "未指定角色"
+        targets = ", ".join(config.target_characters) or t("extractor.noTarget")
         events = [
             InsightEvent(
-                title="读取项目配置",
-                description=f"目标角色: {targets}",
+                title=t("extractor.config.title"),
+                description=t("extractor.config.description", targets=targets),
                 status=InsightStatus.DONE,
             ),
             InsightEvent(
-                title="抽样切片",
-                description="预览模式会先取前 2 个 chunk，用于检查提示词和证据质量。",
+                title=t("extractor.chunk.title"),
+                description=t("extractor.chunk.description"),
                 status=InsightStatus.RUNNING,
             ),
             InsightEvent(
-                title="定向洞察",
-                description="等待接入 AI 后，将写入 knowledge_base/targeted_insights.json。",
+                title=t("extractor.insight.title"),
+                description=t("extractor.insight.description"),
                 status=InsightStatus.QUEUED,
             ),
         ]

@@ -5,13 +5,14 @@ from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, CaptionLabel, CardWidget, ScrollArea, StrongBodyLabel
 
 from core.models import InsightStatus
+from utils.i18n import t
 
 
 STATUS_TEXT = {
-    InsightStatus.QUEUED.value: "等待",
-    InsightStatus.RUNNING.value: "进行中",
-    InsightStatus.DONE.value: "完成",
-    InsightStatus.WARNING.value: "注意",
+    InsightStatus.QUEUED.value: "insight.status.queued",
+    InsightStatus.RUNNING.value: "insight.status.running",
+    InsightStatus.DONE.value: "insight.status.done",
+    InsightStatus.WARNING.value: "insight.status.warning",
 }
 
 STATUS_COLOR = {
@@ -61,8 +62,8 @@ class InsightCard(CardWidget):
         content.setSpacing(6)
 
         header = QHBoxLayout()
-        title = StrongBodyLabel(event.get("title", "未命名洞察"), self)
-        status_label = CaptionLabel(STATUS_TEXT.get(status, "等待"), self)
+        title = StrongBodyLabel(event.get("title", t("insight.untitled")), self)
+        status_label = CaptionLabel(t(STATUS_TEXT.get(status, "insight.status.queued")), self)
         status_label.setStyleSheet(f"color: {color};")
         header.addWidget(title, 1)
         header.addWidget(status_label, 0, Qt.AlignmentFlag.AlignRight)
@@ -81,17 +82,18 @@ class InsightStreamPanel(ScrollArea):
         super().__init__(parent)
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setMinimumHeight(180)
 
         self.container = QWidget(self)
         self.layout = QVBoxLayout(self.container)
         self.layout.setContentsMargins(4, 4, 12, 4)
         self.layout.setSpacing(10)
-        self.layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        self.empty_label = BodyLabel("点击预览后，AI 洞察流会在这里逐步出现。", self.container)
+        self.empty_label = BodyLabel(t("insight.empty"), self.container)
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setMinimumHeight(220)
-        self.layout.addWidget(self.empty_label)
+        self.empty_label.setMinimumHeight(160)
+        self.layout.addWidget(self.empty_label, 1)
+        self.layout.setAlignment(self.empty_label, Qt.AlignmentFlag.AlignCenter)
 
         self.setWidget(self.container)
 
@@ -107,7 +109,8 @@ class InsightStreamPanel(ScrollArea):
             if widget is not None:
                 widget.deleteLater()
 
-        self.empty_label = BodyLabel("点击预览后，AI 洞察流会在这里逐步出现。", self.container)
+        self.empty_label = BodyLabel(t("insight.empty"), self.container)
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setMinimumHeight(220)
-        self.layout.addWidget(self.empty_label)
+        self.empty_label.setMinimumHeight(160)
+        self.layout.addWidget(self.empty_label, 1)
+        self.layout.setAlignment(self.empty_label, Qt.AlignmentFlag.AlignCenter)

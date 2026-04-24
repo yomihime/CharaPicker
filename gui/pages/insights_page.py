@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, CardWidget, ProgressBar, SubtitleLabel
 
 from gui.widgets.insight_stream_panel import InsightStreamPanel
+from utils.i18n import t
 
 
 class InsightsPage(QWidget):
@@ -16,7 +17,7 @@ class InsightsPage(QWidget):
         root.setSpacing(14)
 
         title_row = QHBoxLayout()
-        title_row.addWidget(SubtitleLabel("Insight Stream", self))
+        title_row.addWidget(SubtitleLabel(t("insightsPage.title"), self))
         title_row.addStretch(1)
         root.addLayout(title_row)
 
@@ -25,7 +26,7 @@ class InsightsPage(QWidget):
         status_layout = QVBoxLayout(status_card)
         status_layout.setContentsMargins(18, 14, 18, 16)
         status_layout.setSpacing(8)
-        status_layout.addWidget(BodyLabel("预览进度", status_card))
+        status_layout.addWidget(BodyLabel(t("project.progress.label"), status_card))
         self.progress = ProgressBar(status_card)
         self.progress.setRange(0, 100)
         self.progress.setValue(0)

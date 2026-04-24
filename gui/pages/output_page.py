@@ -3,6 +3,8 @@ from __future__ import annotations
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import CardWidget, PlainTextEdit, PushButton, SubtitleLabel
 
+from utils.i18n import t
+
 
 class OutputPage(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -14,9 +16,9 @@ class OutputPage(QWidget):
         root.setSpacing(14)
 
         header = QHBoxLayout()
-        header.addWidget(SubtitleLabel("生成输出", self))
+        header.addWidget(SubtitleLabel(t("output.title"), self))
         header.addStretch(1)
-        header.addWidget(PushButton("导出 Markdown", self))
+        header.addWidget(PushButton(t("output.exportMarkdown"), self))
         root.addLayout(header)
 
         card = CardWidget(self)
@@ -26,7 +28,7 @@ class OutputPage(QWidget):
 
         self.preview = PlainTextEdit(card)
         self.preview.setReadOnly(True)
-        self.preview.setPlaceholderText("角色卡、设定稿或知识库摘要会显示在这里。")
+        self.preview.setPlaceholderText(t("output.placeholder"))
         layout.addWidget(self.preview)
         root.addWidget(card, 1)
 
