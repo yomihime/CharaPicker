@@ -1,12 +1,19 @@
 # CharaPicker/.gitignore
-.vscode/
 
-models/
+# Local editor and agent state
+.vscode/
+.codex/
+
+# Generated/runtime assets
 bin/
+models/
 projects/
 
+# Local notes and logs
 *.txt
+!requirements.txt
 *.log
 
-init_prompt.md
-memo.txt
+# Python generated files
+__pycache__/
+*.py[cod]

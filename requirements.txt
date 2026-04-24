@@ -1,0 +1,3 @@
+PyQt6>=6.6
+PyQt6-Fluent-Widgets>=1.5
+pydantic>=2.6
