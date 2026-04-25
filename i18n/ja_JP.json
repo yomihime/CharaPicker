@@ -31,6 +31,7 @@
   "project.progress.label": "プレビュー進捗",
   "project.save": "設定を保存",
   "project.preview": "プレビュー開始",
+  "project.fullExtraction": "完全抽出を開始",
   "project.defaultName": "新規プロジェクト {index}",
   "project.new.dialog.title": "新規プロジェクト",
   "project.new.dialog.label": "プロジェクト名",

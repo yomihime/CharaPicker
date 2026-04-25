@@ -31,6 +31,7 @@
   "project.progress.label": "预览进度",
   "project.save": "保存配置",
   "project.preview": "开始预览",
+  "project.fullExtraction": "开始完整提取",
   "project.defaultName": "新项目 {index}",
   "project.new.dialog.title": "新增项目",
   "project.new.dialog.label": "项目名称",

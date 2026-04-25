@@ -31,6 +31,7 @@
   "project.progress.label": "Preview Progress",
   "project.save": "Save Config",
   "project.preview": "Start Preview",
+  "project.fullExtraction": "Start Full Extraction",
   "project.defaultName": "New Project {index}",
   "project.new.dialog.title": "New Project",
   "project.new.dialog.label": "Project Name",

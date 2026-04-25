@@ -187,7 +187,9 @@ class ProjectPage(QWidget):
         self.remove_source_button.clicked.connect(self._remove_selected_sources)
         self.save_button.clicked.connect(self._emit_save)
         self.preview_button.clicked.connect(self._emit_preview)
+        self.mode_combo.currentIndexChanged.connect(self._sync_preview_button_text)
         self._refresh_project_combo()
+        self._sync_preview_button_text()
         self.apply_theme_colors()
 
     def current_config(self) -> ProjectConfig:
@@ -278,6 +280,10 @@ class ProjectPage(QWidget):
     def _emit_preview(self) -> None:
         self.previewRequested.emit(self.current_config())
 
+    def _sync_preview_button_text(self) -> None:
+        key = "project.preview" if self.mode_combo.currentIndex() == 0 else "project.fullExtraction"
+        self.preview_button.setText(t(key))
+
     def _refresh_project_combo(self) -> None:
         self._loading_project = True
         self.project_combo.clear()
@@ -302,6 +308,7 @@ class ProjectPage(QWidget):
         project = self._selected_project()
         self.targets_edit.setText(", ".join(project.target_characters))
         self.mode_combo.setCurrentIndex(0 if project.extraction_mode == ExtractionMode.PREVIEW else 1)
+        self._sync_preview_button_text()
         self.sources_list.clear()
         for source_path in project.source_paths:
             self.sources_list.addItem(source_path)
