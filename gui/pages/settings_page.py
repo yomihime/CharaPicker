@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QFormLayout, QVBoxLayout, QWidget
-from qfluentwidgets import CardWidget, ComboBox, LineEdit, SubtitleLabel, SwitchButton
+from qfluentwidgets import CardWidget, ComboBox, SubtitleLabel
 
 from utils.i18n import (
     SUPPORTED_LOCALES,
@@ -43,30 +43,12 @@ class SettingsPage(QWidget):
         form.setContentsMargins(20, 18, 20, 20)
         form.setSpacing(12)
 
-        self.model_path = LineEdit(card)
-        self.model_path.setPlaceholderText(t("settings.modelPath.placeholder"))
-
-        self.runner_combo = ComboBox(card)
-        self.runner_combo.addItems(
-            [
-                t("settings.runner.local"),
-                t("settings.runner.openai"),
-                t("settings.runner.manual"),
-            ]
-        )
-
-        self.use_cache = SwitchButton(card)
-        self.use_cache.setChecked(True)
-
         self.language_combo = ComboBox(card)
         self._load_language_options()
 
         self.theme_combo = ComboBox(card)
         self._load_theme_options()
 
-        form.addRow(t("settings.field.modelPath"), self.model_path)
-        form.addRow(t("settings.field.runner"), self.runner_combo)
-        form.addRow(t("settings.field.cache"), self.use_cache)
         form.addRow(t("settings.field.language"), self.language_combo)
         form.addRow(t("settings.field.theme"), self.theme_combo)
         root.addWidget(card)

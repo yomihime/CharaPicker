@@ -21,6 +21,9 @@
 - `theme.py`：管理主题偏好，并调用 qfluentwidgets 应用亮色、暗色或系统主题。
 - `chunker.py`：预留文本或素材分块工具。
 - `env_manager.py`：预留环境检测工具。
+- `cloud_model_presets.py`：保存和读取云端模型配置预设，使用 Qt 本地设置。
+- `cloud_models.py`：拉取 OpenAI-compatible 云端模型列表。
+- `llamacpp_downloader.py`：下载并安装 llama.cpp 运行时到 `bin/`。
 - `__init__.py`：标记 `utils` 为 Python 包。
 
 ## 与其他目录的关系
