@@ -40,3 +40,9 @@
 - 新增颜色先维护 `res/colors.py`，再在界面中引用。
 - `InsightStreamPanel` 只展示关键洞察，不展示普通调试日志。
 - Qt Signal 传输的数据尽量保持为可序列化 `dict`。
+
+Dialog middleware note:
+
+- `widgets/dialog_middleware.py` owns the shared Fluent dialog shell.
+- New app-owned modal dialogs should reuse it for the frameless window, translucent background, Card container, title bar, close button, margins, and spacing.
+- Native platform dialogs, such as file pickers, can stay as direct Qt calls.

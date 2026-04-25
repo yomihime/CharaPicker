@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -16,17 +16,16 @@ from qfluentwidgets import (
     BodyLabel,
     CardWidget,
     ComboBox,
-    FluentIcon as FIF,
     LineEdit,
     PrimaryPushButton,
     ProgressBar,
     PushButton,
     SubtitleLabel,
-    TransparentToolButton,
     isDarkTheme,
 )
 
 from core.models import ExtractionMode, ProjectConfig
+from gui.widgets.dialog_middleware import FluentDialog
 from gui.widgets.insight_stream_panel import InsightStreamPanel
 from res.colors import (
     PROJECT_SOURCE_LIST_DARK_ALTERNATE_BACKGROUND,
@@ -46,52 +45,27 @@ from utils.i18n import t
 from utils.state_manager import list_project_configs
 
 
-class NewProjectDialog(QDialog):
+class NewProjectDialog(FluentDialog):
     def __init__(self, default_name: str, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setWindowTitle(t("project.new.dialog.title"))
-        self.setModal(True)
-        self.resize(460, 230)
+        super().__init__(t("project.new.dialog.title"), parent, width=460, height=230)
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-
-        card = CardWidget(self)
-        card.setStyleSheet("CardWidget { background-color: palette(window); }")
-        card.setBorderRadius(8)
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(24, 22, 24, 22)
-        layout.setSpacing(14)
-
-        header = QHBoxLayout()
-        header.addWidget(SubtitleLabel(t("project.new.dialog.title"), card))
-        header.addStretch(1)
-        close_button = TransparentToolButton(FIF.CLOSE, card)
-        header.addWidget(close_button)
-        layout.addLayout(header)
-
-        description = BodyLabel(t("project.new.dialog.description"), card)
+        description = BodyLabel(t("project.new.dialog.description"), self.dialog_card)
         description.setWordWrap(True)
-        layout.addWidget(description)
+        self.content_layout.addWidget(description)
 
-        self.name_edit = LineEdit(card)
+        self.name_edit = LineEdit(self.dialog_card)
         self.name_edit.setPlaceholderText(t("project.new.dialog.label"))
         self.name_edit.setText(default_name)
-        layout.addWidget(self.name_edit)
+        self.content_layout.addWidget(self.name_edit)
 
         actions = QHBoxLayout()
         actions.addStretch(1)
-        cancel_button = PushButton(t("project.new.dialog.cancel"), card)
-        self.create_button = PrimaryPushButton(t("project.new.dialog.create"), card)
+        cancel_button = PushButton(t("project.new.dialog.cancel"), self.dialog_card)
+        self.create_button = PrimaryPushButton(t("project.new.dialog.create"), self.dialog_card)
         actions.addWidget(cancel_button)
         actions.addWidget(self.create_button)
-        layout.addLayout(actions)
+        self.content_layout.addLayout(actions)
 
-        root.addWidget(card)
-        close_button.clicked.connect(self.reject)
         cancel_button.clicked.connect(self.reject)
         self.create_button.clicked.connect(self.accept)
         self.name_edit.textChanged.connect(self._sync_create_button)

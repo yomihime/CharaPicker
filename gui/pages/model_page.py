@@ -3,9 +3,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, QThread, Qt, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
-    QDialog,
     QFormLayout,
     QHBoxLayout,
     QVBoxLayout,
@@ -15,7 +14,6 @@ from qfluentwidgets import (
     BodyLabel,
     CardWidget,
     ComboBox,
-    FluentIcon as FIF,
     InfoBar,
     InfoBarPosition,
     LineEdit,
@@ -27,9 +25,9 @@ from qfluentwidgets import (
     SearchLineEdit,
     SubtitleLabel,
     SwitchButton,
-    TransparentToolButton,
 )
 
+from gui.widgets.dialog_middleware import FluentDialog
 from utils.cloud_models import CloudModelListError, fetch_openai_compatible_models
 from utils.cloud_model_presets import (
     CloudModelPreset,
@@ -110,53 +108,29 @@ class CloudModelListWorker(QObject):
             self.finished.emit()
 
 
-class LlamaCppDownloadDialog(QDialog):
+class LlamaCppDownloadDialog(FluentDialog):
     cancelRequested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
+        super().__init__(t("model.local.download.title"), parent, width=520, height=210, close_rejects=False)
         self._finished = False
         self._cancel_requested = False
-        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setWindowTitle(t("model.local.download.title"))
-        self.setModal(True)
-        self.resize(520, 210)
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-
-        card = CardWidget(self)
-        card.setStyleSheet("CardWidget { background-color: palette(window); }")
-        card.setBorderRadius(8)
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(24, 22, 24, 22)
-        layout.setSpacing(14)
-
-        header = QHBoxLayout()
-        header.addWidget(SubtitleLabel(t("model.local.download.title"), card))
-        header.addStretch(1)
-        self.close_button = TransparentToolButton(FIF.CLOSE, card)
-        header.addWidget(self.close_button)
-        layout.addLayout(header)
-
-        self.status_label = BodyLabel(t("model.local.download.progress.release"), card)
+        self.status_label = BodyLabel(t("model.local.download.progress.release"), self.dialog_card)
         self.status_label.setWordWrap(True)
-        layout.addWidget(self.status_label)
+        self.content_layout.addWidget(self.status_label)
 
-        self.progress_bar = ProgressBar(card)
+        self.progress_bar = ProgressBar(self.dialog_card)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        layout.addWidget(self.progress_bar)
+        self.content_layout.addWidget(self.progress_bar)
 
         actions = QHBoxLayout()
         actions.addStretch(1)
-        self.cancel_button = PushButton(t("model.local.download.cancel"), card)
+        self.cancel_button = PushButton(t("model.local.download.cancel"), self.dialog_card)
         actions.addWidget(self.cancel_button)
-        layout.addLayout(actions)
+        self.content_layout.addLayout(actions)
 
-        root.addWidget(card)
         self.cancel_button.clicked.connect(self.request_cancel)
         self.close_button.clicked.connect(self.request_cancel)
 
@@ -183,53 +157,36 @@ class LlamaCppDownloadDialog(QDialog):
         self.request_cancel()
 
 
-class CloudModelSelectDialog(QDialog):
+class CloudModelSelectDialog(FluentDialog):
     modelSelected = pyqtSignal(str)
 
     def __init__(self, models: list[str], parent: QWidget | None = None) -> None:
-        super().__init__(parent)
+        super().__init__(
+            t("model.cloud.models.title"),
+            parent,
+            width=560,
+            height=460,
+            margins=(22, 20, 22, 20),
+            spacing=12,
+        )
         self._models = models
-        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setWindowTitle(t("model.cloud.models.title"))
-        self.setModal(True)
-        self.resize(560, 460)
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-
-        card = CardWidget(self)
-        card.setStyleSheet("CardWidget { background-color: palette(window); }")
-        card.setBorderRadius(8)
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(22, 20, 22, 20)
-        layout.setSpacing(12)
-
-        header = QHBoxLayout()
-        header.addWidget(SubtitleLabel(t("model.cloud.models.title"), card))
-        header.addStretch(1)
-        close_button = TransparentToolButton(FIF.CLOSE, card)
-        header.addWidget(close_button)
-        layout.addLayout(header)
-
-        self.search_edit = SearchLineEdit(card)
+        self.search_edit = SearchLineEdit(self.dialog_card)
         self.search_edit.setPlaceholderText(t("model.cloud.models.search.placeholder"))
-        layout.addWidget(self.search_edit)
+        self.content_layout.addWidget(self.search_edit)
 
-        self.model_list = ListWidget(card)
+        self.model_list = ListWidget(self.dialog_card)
         self.model_list.setMinimumHeight(260)
-        layout.addWidget(self.model_list, 1)
+        self.content_layout.addWidget(self.model_list, 1)
 
         actions = QHBoxLayout()
         actions.addStretch(1)
-        cancel_button = PushButton(t("model.cloud.models.cancel"), card)
-        select_button = PushButton(t("model.cloud.models.select"), card)
+        cancel_button = PushButton(t("model.cloud.models.cancel"), self.dialog_card)
+        select_button = PushButton(t("model.cloud.models.select"), self.dialog_card)
         actions.addWidget(cancel_button)
         actions.addWidget(select_button)
-        layout.addLayout(actions)
+        self.content_layout.addLayout(actions)
 
-        root.addWidget(card)
-        close_button.clicked.connect(self.reject)
         cancel_button.clicked.connect(self.reject)
         select_button.clicked.connect(self._select_current)
         self.search_edit.textChanged.connect(self._filter_models)
