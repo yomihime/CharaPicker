@@ -25,6 +25,8 @@
 - `cloud_model_presets.py`：保存和读取云端模型配置预设。
 - `cloud_models.py`：拉取 OpenAI-compatible 云端模型列表。
 - `llamacpp_downloader.py`：下载并安装 llama.cpp 运行时到 `bin/`。
+- `ffmpeg_downloader.py`：下载并安装 ffmpeg 运行时到 `bin/`。
+- `source_importer.py`：把外部原始素材按项目目录规则复制到 `projects/{project_id}/raw`。
 - `logging_preferences.py`：管理日志等级偏好。
 - `logging_middleware.py`：安装全局日志中间件，日志只写入文件。
 - `ai_model_middleware.py`：统一模型调用入口，负责加载默认提示词、构造标准消息、屏蔽敏感日志并路由下层模型后端。
