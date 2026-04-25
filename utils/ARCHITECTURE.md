@@ -25,6 +25,7 @@
 - `cloud_model_presets.py`：保存和读取云端模型配置预设，使用 Qt 本地设置。
 - `cloud_models.py`：拉取 OpenAI-compatible 云端模型列表。
 - `llamacpp_downloader.py`：下载并安装 llama.cpp 运行时到 `bin/`。
+- `logging_preferences.py`??????????????? `INFO`??????????
 - `logging_middleware.py`：安装全局日志中间件。每次启动在 `log/` 中创建一个按启动时间命名的 `.log` 文件，并接收 Qt 消息和未捕获异常；日志等级和输出目标在中间件内定义，日志只写入文件；加载时清理旧日志，最多保留 20 个日志文件。
 - `__init__.py`：标记 `utils` 为 Python 包。
 

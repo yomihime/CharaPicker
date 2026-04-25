@@ -12,6 +12,12 @@ from utils.i18n import (
     set_locale_preference,
     t,
 )
+from utils.logging_preferences import (
+    LOG_LEVEL_NAMES,
+    SUPPORTED_LOG_LEVELS,
+    log_level_preference,
+    set_log_level_preference,
+)
 from utils.theme import (
     SUPPORTED_THEMES,
     THEME_NAMES,
@@ -23,6 +29,7 @@ from utils.theme import (
 class SettingsPage(QWidget):
     languageChanged = pyqtSignal(str)
     themeChanged = pyqtSignal(str)
+    logLevelChanged = pyqtSignal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -31,6 +38,8 @@ class SettingsPage(QWidget):
         self._loading_language = False
         self._theme_values = list(SUPPORTED_THEMES)
         self._loading_theme = False
+        self._log_level_values = list(SUPPORTED_LOG_LEVELS)
+        self._loading_log_level = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 24, 28, 24)
@@ -49,13 +58,18 @@ class SettingsPage(QWidget):
         self.theme_combo = ComboBox(card)
         self._load_theme_options()
 
+        self.log_level_combo = ComboBox(card)
+        self._load_log_level_options()
+
         form.addRow(t("settings.field.language"), self.language_combo)
         form.addRow(t("settings.field.theme"), self.theme_combo)
+        form.addRow(t("settings.field.logLevel"), self.log_level_combo)
         root.addWidget(card)
         root.addStretch(1)
 
         self.language_combo.currentIndexChanged.connect(self._change_language)
         self.theme_combo.currentIndexChanged.connect(self._change_theme)
+        self.log_level_combo.currentIndexChanged.connect(self._change_log_level)
 
     def _load_language_options(self) -> None:
         self._loading_language = True
@@ -98,3 +112,24 @@ class SettingsPage(QWidget):
         theme = self._theme_values[index]
         set_theme_preference(theme)
         self.themeChanged.emit(theme)
+
+    def _load_log_level_options(self) -> None:
+        self._loading_log_level = True
+        self.log_level_combo.clear()
+        for level in self._log_level_values:
+            self.log_level_combo.addItem(t(LOG_LEVEL_NAMES[level]))
+
+        preference = log_level_preference()
+        index = self._log_level_values.index(preference) if preference in self._log_level_values else 1
+        self.log_level_combo.setCurrentIndex(index)
+        self._loading_log_level = False
+
+    def _change_log_level(self) -> None:
+        if self._loading_log_level:
+            return
+        index = self.log_level_combo.currentIndex()
+        if not 0 <= index < len(self._log_level_values):
+            return
+        level = self._log_level_values[index]
+        set_log_level_preference(level)
+        self.logLevelChanged.emit(level)

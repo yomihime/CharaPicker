@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from types import TracebackType
 
+from utils.logging_preferences import logging_level_value, log_level_preference
 from utils.paths import LOGS_ROOT
 
 
@@ -26,9 +27,10 @@ QT_MESSAGE_LEVELS = {
 def install_global_logging(logs_root: Path = LOGS_ROOT) -> Path:
     logs_root.mkdir(parents=True, exist_ok=True)
     log_file = logs_root / f"{datetime.now().strftime(LOG_FILE_TIME_FORMAT)}.log"
+    log_level = logging_level_value()
 
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.DEBUG)
+    root_logger.setLevel(log_level)
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
         handler.close()
@@ -36,14 +38,27 @@ def install_global_logging(logs_root: Path = LOGS_ROOT) -> Path:
     formatter = logging.Formatter(LOG_RECORD_FORMAT, datefmt=LOG_TIME_FORMAT)
 
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
-    file_handler.setLevel(logging.DEBUG)
+    file_handler.setLevel(log_level)
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
 
     _install_exception_hooks()
     _prune_old_log_files(logs_root, keep_count=MAX_LOG_FILE_COUNT)
-    logging.getLogger(__name__).info("Global logging initialized: %s", log_file)
+    logging.getLogger(__name__).info(
+        "Global logging initialized; log_file=%s level=%s",
+        log_file,
+        log_level_preference(),
+    )
     return log_file
+
+
+def apply_log_level_preference() -> None:
+    log_level = logging_level_value()
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
+    for handler in root_logger.handlers:
+        handler.setLevel(log_level)
+    logging.getLogger(__name__).info("Log level preference applied; level=%s", log_level_preference())
 
 
 def log_qt_message(message_type: object, message: str) -> None:

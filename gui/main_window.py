@@ -21,6 +21,7 @@ from gui.pages.output_page import OutputPage
 from gui.pages.project_page import ProjectPage
 from gui.pages.settings_page import SettingsPage
 from utils.i18n import t
+from utils.logging_middleware import apply_log_level_preference
 from utils.state_manager import save_project_config
 from utils.theme import apply_theme_preference
 
@@ -73,6 +74,7 @@ class MainWindow(FluentWindow):
         self.extractor.progressChanged.connect(self.project_page.set_progress)
         self.settings_page.languageChanged.connect(self.show_language_changed)
         self.settings_page.themeChanged.connect(self.apply_theme_changed)
+        self.settings_page.logLevelChanged.connect(self.apply_log_level_changed)
 
     def save_config(self, config: ProjectConfig) -> None:
         LOGGER.info("Saving project config from UI; project_id=%s", config.project_id)
@@ -132,3 +134,7 @@ class MainWindow(FluentWindow):
             position=InfoBarPosition.TOP_RIGHT,
             duration=3000,
         )
+
+    def apply_log_level_changed(self, level: str) -> None:
+        apply_log_level_preference()
+        LOGGER.info("Log level preference changed; level=%s", level)
