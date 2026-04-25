@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 
 from PyQt6.QtCore import QtMsgType, qInstallMessageHandler
@@ -14,6 +15,9 @@ _SUPPRESSED_QT_MESSAGE_PREFIXES = (
 
 
 def main() -> int:
+    from utils.logging_middleware import install_global_logging
+
+    install_global_logging()
     _install_qt_message_filter()
     app = QApplication(sys.argv)
     app.setApplicationName("CharaPicker")
@@ -49,10 +53,10 @@ def _qt_message_handler(message_type: QtMsgType, _context, message: str) -> None
         return
 
     if message_type == QtMsgType.QtDebugMsg:
-        stream = sys.stdout
+        level = logging.DEBUG
     else:
-        stream = sys.stderr
-    stream.write(f"{message}\n")
+        level = logging.WARNING
+    logging.getLogger("qt").log(level, message)
 
 
 if __name__ == "__main__":

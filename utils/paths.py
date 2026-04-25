@@ -7,6 +7,7 @@ from core.models import ProjectPaths
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 PROJECTS_ROOT = APP_ROOT / "projects"
+LOGS_ROOT = APP_ROOT / "log"
 
 
 def project_paths(project_id: str) -> ProjectPaths:
