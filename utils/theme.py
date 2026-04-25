@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from qfluentwidgets import Theme, setTheme
 
 from utils.global_store import get_global_value, set_global_value
@@ -14,6 +16,7 @@ THEME_NAMES = {
     LIGHT_THEME: "settings.theme.light",
     DARK_THEME: "settings.theme.dark",
 }
+LOGGER = logging.getLogger(__name__)
 
 
 def theme_preference() -> str:
@@ -22,7 +25,9 @@ def theme_preference() -> str:
 
 
 def set_theme_preference(theme: str) -> None:
-    set_global_value("appearance/theme", theme if theme in SUPPORTED_THEMES else SYSTEM_THEME)
+    normalized_theme = theme if theme in SUPPORTED_THEMES else SYSTEM_THEME
+    set_global_value("appearance/theme", normalized_theme)
+    LOGGER.info("Theme preference saved; theme=%s", normalized_theme)
 
 
 def apply_theme_preference(theme: str | None = None) -> None:
@@ -33,3 +38,4 @@ def apply_theme_preference(theme: str | None = None) -> None:
         setTheme(Theme.LIGHT)
     else:
         setTheme(Theme.AUTO)
+    LOGGER.info("Theme preference applied; theme=%s", preference)

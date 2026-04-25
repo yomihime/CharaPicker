@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from PyQt6.QtCore import QSize
 from qfluentwidgets import (
     FluentIcon as FIF,
@@ -23,9 +25,13 @@ from utils.state_manager import save_project_config
 from utils.theme import apply_theme_preference
 
 
+LOGGER = logging.getLogger(__name__)
+
+
 class MainWindow(FluentWindow):
     def __init__(self) -> None:
         super().__init__()
+        LOGGER.info("Main window initialization started")
         self.setWindowTitle("CharaPicker")
         self.resize(1180, 760)
         self.setMinimumSize(QSize(980, 640))
@@ -40,6 +46,7 @@ class MainWindow(FluentWindow):
 
         self._init_navigation()
         self._connect_signals()
+        LOGGER.info("Main window initialization finished")
 
     def _init_navigation(self) -> None:
         self.addSubInterface(self.project_page, FIF.HOME, t("app.nav.home"))
@@ -68,6 +75,7 @@ class MainWindow(FluentWindow):
         self.settings_page.themeChanged.connect(self.apply_theme_changed)
 
     def save_config(self, config: ProjectConfig) -> None:
+        LOGGER.info("Saving project config from UI; project_id=%s", config.project_id)
         path = save_project_config(config)
         InfoBar.success(
             title=t("app.config.saved.title"),
@@ -78,6 +86,12 @@ class MainWindow(FluentWindow):
         )
 
     def run_preview(self, config: ProjectConfig) -> None:
+        LOGGER.info(
+            "Preview requested; project_id=%s targets=%s sources=%s",
+            config.project_id,
+            len(config.target_characters),
+            len(config.source_paths),
+        )
         self.switchTo(self.project_page)
         self.project_page.clear_events()
         self.extractor.run_preview(config)
@@ -95,8 +109,10 @@ class MainWindow(FluentWindow):
             position=InfoBarPosition.TOP_RIGHT,
             duration=3500,
         )
+        LOGGER.info("Preview completed; project_id=%s", config.project_id)
 
     def show_language_changed(self, _locale: str) -> None:
+        LOGGER.info("Language preference changed; locale=%s", _locale)
         InfoBar.info(
             title=t("settings.language.changed.title"),
             content=t("settings.language.changed.content"),
@@ -106,6 +122,7 @@ class MainWindow(FluentWindow):
         )
 
     def apply_theme_changed(self, theme: str) -> None:
+        LOGGER.info("Theme preference changed; theme=%s", theme)
         apply_theme_preference(theme)
         self.project_page.apply_theme_colors()
         InfoBar.info(

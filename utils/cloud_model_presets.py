@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, dataclass
 
 from utils.global_store import get_global_value, set_global_value
 
 CLOUD_MODEL_PRESETS_KEY = "model/cloudPresets"
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -23,10 +25,12 @@ def load_cloud_model_presets() -> list[CloudModelPreset]:
         try:
             raw_presets = json.loads(raw_value)
         except json.JSONDecodeError:
+            LOGGER.warning("Cloud model presets could not be decoded")
             return []
     else:
         raw_presets = raw_value
     if not isinstance(raw_presets, list):
+        LOGGER.warning("Cloud model presets ignored because stored value is not a list")
         return []
 
     presets: list[CloudModelPreset] = []
@@ -45,11 +49,13 @@ def load_cloud_model_presets() -> list[CloudModelPreset]:
                 model_name=str(item.get("model_name", "")),
             )
         )
+    LOGGER.info("Cloud model presets loaded; count=%s", len(presets))
     return presets
 
 
 def save_cloud_model_presets(presets: list[CloudModelPreset]) -> None:
     set_global_value(CLOUD_MODEL_PRESETS_KEY, [asdict(preset) for preset in presets])
+    LOGGER.info("Cloud model presets saved; count=%s", len(presets))
 
 
 def upsert_cloud_model_preset(preset: CloudModelPreset) -> list[CloudModelPreset]:

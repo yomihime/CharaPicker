@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 
 from PyQt6.QtCore import QEasingCurve, QObject, QPointF, QPropertyAnimation, QSize, QTimer, Qt
@@ -40,6 +41,9 @@ from res.colors import (
     SPLASH_LOADER_TRACK_LIGHT_RGBA,
 )
 from utils.i18n import t
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class OrbitLoader(QWidget):
@@ -277,6 +281,7 @@ class StartupController(QObject):
         ]
 
     def start(self) -> None:
+        LOGGER.info("Startup splash sequence started")
         self.splash.show()
         QTimer.singleShot(180, self._run_next_step)
 
@@ -286,6 +291,12 @@ class StartupController(QObject):
             return
 
         message, progress, action = self._steps[self._step_index]
+        LOGGER.debug(
+            "Startup step running; index=%s progress=%s has_action=%s",
+            self._step_index,
+            progress,
+            action is not None,
+        )
         self.splash.set_step(message, progress)
         if action:
             action()
@@ -294,15 +305,18 @@ class StartupController(QObject):
         QTimer.singleShot(260, self._run_next_step)
 
     def _create_main_window(self) -> None:
+        LOGGER.info("Creating main window during startup")
         self.window = MainWindow()
 
     def _show_main_window(self) -> None:
         if self.window is None:
+            LOGGER.info("Main window was not pre-created; creating before show")
             self.window = MainWindow()
         self.window.resize(self.MAIN_WINDOW_SIZE)
         self._center_main_window()
         QApplication.instance().setQuitOnLastWindowClosed(True)
         self.window.showNormal()
+        LOGGER.info("Main window shown")
 
     def _center_main_window(self) -> None:
         if self.window is None:

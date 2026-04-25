@@ -14,6 +14,13 @@ LOG_FILE_TIME_FORMAT = "%Y%m%d_%H%M%S_%f"
 MAX_LOG_FILE_COUNT = 20
 LOG_RECORD_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 LOG_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+QT_MESSAGE_LEVELS = {
+    "QtDebugMsg": logging.DEBUG,
+    "QtInfoMsg": logging.INFO,
+    "QtWarningMsg": logging.WARNING,
+    "QtCriticalMsg": logging.ERROR,
+    "QtFatalMsg": logging.CRITICAL,
+}
 
 
 def install_global_logging(logs_root: Path = LOGS_ROOT) -> Path:
@@ -33,15 +40,15 @@ def install_global_logging(logs_root: Path = LOGS_ROOT) -> Path:
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
 
-    stream_handler = logging.StreamHandler()
-    stream_handler.setLevel(logging.INFO)
-    stream_handler.setFormatter(formatter)
-    root_logger.addHandler(stream_handler)
-
     _install_exception_hooks()
     _prune_old_log_files(logs_root, keep_count=MAX_LOG_FILE_COUNT)
     logging.getLogger(__name__).info("Global logging initialized: %s", log_file)
     return log_file
+
+
+def log_qt_message(message_type: object, message: str) -> None:
+    level = QT_MESSAGE_LEVELS.get(getattr(message_type, "name", ""), logging.WARNING)
+    logging.getLogger("qt").log(level, message)
 
 
 def _prune_old_log_files(logs_root: Path, keep_count: int) -> None:
@@ -71,14 +78,12 @@ def _install_exception_hooks() -> None:
             "Uncaught exception",
             exc_info=(exception_type, exception, traceback),
         )
-        sys.__excepthook__(exception_type, exception, traceback)
 
     def handle_thread_exception(args: threading.ExceptHookArgs) -> None:
         logging.getLogger("exception.thread").critical(
             "Uncaught thread exception",
             exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
         )
-        threading.__excepthook__(args)
 
     sys.excepthook = handle_exception
     threading.excepthook = handle_thread_exception

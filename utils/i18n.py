@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -22,6 +23,7 @@ LOCALE_NAMES = {
     "en_US": "English",
     "ja_JP": "日本語",
 }
+LOGGER = logging.getLogger(__name__)
 
 
 def current_locale() -> str:
@@ -43,7 +45,9 @@ def locale_preference() -> str:
 
 
 def set_locale_preference(locale: str) -> None:
-    set_global_value("language/locale", locale if locale == SYSTEM_LOCALE else normalize_locale(locale))
+    normalized_locale = locale if locale == SYSTEM_LOCALE else normalize_locale(locale)
+    set_global_value("language/locale", normalized_locale)
+    LOGGER.info("Locale preference saved; locale=%s", normalized_locale)
 
 
 def system_locale() -> str:
@@ -78,7 +82,9 @@ def load_messages(locale: str) -> dict[str, str]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        LOGGER.warning("Locale messages could not be loaded; locale=%s path=%s", locale, path, exc_info=True)
         return {}
+    LOGGER.debug("Locale messages loaded; locale=%s path=%s count=%s", locale, path, len(data))
     return {str(key): str(value) for key, value in data.items()}
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, QThread, Qt, pyqtSignal
@@ -48,6 +49,7 @@ from utils.paths import APP_ROOT
 
 MODELS_ROOT = APP_ROOT / "models"
 LOCAL_MODEL_SUFFIXES = {".bin", ".gguf", ".model", ".onnx", ".pt", ".pth", ".safetensors"}
+LOGGER = logging.getLogger(__name__)
 
 
 class LlamaCppDownloadWorker(QObject):
@@ -65,16 +67,20 @@ class LlamaCppDownloadWorker(QObject):
         self._cancel_requested = True
 
     def run(self) -> None:
+        LOGGER.info("llama.cpp download worker started")
         try:
             binary = download_and_install_llamacpp(
                 progress=lambda value, step: self.progressChanged.emit(value, step),
                 cancelled=lambda: self._cancel_requested,
             )
         except LlamaCppDownloadCancelled:
+            LOGGER.info("llama.cpp download cancelled")
             self.cancelled.emit()
         except LlamaCppDownloadError as exc:
+            LOGGER.warning("llama.cpp download failed", exc_info=True)
             self.failed.emit(str(exc))
         else:
+            LOGGER.info("llama.cpp download succeeded; binary=%s", binary)
             self.succeeded.emit(str(binary))
         finally:
             self.finished.emit()
@@ -91,11 +97,14 @@ class CloudModelListWorker(QObject):
         self.api_key = api_key
 
     def run(self) -> None:
+        LOGGER.info("Cloud model list worker started; base_url=%s", self.base_url)
         try:
             models = fetch_openai_compatible_models(self.base_url, self.api_key)
         except CloudModelListError as exc:
+            LOGGER.warning("Cloud model list worker failed; base_url=%s", self.base_url, exc_info=True)
             self.failed.emit(str(exc))
         else:
+            LOGGER.info("Cloud model list worker succeeded; base_url=%s count=%s", self.base_url, len(models))
             self.succeeded.emit(models)
         finally:
             self.finished.emit()
@@ -382,13 +391,16 @@ class ModelPage(QWidget):
         self._set_cloud_mode(False)
 
     def _set_cloud_mode(self, enabled: bool) -> None:
+        LOGGER.info("Model page mode changed; cloud_enabled=%s", enabled)
         self.local_card.setVisible(not enabled)
         self.cloud_card.setVisible(enabled)
 
     def _download_llamacpp(self) -> None:
         if self._download_thread is not None:
+            LOGGER.info("llama.cpp download ignored because a download is already running")
             return
 
+        LOGGER.info("llama.cpp download requested")
         self._download_dialog = LlamaCppDownloadDialog(self)
         self._download_dialog.show()
 
@@ -468,6 +480,7 @@ class ModelPage(QWidget):
     def _refresh_local_models(self) -> None:
         selected_path = self.local_model_combo.currentData()
         candidates = self._local_model_candidates()
+        LOGGER.info("Local model list refreshed; count=%s", len(candidates))
         self.local_model_combo.clear()
         if not candidates:
             self.local_model_combo.addItem(t("model.local.models.empty"), "")
@@ -518,11 +531,13 @@ class ModelPage(QWidget):
 
     def _fetch_cloud_models(self) -> None:
         if self._cloud_models_thread is not None:
+            LOGGER.info("Cloud model fetch ignored because a fetch is already running")
             return
 
         base_url = self.cloud_base_url.text().strip()
         api_key = self.cloud_api_key.text().strip()
         if not base_url:
+            LOGGER.warning("Cloud model fetch blocked because base URL is empty")
             InfoBar.warning(
                 title=t("model.cloud.models.failure.title"),
                 content=t("model.cloud.models.baseUrlRequired"),
@@ -532,6 +547,7 @@ class ModelPage(QWidget):
             )
             return
 
+        LOGGER.info("Cloud model fetch requested; base_url=%s has_api_key=%s", base_url, bool(api_key))
         self.fetch_cloud_models_button.setEnabled(False)
         self.fetch_cloud_models_button.setText(t("model.cloud.models.fetching"))
         self._cloud_models_thread = QThread(self)
@@ -547,11 +563,13 @@ class ModelPage(QWidget):
         self._cloud_models_thread.start()
 
     def _show_cloud_models(self, models: list[str]) -> None:
+        LOGGER.info("Showing cloud model selection dialog; count=%s", len(models))
         dialog = CloudModelSelectDialog(models, self)
         dialog.modelSelected.connect(self.cloud_model_name.setText)
         dialog.exec()
 
     def _show_cloud_models_failure(self, error: str) -> None:
+        LOGGER.warning("Showing cloud model fetch failure; error=%s", self._short_error(error))
         InfoBar.warning(
             title=t("model.cloud.models.failure.title"),
             content=t("model.cloud.models.failure.content", error=self._short_error(error)),
@@ -613,6 +631,7 @@ class ModelPage(QWidget):
     def _save_current_cloud_preset(self) -> None:
         name = self.cloud_preset_name.text().strip()
         if not name:
+            LOGGER.warning("Cloud model preset save blocked because name is empty")
             InfoBar.warning(
                 title=t("model.cloud.preset.save.failure.title"),
                 content=t("model.cloud.preset.name.required"),
@@ -630,6 +649,7 @@ class ModelPage(QWidget):
             model_name=self.cloud_model_name.text().strip(),
         )
         upsert_cloud_model_preset(preset)
+        LOGGER.info("Cloud model preset saved from UI; name=%s provider=%s", name, preset.provider)
         self._refresh_cloud_presets(selected_name=name)
         InfoBar.success(
             title=t("model.cloud.preset.save.success.title"),
@@ -645,6 +665,7 @@ class ModelPage(QWidget):
             return
         name = self._cloud_presets[index].name
         delete_cloud_model_preset(name)
+        LOGGER.info("Cloud model preset deleted from UI; name=%s", name)
         self._refresh_cloud_presets()
         InfoBar.info(
             title=t("model.cloud.preset.delete.success.title"),

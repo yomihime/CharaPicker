@@ -12,12 +12,14 @@ DEFAULT_FONT_POINT_SIZE = 10
 _SUPPRESSED_QT_MESSAGE_PREFIXES = (
     "QFont::setPointSize: Point size <= 0",
 )
+LOGGER = logging.getLogger(__name__)
 
 
 def main() -> int:
     from utils.logging_middleware import install_global_logging
 
-    install_global_logging()
+    log_file = install_global_logging()
+    LOGGER.info("Application startup begins; log_file=%s", log_file)
     _install_qt_message_filter()
     app = QApplication(sys.argv)
     app.setApplicationName("CharaPicker")
@@ -34,7 +36,9 @@ def main() -> int:
     app.startup_controller = startup
     startup.start()
 
-    return app.exec()
+    exit_code = app.exec()
+    LOGGER.info("Application exited; exit_code=%s", exit_code)
+    return exit_code
 
 
 def _ensure_valid_application_font(app: QApplication) -> None:
@@ -52,11 +56,9 @@ def _qt_message_handler(message_type: QtMsgType, _context, message: str) -> None
     if any(message.startswith(prefix) for prefix in _SUPPRESSED_QT_MESSAGE_PREFIXES):
         return
 
-    if message_type == QtMsgType.QtDebugMsg:
-        level = logging.DEBUG
-    else:
-        level = logging.WARNING
-    logging.getLogger("qt").log(level, message)
+    from utils.logging_middleware import log_qt_message
+
+    log_qt_message(message_type, message)
 
 
 if __name__ == "__main__":
