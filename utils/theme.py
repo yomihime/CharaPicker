@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import QSettings
 from qfluentwidgets import Theme, setTheme
+
+from utils.global_store import get_global_value, set_global_value
 
 
 SYSTEM_THEME = "system"
@@ -16,12 +17,12 @@ THEME_NAMES = {
 
 
 def theme_preference() -> str:
-    value = QSettings().value("appearance/theme", SYSTEM_THEME, str)
+    value = str(get_global_value("appearance/theme", SYSTEM_THEME))
     return value if value in SUPPORTED_THEMES else SYSTEM_THEME
 
 
 def set_theme_preference(theme: str) -> None:
-    QSettings().setValue("appearance/theme", theme if theme in SUPPORTED_THEMES else SYSTEM_THEME)
+    set_global_value("appearance/theme", theme if theme in SUPPORTED_THEMES else SYSTEM_THEME)
 
 
 def apply_theme_preference(theme: str | None = None) -> None:

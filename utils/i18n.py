@@ -6,7 +6,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QLocale, QSettings
+from PyQt6.QtCore import QLocale
+
+from utils.global_store import get_global_value, set_global_value
 
 
 I18N_ROOT = Path(__file__).resolve().parents[1] / "i18n"
@@ -34,14 +36,14 @@ def current_locale() -> str:
 
 
 def locale_preference() -> str:
-    value = QSettings().value("language/locale", SYSTEM_LOCALE, str)
+    value = str(get_global_value("language/locale", SYSTEM_LOCALE))
     if value == SYSTEM_LOCALE:
         return SYSTEM_LOCALE
     return normalize_locale(value)
 
 
 def set_locale_preference(locale: str) -> None:
-    QSettings().setValue("language/locale", locale if locale == SYSTEM_LOCALE else normalize_locale(locale))
+    set_global_value("language/locale", locale if locale == SYSTEM_LOCALE else normalize_locale(locale))
 
 
 def system_locale() -> str:

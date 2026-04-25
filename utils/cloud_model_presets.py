@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 
-from PyQt6.QtCore import QSettings
+from utils.global_store import get_global_value, set_global_value
 
 CLOUD_MODEL_PRESETS_KEY = "model/cloudPresets"
 
@@ -18,11 +18,14 @@ class CloudModelPreset:
 
 
 def load_cloud_model_presets() -> list[CloudModelPreset]:
-    raw_value = QSettings().value(CLOUD_MODEL_PRESETS_KEY, "[]", str)
-    try:
-        raw_presets = json.loads(raw_value)
-    except json.JSONDecodeError:
-        return []
+    raw_value = get_global_value(CLOUD_MODEL_PRESETS_KEY, [])
+    if isinstance(raw_value, str):
+        try:
+            raw_presets = json.loads(raw_value)
+        except json.JSONDecodeError:
+            return []
+    else:
+        raw_presets = raw_value
     if not isinstance(raw_presets, list):
         return []
 
@@ -46,10 +49,7 @@ def load_cloud_model_presets() -> list[CloudModelPreset]:
 
 
 def save_cloud_model_presets(presets: list[CloudModelPreset]) -> None:
-    QSettings().setValue(
-        CLOUD_MODEL_PRESETS_KEY,
-        json.dumps([asdict(preset) for preset in presets], ensure_ascii=False),
-    )
+    set_global_value(CLOUD_MODEL_PRESETS_KEY, [asdict(preset) for preset in presets])
 
 
 def upsert_cloud_model_preset(preset: CloudModelPreset) -> list[CloudModelPreset]:

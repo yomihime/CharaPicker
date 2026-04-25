@@ -6,6 +6,7 @@
 .codex/
 
 # Generated/runtime assets
+config.yaml
 bin/*
 !bin/ARCHITECTURE.md
 models/*
