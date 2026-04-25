@@ -20,6 +20,7 @@
 - `splash_screen.py`：启动流程和启动界面。
 - `pages/project_page.py`：项目配置页。收集目标角色、提取模式和素材路径，并展示洞察流。
 - `pages/output_page.py`：角色卡 Markdown 预览页。
+- `pages/prompt_page.py`：提示词设置页。显示默认提示词，保存或清除用户自定义提示词覆盖。
 - `pages/settings_page.py`：语言、主题和推理后端等设置页。
 - `pages/about_page.py`：项目信息和注意事项页面。
 - `pages/insights_page.py`：独立洞察页组件，当前未接入主窗口导航。
@@ -30,6 +31,7 @@
 - 调用 `core.extractor.Extractor` 启动预览提取。
 - 调用 `core.compiler` 和 `core.generator` 生成当前的角色卡预览。
 - 调用 `utils.state_manager` 保存和读取项目配置。
+- 调用 `utils.prompt_preferences` 保存和读取用户自定义提示词覆盖。
 - 调用 `utils.i18n.t()` 获取所有 UI 可见文案。
 - 从 `res.colors` 读取界面颜色标识。
 

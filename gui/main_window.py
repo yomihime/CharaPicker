@@ -18,6 +18,7 @@ from core.models import ProjectConfig
 from gui.pages.about_page import AboutPage
 from gui.pages.model_page import ModelPage
 from gui.pages.output_page import OutputPage
+from gui.pages.prompt_page import PromptPage
 from gui.pages.project_page import ProjectPage
 from gui.pages.settings_page import SettingsPage
 from utils.i18n import t
@@ -42,6 +43,7 @@ class MainWindow(FluentWindow):
         self.project_page = ProjectPage(self)
         self.output_page = OutputPage(self)
         self.model_page = ModelPage(self)
+        self.prompt_page = PromptPage(self)
         self.about_page = AboutPage(self)
         self.settings_page = SettingsPage(self)
 
@@ -53,6 +55,7 @@ class MainWindow(FluentWindow):
         self.addSubInterface(self.project_page, FIF.HOME, t("app.nav.home"))
         self.addSubInterface(self.output_page, FIF.DOCUMENT, t("app.nav.output"))
         self.addSubInterface(self.model_page, FIF.ROBOT, t("app.nav.model"))
+        self.addSubInterface(self.prompt_page, FIF.EDIT, t("app.nav.prompts"))
         self.addSubInterface(
             self.about_page,
             FIF.INFO,

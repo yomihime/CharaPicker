@@ -11,6 +11,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from utils.paths import APP_ROOT
+from utils.prompt_preferences import prompt_override
 
 
 LOGGER = logging.getLogger(__name__)
@@ -98,7 +99,10 @@ def build_model_call_request(
     if template is None:
         raise PromptNotFoundError(f"Prompt purpose is not defined: {purpose}")
 
-    rendered_user = _render_template(template.user_template, variables)
+    override = prompt_override(purpose)
+    system_prompt = override.system.strip() or template.system
+    user_template = override.user_template.strip() or template.user_template
+    rendered_user = _render_template(user_template, variables)
     LOGGER.debug(
         "Model call request built; purpose=%s backend=%s model=%s has_api_key=%s",
         purpose,
@@ -116,7 +120,7 @@ def build_model_call_request(
         max_tokens=max_tokens,
         metadata=metadata or {},
         messages=[
-            ModelMessage(role="system", content=template.system),
+            ModelMessage(role="system", content=system_prompt),
             ModelMessage(role="user", content=rendered_user),
         ],
     )

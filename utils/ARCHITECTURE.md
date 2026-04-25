@@ -28,15 +28,16 @@
 - `logging_preferences.py`：管理日志等级偏好。
 - `logging_middleware.py`：安装全局日志中间件，日志只写入文件。
 - `ai_model_middleware.py`：统一模型调用入口，负责加载默认提示词、构造标准消息、屏蔽敏感日志并路由下层模型后端。
+- `prompt_preferences.py`：管理用户自定义提示词覆盖，空内容不覆盖默认提示词。
 - `__init__.py`：标记 `utils` 为 Python 包。
 
 ## 与其他目录的关系
 
-- `gui` 调用 `i18n.py`、`theme.py`、`logging_preferences.py`、`cloud_model_presets.py` 和 `state_manager.py`。
+- `gui` 调用 `i18n.py`、`theme.py`、`logging_preferences.py`、`prompt_preferences.py`、`cloud_model_presets.py` 和 `state_manager.py`。
 - `core` 可调用 `i18n.py` 获取当前占位流程文案。
 - `core` 的 AI 请求必须通过 `ai_model_middleware.py` 构造和执行，不能直接访问下层模型接口。
-- `ai_model_middleware.py` 从 `res/default_prompts.json` 加载默认提示词资源。
-- `i18n.py`、`theme.py`、`logging_preferences.py` 和 `cloud_model_presets.py` 通过 `global_store.py` 管理全局用户偏好。
+- `ai_model_middleware.py` 从 `res/default_prompts.json` 加载默认提示词资源，并通过 `prompt_preferences.py` 读取非空用户覆盖。
+- `i18n.py`、`theme.py`、`logging_preferences.py`、`prompt_preferences.py` 和 `cloud_model_presets.py` 通过 `global_store.py` 管理全局用户偏好。
 - `state_manager.py` 使用 `core.models.ProjectConfig` 进行结构校验。
 - `paths.py` 统一指向 `projects/` 下的工程目录。
 
