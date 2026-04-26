@@ -40,6 +40,7 @@ class SourceProcessingConfig(BaseModel):
     trim_end: str = "00:00"
     transcode_enabled: bool = False
     codec: str = "H.264"
+    encoder: str = ""
     resolution: str = "540p"
     segment_enabled: bool = False
     segment_mode: SourceSegmentMode = SourceSegmentMode.TIME

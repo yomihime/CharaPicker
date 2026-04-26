@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import logging
 from pathlib import Path
@@ -60,6 +61,7 @@ from utils.ffmpeg_downloader import (
     FfmpegDownloadError,
     download_and_install_ffmpeg,
 )
+from utils.ffmpeg_tool import DeviceOption, is_device_compatible_for_codec, list_available_device_options
 from utils.material_processing_middleware import (
     MaterialProcessingError,
     SOURCE_PROCESSING_CANCELLED_MESSAGE,
@@ -95,6 +97,7 @@ PROCESSING_PRESETS = [
     SourceProcessingPreset.SEGMENT_ONLY,
     SourceProcessingPreset.TRANSCODE_ONLY,
 ]
+FFMPEG_EVENT_PREFIX = "__ffmpeg_event__:"
 
 class FfmpegDownloadWorker(QObject):
     progressChanged = pyqtSignal(int, str)
@@ -163,6 +166,7 @@ class FfmpegDownloadDialog(FluentDialog):
     def request_cancel(self) -> None:
         if self._cancel_requested or self._finished:
             return
+        LOGGER.info("ffmpeg download dialog cancel clicked")
         self._cancel_requested = True
         self.cancel_button.setEnabled(False)
         self.close_button.setEnabled(False)
@@ -192,9 +196,11 @@ class SourceProcessingWorker(QObject):
         self._cancel_requested = False
 
     def cancel(self) -> None:
+        LOGGER.info("source processing worker cancel flag set")
         self._cancel_requested = True
 
     def run(self) -> None:
+        LOGGER.info("source processing worker started; project_id=%s", self.config.project_id)
         try:
             result = process_source_request(
                 self.config,
@@ -207,6 +213,7 @@ class SourceProcessingWorker(QObject):
             self.failed.emit(str(exc))
         except RuntimeError as exc:
             if str(exc) == SOURCE_PROCESSING_CANCELLED_MESSAGE:
+                LOGGER.info("source processing worker cancelled")
                 self.cancelled.emit()
                 return
             LOGGER.warning("Source processing failed", exc_info=True)
@@ -219,6 +226,7 @@ class SourceProcessingWorker(QObject):
 
     def _emit_progress(self, done: int, total: int, name: str) -> None:
         if self._cancel_requested:
+            LOGGER.info("source processing progress callback observed cancel flag")
             raise RuntimeError(SOURCE_PROCESSING_CANCELLED_MESSAGE)
         self.progressChanged.emit(done, total, name)
 
@@ -227,10 +235,20 @@ class SourceProcessingDialog(FluentDialog):
     cancelRequested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(t("project.processing.dialog.title"), parent, width=520, height=190, close_rejects=False)
+        super().__init__(t("project.processing.dialog.title"), parent, width=560, height=240, close_rejects=False)
         self._cancel_requested = False
         self._finished = False
-        self.close_button.clicked.connect(self.reject)
+        self.close_button.setVisible(False)
+
+        self.total_status_label = BodyLabel("", self.dialog_card)
+        self.total_status_label.setWordWrap(True)
+        self.total_status_label.setVisible(False)
+        self.content_layout.addWidget(self.total_status_label)
+
+        self.total_progress_bar = ProgressBar(self.dialog_card)
+        self.total_progress_bar.setVisible(False)
+        self.content_layout.addWidget(self.total_progress_bar)
+
         self.status_label = BodyLabel(t("project.processing.dialog.scanning"), self.dialog_card)
         self.status_label.setWordWrap(True)
         self.content_layout.addWidget(self.status_label)
@@ -239,7 +257,15 @@ class SourceProcessingDialog(FluentDialog):
         self.progress_bar.setRange(0, 0)
         self.content_layout.addWidget(self.progress_bar)
 
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        self.cancel_button = PushButton(t("project.processing.dialog.cancel"), self.dialog_card)
+        actions.addWidget(self.cancel_button)
+        self.content_layout.addLayout(actions)
+        self.cancel_button.clicked.connect(self.request_cancel)
+
     def set_progress(self, done: int, total: int, name: str) -> None:
+        self._set_total_progress_visible(False)
         if total <= 0:
             self.progress_bar.setRange(0, 0)
             self.status_label.setText(t("project.processing.dialog.scanning"))
@@ -248,20 +274,82 @@ class SourceProcessingDialog(FluentDialog):
         self.progress_bar.setValue(done)
         self.status_label.setText(t("project.processing.dialog.progress", done=done, total=total, name=name))
 
+    def set_ffmpeg_event(self, payload: dict[str, object]) -> None:
+        stage = str(payload.get("stage", ""))
+        if stage == "preparing":
+            message_key = str(payload.get("message_key", "project.processing.dialog.preparing.probe"))
+            message_kwargs: dict[str, object] = {}
+            for key in ("name", "current", "total"):
+                if key in payload:
+                    message_kwargs[key] = payload[key]
+            self._set_total_progress_visible(False)
+            self.progress_bar.setRange(0, 0)
+            self.status_label.setText(t(message_key, **message_kwargs))
+            return
+
+        if stage != "processing":
+            return
+
+        file_done = max(int(payload.get("file_done", 0) or 0), 0)
+        file_total = max(int(payload.get("file_total", 0) or 0), 1)
+        file_percent = float(payload.get("file_percent", 0.0) or 0.0)
+        fps = float(payload.get("fps", 0.0) or 0.0)
+        name = str(payload.get("name", ""))
+        self.progress_bar.setRange(0, file_total)
+        self.progress_bar.setValue(min(file_done, file_total))
+        self.status_label.setText(
+            t(
+                "project.processing.dialog.frameProgress",
+                name=name,
+                done=file_done,
+                total=file_total,
+                percent=f"{file_percent:.2f}",
+                fps=f"{fps:.2f}",
+            )
+        )
+
+        overall_enabled = bool(payload.get("overall_enabled", False))
+        if not overall_enabled:
+            self._set_total_progress_visible(False)
+            return
+
+        overall_done = max(int(payload.get("overall_done", 0) or 0), 0)
+        overall_total = max(int(payload.get("overall_total", 0) or 0), 1)
+        overall_percent = float(payload.get("overall_percent", 0.0) or 0.0)
+        self._set_total_progress_visible(True)
+        self.total_progress_bar.setRange(0, overall_total)
+        self.total_progress_bar.setValue(min(overall_done, overall_total))
+        self.total_status_label.setText(
+            t(
+                "project.processing.dialog.totalProgress",
+                done=overall_done,
+                total=overall_total,
+                percent=f"{overall_percent:.2f}",
+            )
+        )
+
+    def _set_total_progress_visible(self, visible: bool) -> None:
+        self.total_status_label.setVisible(visible)
+        self.total_progress_bar.setVisible(visible)
+
     def finish(self) -> None:
         self._finished = True
         self.accept()
+
+    def request_cancel(self) -> None:
+        if self._finished or self._cancel_requested:
+            return
+        LOGGER.info("source processing dialog cancel clicked")
+        self._cancel_requested = True
+        self.cancel_button.setEnabled(False)
+        self.status_label.setText(t("project.processing.dialog.canceling"))
+        self.cancelRequested.emit()
 
     def reject(self) -> None:
         if self._finished:
             super().reject()
             return
-        if self._cancel_requested:
-            return
-        self._cancel_requested = True
-        self.close_button.setEnabled(False)
-        self.status_label.setText(t("project.processing.dialog.canceling"))
-        self.cancelRequested.emit()
+        self.request_cancel()
 
 
 class NewProjectDialog(FluentDialog):
@@ -355,6 +443,7 @@ class ProjectPage(QWidget):
         self._source_processing_thread: QThread | None = None
         self._source_processing_worker: SourceProcessingWorker | None = None
         self._source_processing_dialog: SourceProcessingDialog | None = None
+        self._encoder_options: list[DeviceOption] = []
 
         root = QVBoxLayout(self)
         root.setContentsMargins(22, 18, 22, 18)
@@ -451,6 +540,10 @@ class ProjectPage(QWidget):
         )
         self.processing_preset_combo.setMinimumWidth(260)
         processing_layout.addWidget(self.processing_preset_combo, 1, 1)
+        processing_layout.addWidget(BodyLabel(t("project.processing.encoder"), processing_panel), 2, 0)
+        self.encoder_combo = ComboBox(processing_panel)
+        self.encoder_combo.setMinimumWidth(520)
+        processing_layout.addWidget(self.encoder_combo, 2, 1, 1, 2)
         self.download_ffmpeg_button = PushButton(t("project.ffmpeg.download.button"), processing_panel)
         self.download_ffmpeg_button.setMinimumWidth(128)
         self.download_ffmpeg_button.setVisible(False)
@@ -608,6 +701,7 @@ class ProjectPage(QWidget):
         self.processing_preset_combo.currentIndexChanged.connect(self._sync_processing_options)
         self.segment_mode_combo.currentIndexChanged.connect(self._sync_segment_mode)
         self.segment_count_slider.valueChanged.connect(self._sync_segment_count_label)
+        self._refresh_encoder_options()
         self._refresh_project_combo()
         self._sync_preview_button_text()
         self._refresh_ffmpeg_state()
@@ -733,6 +827,9 @@ class ProjectPage(QWidget):
     def _current_processing_config(self) -> SourceProcessingConfig:
         preset_index = self.processing_preset_combo.currentIndex()
         segment_mode = SourceSegmentMode.TIME if self.segment_mode_combo.currentIndex() == 0 else SourceSegmentMode.COUNT
+        selected_encoder = self.encoder_combo.currentData()
+        if selected_encoder is None:
+            selected_encoder = self.encoder_combo.currentText()
         return SourceProcessingConfig(
             preset=PROCESSING_PRESETS[preset_index] if 0 <= preset_index < len(PROCESSING_PRESETS) else PROCESSING_PRESETS[0],
             trim_enabled=self.trim_check.isChecked(),
@@ -740,6 +837,7 @@ class ProjectPage(QWidget):
             trim_end=self.trim_end_time.text(),
             transcode_enabled=self.transcode_check.isChecked(),
             codec=self.codec_combo.currentText(),
+            encoder=str(selected_encoder),
             resolution=self.resolution_combo.currentText(),
             segment_enabled=self.segment_check.isChecked(),
             segment_mode=segment_mode,
@@ -757,7 +855,8 @@ class ProjectPage(QWidget):
         self.trim_start_time.setText(config.trim_start.replace(":", ""))
         self.trim_end_time.setText(config.trim_end.replace(":", ""))
         self.transcode_check.setChecked(config.transcode_enabled)
-        self.codec_combo.setCurrentText(config.codec)
+        self.codec_combo.setCurrentText(config.codec if config.codec else "H.264")
+        self._set_encoder_selection(config.encoder)
         self.resolution_combo.setCurrentText(config.resolution)
         self.segment_check.setChecked(config.segment_enabled)
         self.segment_mode_combo.setCurrentIndex(0 if config.segment_mode == SourceSegmentMode.TIME else 1)
@@ -775,6 +874,7 @@ class ProjectPage(QWidget):
             self.trim_start_time,
             self.trim_end_time,
             self.transcode_check,
+            self.encoder_combo,
             self.codec_combo,
             self.resolution_combo,
             self.segment_check,
@@ -801,6 +901,20 @@ class ProjectPage(QWidget):
         if self._source_processing_thread is not None:
             return
         config = self.current_config()
+        if not self._uses_original_sources():
+            encoder = config.source_processing.encoder
+            codec = config.source_processing.codec
+            if encoder and not is_device_compatible_for_codec(codec, encoder):
+                selected_option = self._selected_encoder_option()
+                device_label = selected_option.label if selected_option is not None else encoder
+                InfoBar.warning(
+                    title=t("project.processing.encoderMismatch.title"),
+                    content=t("project.processing.encoderMismatch.content", device=device_label, codec=codec),
+                    parent=self.window(),
+                    position=InfoBarPosition.TOP_RIGHT,
+                    duration=6500,
+                )
+                return
         validation = validate_source_processing_tools(config.source_processing)
         if not validation.is_valid:
             dialog = MessageBox(
@@ -814,6 +928,17 @@ class ProjectPage(QWidget):
                 self._download_ffmpeg()
             return
 
+        if not self._uses_original_sources() and self._is_cpu_encoder_selected():
+            cpu_dialog = MessageBox(
+                t("project.processing.cpuWarning.title"),
+                t("project.processing.cpuWarning.content"),
+                self.window(),
+            )
+            cpu_dialog.yesButton.setText(t("project.processing.cpuWarning.continue"))
+            cpu_dialog.cancelButton.setText(t("project.processing.cpuWarning.cancel"))
+            if not cpu_dialog.exec():
+                return
+
         self._source_processing_dialog = SourceProcessingDialog(self)
         self._source_processing_dialog.show()
         self.process_sources_button.setEnabled(False)
@@ -821,7 +946,10 @@ class ProjectPage(QWidget):
         self._source_processing_worker = SourceProcessingWorker(config)
         self._source_processing_worker.moveToThread(self._source_processing_thread)
         self._source_processing_thread.started.connect(self._source_processing_worker.run)
-        self._source_processing_dialog.cancelRequested.connect(self._source_processing_worker.cancel)
+        self._source_processing_dialog.cancelRequested.connect(
+            self._source_processing_worker.cancel,
+            Qt.ConnectionType.DirectConnection,
+        )
         self._source_processing_worker.progressChanged.connect(self._update_source_processing_progress)
         self._source_processing_worker.succeeded.connect(self._finish_source_processing_success)
         self._source_processing_worker.failed.connect(self._finish_source_processing_failure)
@@ -833,8 +961,13 @@ class ProjectPage(QWidget):
         self._source_processing_thread.start()
 
     def _update_source_processing_progress(self, done: int, total: int, name: str) -> None:
-        if self._source_processing_dialog is not None:
-            self._source_processing_dialog.set_progress(done, total, name)
+        if self._source_processing_dialog is None:
+            return
+        ffmpeg_event = self._parse_ffmpeg_event(name)
+        if ffmpeg_event is not None:
+            self._source_processing_dialog.set_ffmpeg_event(ffmpeg_event)
+            return
+        self._source_processing_dialog.set_progress(done, total, name)
 
     def _finish_source_processing_success(self, config: ProjectConfig, linked_count: int, uses_original_sources: bool) -> None:
         if self._source_processing_dialog is not None:
@@ -900,7 +1033,10 @@ class ProjectPage(QWidget):
         self._ffmpeg_download_worker = FfmpegDownloadWorker()
         self._ffmpeg_download_worker.moveToThread(self._ffmpeg_download_thread)
         self._ffmpeg_download_thread.started.connect(self._ffmpeg_download_worker.run)
-        self._ffmpeg_download_dialog.cancelRequested.connect(self._ffmpeg_download_worker.cancel)
+        self._ffmpeg_download_dialog.cancelRequested.connect(
+            self._ffmpeg_download_worker.cancel,
+            Qt.ConnectionType.DirectConnection,
+        )
         self._ffmpeg_download_worker.progressChanged.connect(self._update_ffmpeg_download_progress)
         self._ffmpeg_download_worker.succeeded.connect(self._finish_ffmpeg_download_success)
         self._ffmpeg_download_worker.failed.connect(self._finish_ffmpeg_download_failure)
@@ -921,6 +1057,7 @@ class ProjectPage(QWidget):
             self._ffmpeg_download_dialog.mark_finished()
             self._ffmpeg_download_dialog.set_progress(100, t("project.ffmpeg.download.progress.done"))
             self._ffmpeg_download_dialog.close()
+        self._refresh_encoder_options()
         self._refresh_ffmpeg_state()
         InfoBar.success(
             title=t("project.ffmpeg.download.success.title"),
@@ -967,6 +1104,63 @@ class ProjectPage(QWidget):
         if len(error) <= max_length:
             return error
         return f"{error[:max_length]}..."
+
+    def _parse_ffmpeg_event(self, name: str) -> dict[str, object] | None:
+        if not name.startswith(FFMPEG_EVENT_PREFIX):
+            return None
+        payload_text = name[len(FFMPEG_EVENT_PREFIX) :]
+        try:
+            payload = json.loads(payload_text)
+        except json.JSONDecodeError:
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _refresh_encoder_options(self) -> None:
+        previous_value = self.encoder_combo.currentData()
+        if previous_value is None:
+            previous_value = self.encoder_combo.currentText()
+
+        self.encoder_combo.clear()
+        self._encoder_options = list_available_device_options()
+        if not self._encoder_options:
+            fallback = DeviceOption(
+                device_id="cpu",
+                label=t("project.processing.device.fallback"),
+                is_cpu=True,
+                encoders={"h264": "libx264", "hevc": "libx265"},
+            )
+            self._encoder_options = [fallback]
+
+        for option in self._encoder_options:
+            self.encoder_combo.addItem(option.label, userData=option.device_id)
+        self._set_encoder_selection(str(previous_value or ""))
+
+    def _set_encoder_selection(self, encoder_value: str) -> None:
+        normalized_value = encoder_value.strip()
+        if "_" in normalized_value:
+            for option in self._encoder_options:
+                if normalized_value.lower() in {value.lower() for value in option.encoders.values()}:
+                    normalized_value = option.device_id
+                    break
+
+        for index in range(self.encoder_combo.count()):
+            if str(self.encoder_combo.itemData(index) or "").lower() == normalized_value.lower():
+                self.encoder_combo.setCurrentIndex(index)
+                return
+
+        if self.encoder_combo.count() > 0:
+            self.encoder_combo.setCurrentIndex(0)
+
+    def _selected_encoder_option(self) -> DeviceOption | None:
+        current_value = str(self.encoder_combo.currentData() or "")
+        for option in self._encoder_options:
+            if option.device_id.lower() == current_value.lower():
+                return option
+        return None
+
+    def _is_cpu_encoder_selected(self) -> bool:
+        option = self._selected_encoder_option()
+        return option.is_cpu if option is not None else False
 
     def _refresh_project_combo(self) -> None:
         self._loading_project = True
