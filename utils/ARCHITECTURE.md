@@ -22,7 +22,7 @@
 - `theme.py`：管理主题偏好，并调用 qfluentwidgets 应用亮色、暗色或系统主题。
 - `chunker.py`：预留文本或素材分块工具。
 - `env_manager.py`：预留环境检测工具。
-- `ffmpeg_tool.py`：封装 ffmpeg 工具探测与可用性校验（一个工具一个文件）。
+- `ffmpeg_tool.py`：封装 ffmpeg 工具探测、可用性校验与素材转码/分段执行（一个工具一个文件）。
 - `cloud_model_presets.py`：保存和读取云端模型配置预设。
 - `cloud_models.py`：拉取 OpenAI-compatible 云端模型列表。
 - `llamacpp_downloader.py`：下载并安装 llama.cpp 运行时到 `bin/`。

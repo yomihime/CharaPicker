@@ -7,7 +7,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from core.models import ProjectConfig, SourceProcessingConfig, SourceProcessingPreset
-from utils.ffmpeg_tool import has_ffmpeg_binary
+from utils.ffmpeg_tool import has_ffmpeg_binary, process_raw_sources_with_ffmpeg
 from utils.paths import project_paths
 from utils.source_importer import import_sources_to_raw, link_raw_sources_to_materials
 from utils.state_manager import save_project_config
@@ -86,6 +86,14 @@ def process_source_request(
             config.project_id,
             raw_sources,
             progress=progress,
+        )
+    else:
+        linked_count = process_raw_sources_with_ffmpeg(
+            config.project_id,
+            raw_sources,
+            config.source_processing,
+            progress=progress,
+            cancelled=cancelled,
         )
     _raise_if_cancelled(cancelled)
 

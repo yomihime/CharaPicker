@@ -55,6 +55,7 @@
   "project.processing.start": "Start Processing",
   "project.processing.done.title": "Source processing complete",
   "project.processing.done.original": "Linked {count} raw source files into the materials folder.",
+  "project.processing.done.ffmpeg": "Processed {count} source items and wrote outputs into the project materials folder.",
   "project.processing.dialog.title": "Processing Sources",
   "project.processing.dialog.scanning": "Scanning sources...",
   "project.processing.dialog.progress": "Processing {done}/{total}: {name}",

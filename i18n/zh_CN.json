@@ -55,6 +55,7 @@
   "project.processing.start": "开始处理",
   "project.processing.done.title": "素材处理完成",
   "project.processing.done.original": "已把 {count} 个 raw 素材软链接到素材文件夹。",
+  "project.processing.done.ffmpeg": "已处理 {count} 个素材，并写入项目 materials 文件夹。",
   "project.processing.dialog.title": "素材处理中",
   "project.processing.dialog.scanning": "正在扫描素材...",
   "project.processing.dialog.progress": "正在处理 {done}/{total}：{name}",

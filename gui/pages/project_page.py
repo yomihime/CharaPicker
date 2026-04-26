@@ -850,12 +850,12 @@ class ProjectPage(QWidget):
                 duration=3500,
             )
             return
-        InfoBar.info(
-            title=t("project.processing.placeholder.title"),
-            content=t("project.processing.placeholder.content"),
+        InfoBar.success(
+            title=t("project.processing.done.title"),
+            content=t("project.processing.done.ffmpeg", count=linked_count),
             parent=self.window(),
             position=InfoBarPosition.TOP_RIGHT,
-            duration=4500,
+            duration=3500,
         )
 
     def _finish_source_processing_failure(self, error: str) -> None:
