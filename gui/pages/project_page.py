@@ -55,18 +55,21 @@ from res.colors import (
     PROJECT_SOURCE_LIST_LIGHT_TEXT,
 )
 from utils.i18n import t
-from utils.env_manager import has_ffmpeg_binary
 from utils.ffmpeg_downloader import (
     FfmpegDownloadCancelled,
     FfmpegDownloadError,
     download_and_install_ffmpeg,
 )
+from utils.material_processing_middleware import (
+    MaterialProcessingError,
+    SOURCE_PROCESSING_CANCELLED_MESSAGE,
+    process_source_request,
+    validate_source_processing_tools,
+)
 from utils.paths import project_paths
 from utils.source_importer import (
     SUPPORTED_SOURCE_SUFFIXES,
     clean_raw_sources,
-    import_sources_to_raw,
-    link_raw_sources_to_materials,
     remove_project_sources,
     remove_raw_sources,
     source_raw_target_pairs,
@@ -183,10 +186,9 @@ class SourceProcessingWorker(QObject):
     cancelled = pyqtSignal()
     finished = pyqtSignal()
 
-    def __init__(self, config: ProjectConfig, uses_original_sources: bool) -> None:
+    def __init__(self, config: ProjectConfig) -> None:
         super().__init__()
         self.config = config
-        self.uses_original_sources = uses_original_sources
         self._cancel_requested = False
 
     def cancel(self) -> None:
@@ -194,44 +196,17 @@ class SourceProcessingWorker(QObject):
 
     def run(self) -> None:
         try:
-            raw_sources = import_sources_to_raw(
-                self.config.project_id,
-                self.config.source_paths,
+            result = process_source_request(
+                self.config,
                 progress=self._emit_progress,
                 cancelled=lambda: self._cancel_requested,
             )
-            if self._cancel_requested:
-                self.cancelled.emit()
-                return
-            raw_root = project_paths(self.config.project_id).raw
-            reimported_paths = {
-                self._raw_relative_path(raw_root, raw_source)
-                for raw_source in raw_sources
-            }
-            updated_config = self.config
-            if reimported_paths:
-                updated_config = self.config.model_copy(
-                    update={
-                        "raw_cleaned_paths": [
-                            path for path in self.config.raw_cleaned_paths if path not in reimported_paths
-                        ]
-                    }
-                )
-
-            linked_count = 0
-            if self.uses_original_sources:
-                linked_count = link_raw_sources_to_materials(
-                    self.config.project_id,
-                    raw_sources,
-                    progress=self._emit_progress,
-                )
-            if self._cancel_requested:
-                self.cancelled.emit()
-                return
-            save_project_config(updated_config)
-            self.succeeded.emit(updated_config, linked_count, self.uses_original_sources)
+            self.succeeded.emit(result.config, result.linked_count, result.uses_original_sources)
+        except MaterialProcessingError as exc:
+            LOGGER.warning("Source processing failed because required tools are unavailable", exc_info=True)
+            self.failed.emit(str(exc))
         except RuntimeError as exc:
-            if str(exc) == "Source processing cancelled":
+            if str(exc) == SOURCE_PROCESSING_CANCELLED_MESSAGE:
                 self.cancelled.emit()
                 return
             LOGGER.warning("Source processing failed", exc_info=True)
@@ -244,14 +219,8 @@ class SourceProcessingWorker(QObject):
 
     def _emit_progress(self, done: int, total: int, name: str) -> None:
         if self._cancel_requested:
-            raise RuntimeError("Source processing cancelled")
+            raise RuntimeError(SOURCE_PROCESSING_CANCELLED_MESSAGE)
         self.progressChanged.emit(done, total, name)
-
-    def _raw_relative_path(self, raw_root: Path, raw_source: Path) -> str:
-        try:
-            return raw_source.resolve().relative_to(raw_root.resolve()).as_posix()
-        except ValueError:
-            return raw_source.name
 
 
 class SourceProcessingDialog(FluentDialog):
@@ -484,7 +453,7 @@ class ProjectPage(QWidget):
         processing_layout.addWidget(self.processing_preset_combo, 1, 1)
         self.download_ffmpeg_button = PushButton(t("project.ffmpeg.download.button"), processing_panel)
         self.download_ffmpeg_button.setMinimumWidth(128)
-        self.download_ffmpeg_button.setVisible(not has_ffmpeg_binary())
+        self.download_ffmpeg_button.setVisible(False)
         self.process_sources_button = PrimaryPushButton(t("project.processing.start"), processing_panel)
         self.process_sources_button.setMinimumWidth(112)
         process_actions = QHBoxLayout()
@@ -748,15 +717,15 @@ class ProjectPage(QWidget):
         self.preview_button.setText(t(key))
 
     def _refresh_ffmpeg_state(self) -> None:
-        has_ffmpeg = has_ffmpeg_binary()
+        validation = validate_source_processing_tools(self._current_processing_config())
         self.ffmpeg_status_label.setText(
             t("project.ffmpeg.status.notRequired")
-            if self._uses_original_sources()
+            if not validation.requires_ffmpeg
             else t("project.ffmpeg.status.ready")
-            if has_ffmpeg
+            if validation.ffmpeg_ready
             else t("project.ffmpeg.status.missing")
         )
-        self.download_ffmpeg_button.setVisible(not self._uses_original_sources() and not has_ffmpeg)
+        self.download_ffmpeg_button.setVisible(validation.requires_ffmpeg and not validation.ffmpeg_ready)
 
     def _uses_original_sources(self) -> bool:
         return self.processing_preset_combo.currentIndex() == 0
@@ -832,8 +801,8 @@ class ProjectPage(QWidget):
         if self._source_processing_thread is not None:
             return
         config = self.current_config()
-
-        if not self._uses_original_sources() and not has_ffmpeg_binary():
+        validation = validate_source_processing_tools(config.source_processing)
+        if not validation.is_valid:
             dialog = MessageBox(
                 t("project.ffmpeg.missing.dialog.title"),
                 t("project.ffmpeg.missing.dialog.content"),
@@ -849,7 +818,7 @@ class ProjectPage(QWidget):
         self._source_processing_dialog.show()
         self.process_sources_button.setEnabled(False)
         self._source_processing_thread = QThread(self)
-        self._source_processing_worker = SourceProcessingWorker(config, self._uses_original_sources())
+        self._source_processing_worker = SourceProcessingWorker(config)
         self._source_processing_worker.moveToThread(self._source_processing_thread)
         self._source_processing_thread.started.connect(self._source_processing_worker.run)
         self._source_processing_dialog.cancelRequested.connect(self._source_processing_worker.cancel)
@@ -952,8 +921,7 @@ class ProjectPage(QWidget):
             self._ffmpeg_download_dialog.mark_finished()
             self._ffmpeg_download_dialog.set_progress(100, t("project.ffmpeg.download.progress.done"))
             self._ffmpeg_download_dialog.close()
-        self.download_ffmpeg_button.setVisible(False)
-        self.ffmpeg_status_label.setText(t("project.ffmpeg.status.ready"))
+        self._refresh_ffmpeg_state()
         InfoBar.success(
             title=t("project.ffmpeg.download.success.title"),
             content=t("project.ffmpeg.download.success.content", path=binary_path),

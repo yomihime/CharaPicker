@@ -8,7 +8,8 @@ import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
-from utils.env_manager import BIN_ROOT, find_usable_ffmpeg_binary
+from utils.env_manager import BIN_ROOT
+from utils.ffmpeg_tool import find_usable_ffmpeg_binary
 
 FFMPEG_WINDOWS_ESSENTIALS_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
 USER_AGENT = "CharaPicker/0.1"
