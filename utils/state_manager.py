@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from pathlib import Path
 
 from core.models import ProjectConfig
-from utils.paths import PROJECTS_ROOT, ensure_project_tree
+from utils.paths import PROJECTS_ROOT, ensure_project_tree, project_paths
 
 
 LOGGER = logging.getLogger(__name__)
+EMPTY_JSON_LIST = "[]\n"
 
 
 def save_project_config(config: ProjectConfig) -> Path:
@@ -19,6 +21,24 @@ def save_project_config(config: ProjectConfig) -> Path:
     )
     LOGGER.info("Project config saved; project_id=%s path=%s", config.project_id, paths.config)
     return paths.config
+
+
+def create_project_config(config: ProjectConfig) -> Path:
+    paths = ensure_project_tree(config.project_id)
+    for data_file in (paths.facts, paths.targeted_insights):
+        if not data_file.exists():
+            data_file.write_text(EMPTY_JSON_LIST, encoding="utf-8")
+    return save_project_config(config)
+
+
+def delete_project_config(project_id: str) -> None:
+    project_root = project_paths(project_id).root.resolve()
+    projects_root = PROJECTS_ROOT.resolve()
+    if project_root == projects_root or projects_root not in project_root.parents:
+        raise ValueError(f"Unsafe project path: {project_root}")
+    if project_root.exists():
+        shutil.rmtree(project_root)
+        LOGGER.info("Project deleted; project_id=%s path=%s", project_id, project_root)
 
 
 def load_project_config(path: Path) -> ProjectConfig:

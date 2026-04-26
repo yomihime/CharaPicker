@@ -60,7 +60,7 @@ from utils.ffmpeg_downloader import (
 )
 from utils.paths import APP_ROOT, project_paths
 from utils.source_importer import SUPPORTED_SOURCE_SUFFIXES, import_original_sources
-from utils.state_manager import list_project_configs
+from utils.state_manager import create_project_config, delete_project_config, list_project_configs
 
 LOGGER = logging.getLogger(__name__)
 MM_SS_VALIDATOR = QRegularExpressionValidator(QRegularExpression(r"[0-5]\d:[0-5]\d"))
@@ -226,10 +226,13 @@ class ProjectPage(QWidget):
         form.setVerticalSpacing(10)
 
         project_row = QHBoxLayout()
+        project_row.setSpacing(12)
         self.project_combo = ComboBox(form_card)
         self.new_project_button = PushButton(t("project.new"), form_card)
+        self.delete_project_button = PushButton(t("project.delete"), form_card)
         project_row.addWidget(self.project_combo, 1)
         project_row.addWidget(self.new_project_button)
+        project_row.addWidget(self.delete_project_button)
 
         self.targets_edit = LineEdit(form_card)
         self.targets_edit.setPlaceholderText(t("project.character.placeholder"))
@@ -435,6 +438,7 @@ class ProjectPage(QWidget):
 
         self.project_combo.currentIndexChanged.connect(self._load_selected_project)
         self.new_project_button.clicked.connect(self._add_project)
+        self.delete_project_button.clicked.connect(self._delete_project)
         self.add_file_button.clicked.connect(self._add_files)
         self.add_folder_button.clicked.connect(self._add_folder)
         self.remove_source_button.clicked.connect(self._remove_selected_sources)
@@ -454,6 +458,9 @@ class ProjectPage(QWidget):
         self.apply_theme_colors()
 
     def current_config(self) -> ProjectConfig:
+        project = self._selected_project()
+        if project is None:
+            raise RuntimeError("No project selected")
         targets = [
             target.strip()
             for target in self.targets_edit.text().replace("，", ",").split(",")
@@ -465,7 +472,6 @@ class ProjectPage(QWidget):
             if self.sources_list.item(index).data(SOURCE_KIND_ROLE) == SOURCE_KIND_EXTERNAL
         ]
         mode = ExtractionMode.PREVIEW if self.mode_combo.currentIndex() == 0 else ExtractionMode.FULL
-        project = self._selected_project()
         return ProjectConfig(
             project_id=project.project_id,
             name=project.name,
@@ -535,6 +541,8 @@ class ProjectPage(QWidget):
         self.stream_panel.apply_theme_colors()
 
     def _emit_save(self) -> None:
+        if not self._has_project():
+            return
         config = self.current_config()
         if self._uses_original_sources():
             import_original_sources(config.project_id, config.source_paths)
@@ -543,6 +551,8 @@ class ProjectPage(QWidget):
         self.configSaved.emit(config)
 
     def _emit_preview(self) -> None:
+        if not self._has_project():
+            return
         self.previewRequested.emit(self.current_config())
 
     def _sync_preview_button_text(self) -> None:
@@ -591,6 +601,8 @@ class ProjectPage(QWidget):
         self.segment_count_label.setText(str(value))
 
     def _start_source_processing(self) -> None:
+        if not self._has_project():
+            return
         config = self.current_config()
         if self._uses_original_sources():
             imported_count = import_original_sources(config.project_id, config.source_paths)
@@ -711,24 +723,46 @@ class ProjectPage(QWidget):
         self._loading_project = True
         self.project_combo.clear()
         if not self.projects:
-            name = t("project.defaultName", index=1)
-            self.projects.append(ProjectConfig(project_id=self._make_project_id(name), name=name))
-        for project in self.projects:
-            self.project_combo.addItem(project.name)
+            self.project_combo.addItem(t("project.empty.placeholder"))
+        else:
+            for project in self.projects:
+                self.project_combo.addItem(project.name)
         self._loading_project = False
+        self._sync_project_actions()
         self._load_selected_project()
 
-    def _selected_project(self) -> ProjectConfig:
+    def _selected_project(self) -> ProjectConfig | None:
         index = self.project_combo.currentIndex()
         if 0 <= index < len(self.projects):
             return self.projects[index]
-        name = t("project.defaultName", index=1)
-        return ProjectConfig(project_id=self._make_project_id(name), name=name)
+        return None
+
+    def _has_project(self) -> bool:
+        return bool(self.projects)
+
+    def _sync_project_actions(self) -> None:
+        has_project = self._has_project()
+        self.project_combo.setEnabled(has_project)
+        self.delete_project_button.setEnabled(has_project)
+        self.targets_edit.setEnabled(has_project)
+        self.mode_combo.setEnabled(has_project)
+        self.add_file_button.setEnabled(has_project)
+        self.add_folder_button.setEnabled(has_project)
+        self.remove_source_button.setEnabled(has_project)
+        self.sources_list.setEnabled(has_project)
+        self.process_sources_button.setEnabled(has_project)
+        self.save_button.setEnabled(has_project)
+        self.preview_button.setEnabled(has_project)
 
     def _load_selected_project(self) -> None:
         if self._loading_project:
             return
         project = self._selected_project()
+        if project is None:
+            self.targets_edit.clear()
+            self.sources_list.clear()
+            self.clear_events()
+            return
         self.targets_edit.setText(", ".join(project.target_characters))
         self.mode_combo.setCurrentIndex(0 if project.extraction_mode == ExtractionMode.PREVIEW else 1)
         self._sync_preview_button_text()
@@ -747,9 +781,40 @@ class ProjectPage(QWidget):
         name = dialog.project_name() or default_name
         name = self._unique_project_name(name)
         project_id = self._make_project_id(name)
-        self.projects.insert(0, ProjectConfig(project_id=project_id, name=name))
+        project = ProjectConfig(project_id=project_id, name=name)
+        create_project_config(project)
+        self.projects.insert(0, project)
         self._refresh_project_combo()
         self.project_combo.setCurrentIndex(0)
+
+    def _delete_project(self) -> None:
+        index = self.project_combo.currentIndex()
+        if not 0 <= index < len(self.projects):
+            return
+
+        project = self.projects[index]
+        dialog = MessageBox(
+            t("project.delete.dialog.title"),
+            t("project.delete.dialog.content", name=project.name),
+            self.window(),
+        )
+        dialog.yesButton.setText(t("project.delete.dialog.confirm"))
+        dialog.cancelButton.setText(t("project.delete.dialog.cancel"))
+        if not dialog.exec():
+            return
+
+        delete_project_config(project.project_id)
+        del self.projects[index]
+        self._refresh_project_combo()
+        if self.projects:
+            self.project_combo.setCurrentIndex(min(index, len(self.projects) - 1))
+        InfoBar.success(
+            title=t("project.delete.success.title"),
+            content=t("project.delete.success.content", name=project.name),
+            parent=self.window(),
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=3500,
+        )
 
     def _upsert_project(self, config: ProjectConfig) -> None:
         for index, project in enumerate(self.projects):
