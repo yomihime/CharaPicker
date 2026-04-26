@@ -16,7 +16,7 @@
 
 ## 关键文件
 
-- `models.py`：定义 `ProjectConfig`、`InsightEvent`、`CharacterState`、`ProjectPaths` 等 Pydantic 模型。
+- `models.py`：定义 `ProjectConfig`、`SourceProcessingConfig`、`InsightEvent`、`CharacterState`、`ProjectPaths` 等 Pydantic 模型。
 - `extractor.py`：定义 `Extractor`，当前负责预览阶段的占位洞察事件和进度信号。
 - `compiler.py`：定义 `compile_character_state()`，当前返回占位角色状态。
 - `generator.py`：定义 `render_profile_markdown()`，当前将角色状态渲染为 Markdown。
@@ -27,11 +27,13 @@
 - 从 `utils.i18n` 读取本地化文案，用于占位摘要和洞察描述。
 - 向 `gui` 通过 Qt Signal 传递可序列化的洞察事件 `dict`。
 - 被 `utils.state_manager` 引用，用于项目配置的序列化和反序列化。
+- 被 `utils.paths` 引用，用于描述包含 `raw/`、`materials/`、`cache/`、`knowledge_base/` 和 `output/` 的项目路径。
 - 后续应向 `projects/{project_id}/knowledge_base/` 写入结构化提取结果。
 
 ## 维护注意事项
 
 - 新增业务数据结构时优先放在 `models.py`，保持 Type Hints。
+- 素材处理配置只描述用户选择和项目状态；文件复制、链接、清理等副作用放在 `utils/source_importer.py`。
 - `extractor` 只做素材解析、事实提取和洞察产出。
 - `compiler` 只做角色状态迭代、长文本阅读和冲突处理。
 - `generator` 只做编译调度后的格式组织和输出渲染。

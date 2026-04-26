@@ -3,7 +3,7 @@
 ## 负责什么
 
 - 保存本地用户工程数据。
-- 按 `project_id` 隔离项目配置、原始素材、缓存、知识库和输出结果。
+- 按 `project_id` 隔离项目配置、原始素材、可处理素材、缓存、知识库和输出结果。
 - 作为 Extract Once 流程的落盘位置。
 
 ## 不负责什么
@@ -16,8 +16,9 @@
 ## 关键文件和目录
 
 - `.gitkeep`：保留空目录。
-- `{project_id}/config.json`：项目配置，包含目标角色、提取模式和素材路径等。
-- `{project_id}/raw/`：原始素材。
+- `{project_id}/config.json`：项目配置，包含目标角色、提取模式、素材路径、素材处理配置和已清理 raw 标记等。
+- `{project_id}/raw/`：导入后的原始素材副本，用于后续重新处理。
+- `{project_id}/materials/`：当前处理管线实际读取的素材。使用原素材方案时通常指向 `raw/` 中的同名素材。
 - `{project_id}/cache/`：切片、预览和临时处理文件。
 - `{project_id}/knowledge_base/facts.json`：客观事实记录。
 - `{project_id}/knowledge_base/targeted_insights.json`：面向目标角色或世界观的定向洞察。
@@ -27,12 +28,15 @@
 
 - `utils/paths.py` 定义本目录的标准项目结构。
 - `utils/state_manager.py` 保存和读取 `config.json`。
+- `utils/source_importer.py` 负责外部素材导入、`raw/` 到 `materials/` 的轻量链接、raw 清理和素材移除。
 - `core` 后续应读取素材并写入 `knowledge_base/`。
 - `gui` 通过项目页展示和编辑项目配置。
 
 ## 维护注意事项
 
 - 项目目录结构应由 `utils.paths.ensure_project_tree()` 统一创建。
+- `raw/` 保存可重新处理的源副本；`materials/` 保存当前可被提取流程消费的素材入口。
+- 清理 `raw/` 前必须确保 `materials/` 中已有可用素材，并在 `config.json` 中记录已清理路径。
 - 用户素材、缓存、知识库和输出结果默认不应进入版本控制。
 - 写入 JSON 时保持 UTF-8 和结构化格式。
 - 后续新增项目子目录时，同步更新本说明和路径工具。

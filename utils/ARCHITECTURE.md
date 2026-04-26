@@ -26,7 +26,7 @@
 - `cloud_models.py`：拉取 OpenAI-compatible 云端模型列表。
 - `llamacpp_downloader.py`：下载并安装 llama.cpp 运行时到 `bin/`。
 - `ffmpeg_downloader.py`：下载并安装 ffmpeg 运行时到 `bin/`。
-- `source_importer.py`：把外部原始素材按项目目录规则复制到 `projects/{project_id}/raw`。
+- `source_importer.py`：把外部原始素材按项目目录规则复制到 `projects/{project_id}/raw`，计算外部路径对应的 raw 目标，准备 `materials`，并支持 raw 清理和素材移除。
 - `logging_preferences.py`：管理日志等级偏好。
 - `logging_middleware.py`：安装全局日志中间件，日志只写入文件。
 - `ai_model_middleware.py`：统一模型调用入口，负责加载默认提示词、构造标准消息、屏蔽敏感日志并路由下层模型后端。
@@ -42,11 +42,13 @@
 - `i18n.py`、`theme.py`、`logging_preferences.py`、`prompt_preferences.py` 和 `cloud_model_presets.py` 通过 `global_store.py` 管理全局用户偏好。
 - `state_manager.py` 使用 `core.models.ProjectConfig` 进行结构校验。
 - `paths.py` 统一指向 `projects/` 下的工程目录。
+- `source_importer.py` 由 `gui/pages/project_page.py` 调用；它只处理文件系统操作，不负责弹窗、按钮状态或用户提示。
 
 ## 维护注意事项
 
 - 工具函数保持无界面依赖，除非它本身就是 Qt 适配层。
 - 路径相关逻辑集中放在 `paths.py`，避免各处拼接项目目录。
+- 素材导入和清理逻辑集中放在 `source_importer.py`，页面层不要直接复制、链接或删除项目素材文件。
 - 全局用户数据和配置选项统一通过 `global_store.py` 读写。
 - 项目配置读写保持 UTF-8 和结构化 JSON；全局配置读写保持 UTF-8 和结构化 YAML。
 - 模型执行只能经由 `call_model()` 进入下层后端。

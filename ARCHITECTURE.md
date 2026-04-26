@@ -39,12 +39,13 @@
 
 1. `main.py` 创建应用并进入启动流程。
 2. `gui/main_window.py` 组装窗口、页面和信号连接。
-3. `gui/pages/project_page.py` 收集项目名、目标角色、提取模式和素材路径。
-4. `core/extractor.py` 在预览阶段产出结构化洞察事件。
-5. 洞察事件以 `dict` 形式通过 Qt Signal 推送到 `InsightStreamPanel`。
-6. `core/compiler.py` 生成占位 `CharacterState`。
-7. `core/generator.py` 将角色状态渲染为 Markdown，并交给输出页展示。
-8. `utils/state_manager.py` 将项目配置保存到 `projects/{project_id}/config.json`。
+3. `gui/pages/project_page.py` 收集项目名、目标角色、提取模式、素材路径和素材处理配置。
+4. `utils/source_importer.py` 将外部素材导入 `projects/{project_id}/raw/`，并按处理方案准备 `materials/`。
+5. `utils/state_manager.py` 将项目配置保存到 `projects/{project_id}/config.json`。
+6. `core/extractor.py` 在预览阶段产出结构化洞察事件。
+7. 洞察事件以 `dict` 形式通过 Qt Signal 推送到 `InsightStreamPanel`。
+8. `core/compiler.py` 生成占位 `CharacterState`。
+9. `core/generator.py` 将角色状态渲染为 Markdown，并交给输出页展示。
 
 ## 维护注意事项
 

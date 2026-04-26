@@ -14,11 +14,37 @@ class ExtractionMode(str, Enum):
     FULL = "full"
 
 
+class SourceProcessingPreset(str, Enum):
+    ORIGINAL = "original"
+    SEGMENT_TRANSCODE = "segment_transcode"
+    SEGMENT_ONLY = "segment_only"
+    TRANSCODE_ONLY = "transcode_only"
+
+
+class SourceSegmentMode(str, Enum):
+    TIME = "time"
+    COUNT = "count"
+
+
 class InsightStatus(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
     DONE = "done"
     WARNING = "warning"
+
+
+class SourceProcessingConfig(BaseModel):
+    preset: SourceProcessingPreset = SourceProcessingPreset.ORIGINAL
+    trim_enabled: bool = False
+    trim_start: str = "00:00"
+    trim_end: str = "00:00"
+    transcode_enabled: bool = False
+    codec: str = "H.264"
+    resolution: str = "540p"
+    segment_enabled: bool = False
+    segment_mode: SourceSegmentMode = SourceSegmentMode.TIME
+    segment_time: str = "00:02:00"
+    segment_count: int = 4
 
 
 class ProjectConfig(BaseModel):
@@ -27,6 +53,8 @@ class ProjectConfig(BaseModel):
     target_characters: list[str] = Field(default_factory=list)
     extraction_mode: ExtractionMode = ExtractionMode.PREVIEW
     source_paths: list[str] = Field(default_factory=list)
+    source_processing: SourceProcessingConfig = Field(default_factory=SourceProcessingConfig)
+    raw_cleaned_paths: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
 
@@ -50,6 +78,7 @@ class CharacterState(BaseModel):
 class ProjectPaths(BaseModel):
     root: Path
     raw: Path
+    materials: Path
     cache: Path
     knowledge_base: Path
     output: Path

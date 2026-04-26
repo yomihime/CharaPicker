@@ -16,6 +16,7 @@ def project_paths(project_id: str) -> ProjectPaths:
     return ProjectPaths(
         root=root,
         raw=root / "raw",
+        materials=root / "materials",
         cache=root / "cache",
         knowledge_base=knowledge_base,
         output=root / "output",
@@ -27,6 +28,6 @@ def project_paths(project_id: str) -> ProjectPaths:
 
 def ensure_project_tree(project_id: str) -> ProjectPaths:
     paths = project_paths(project_id)
-    for directory in (paths.raw, paths.cache, paths.knowledge_base, paths.output):
+    for directory in (paths.raw, paths.materials, paths.cache, paths.knowledge_base, paths.output):
         directory.mkdir(parents=True, exist_ok=True)
     return paths
