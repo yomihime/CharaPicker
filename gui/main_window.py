@@ -23,6 +23,7 @@ from gui.pages.project_page import ProjectPage
 from gui.pages.settings_page import SettingsPage
 from utils.i18n import t
 from utils.logging_middleware import apply_log_level_preference
+from utils.startup_middleware import StartupWarmupSnapshot
 from utils.state_manager import save_project_config
 from utils.theme import apply_theme_preference
 
@@ -31,7 +32,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class MainWindow(FluentWindow):
-    def __init__(self) -> None:
+    def __init__(self, startup_snapshot: StartupWarmupSnapshot | None = None) -> None:
         super().__init__()
         LOGGER.info("Main window initialization started")
         self.setWindowTitle("CharaPicker")
@@ -40,9 +41,18 @@ class MainWindow(FluentWindow):
 
         self.extractor = Extractor(self)
 
-        self.project_page = ProjectPage(self)
+        self.project_page = ProjectPage(
+            self,
+            initial_projects=startup_snapshot.project_configs if startup_snapshot else None,
+            initial_encoder_options=startup_snapshot.encoder_options if startup_snapshot else None,
+            initial_ffmpeg_ready=startup_snapshot.ffmpeg_ready if startup_snapshot else None,
+        )
         self.output_page = OutputPage(self)
-        self.model_page = ModelPage(self)
+        self.model_page = ModelPage(
+            self,
+            initial_llamacpp_ready=startup_snapshot.llamacpp_ready if startup_snapshot else None,
+            initial_cloud_presets=startup_snapshot.cloud_presets if startup_snapshot else None,
+        )
         self.prompt_page = PromptPage(self)
         self.about_page = AboutPage(self)
         self.settings_page = SettingsPage(self)

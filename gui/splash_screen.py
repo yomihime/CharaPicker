@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-from PyQt6.QtCore import QEasingCurve, QObject, QPointF, QPropertyAnimation, QSize, QTimer, Qt
+from PyQt6.QtCore import QEasingCurve, QObject, QPointF, QPropertyAnimation, QSize, QThread, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import (
     QApplication,
@@ -41,6 +41,7 @@ from res.colors import (
     SPLASH_LOADER_TRACK_LIGHT_RGBA,
 )
 from utils.i18n import t
+from utils.startup_middleware import StartupWarmupSnapshot, warmup_startup_context
 
 
 LOGGER = logging.getLogger(__name__)
@@ -272,46 +273,59 @@ class StartupController(QObject):
         super().__init__()
         self.splash = SplashScreen()
         self.window: MainWindow | None = None
-        self._step_index = 0
-        self._steps: list[tuple[str, int, Callable[[], None] | None]] = [
-            (t("startup.status.boot"), 12, None),
-            (t("startup.status.theme"), 34, None),
-            (t("startup.status.window"), 66, self._create_main_window),
-            (t("startup.status.workspace"), 88, None),
-        ]
+        self._startup_snapshot: StartupWarmupSnapshot | None = None
+        self._warmup_thread: QThread | None = None
+        self._warmup_worker: StartupWarmupWorker | None = None
 
     def start(self) -> None:
         LOGGER.info("Startup splash sequence started")
         self.splash.show()
-        QTimer.singleShot(180, self._run_next_step)
+        self.splash.set_step(t("startup.status.boot"), 12)
+        QTimer.singleShot(180, self._start_warmup)
 
-    def _run_next_step(self) -> None:
-        if self._step_index >= len(self._steps):
-            self.splash.finish(self._show_main_window)
+    def _start_warmup(self) -> None:
+        if self._warmup_thread is not None:
             return
+        LOGGER.info("Startup warmup thread starting")
+        self._warmup_thread = QThread(self)
+        self._warmup_worker = StartupWarmupWorker()
+        self._warmup_worker.moveToThread(self._warmup_thread)
+        self._warmup_thread.started.connect(self._warmup_worker.run)
+        self._warmup_worker.progressChanged.connect(self._apply_warmup_progress)
+        self._warmup_worker.succeeded.connect(self._finish_warmup)
+        self._warmup_worker.failed.connect(self._handle_warmup_failure)
+        self._warmup_worker.finished.connect(self._warmup_thread.quit)
+        self._warmup_worker.finished.connect(self._warmup_worker.deleteLater)
+        self._warmup_thread.finished.connect(self._warmup_thread.deleteLater)
+        self._warmup_thread.finished.connect(self._clear_warmup_worker)
+        self._warmup_thread.start()
 
-        message, progress, action = self._steps[self._step_index]
-        LOGGER.debug(
-            "Startup step running; index=%s progress=%s has_action=%s",
-            self._step_index,
-            progress,
-            action is not None,
-        )
-        self.splash.set_step(message, progress)
-        if action:
-            action()
+    def _apply_warmup_progress(self, message_key: str, progress: int) -> None:
+        self.splash.set_step(t(message_key), progress)
 
-        self._step_index += 1
-        QTimer.singleShot(260, self._run_next_step)
+    def _finish_warmup(self, snapshot: StartupWarmupSnapshot) -> None:
+        self._startup_snapshot = snapshot
+        self._create_main_window()
+        self.splash.finish(self._show_main_window)
+
+    def _handle_warmup_failure(self, error: str) -> None:
+        LOGGER.warning("Startup warmup failed; fallback to direct startup. error=%s", error)
+        self._startup_snapshot = None
+        self._create_main_window()
+        self.splash.finish(self._show_main_window)
+
+    def _clear_warmup_worker(self) -> None:
+        self._warmup_thread = None
+        self._warmup_worker = None
 
     def _create_main_window(self) -> None:
         LOGGER.info("Creating main window during startup")
-        self.window = MainWindow()
+        self.window = MainWindow(self._startup_snapshot)
 
     def _show_main_window(self) -> None:
         if self.window is None:
             LOGGER.info("Main window was not pre-created; creating before show")
-            self.window = MainWindow()
+            self.window = MainWindow(self._startup_snapshot)
         self.window.resize(self.MAIN_WINDOW_SIZE)
         self._center_main_window()
         QApplication.instance().setQuitOnLastWindowClosed(True)
@@ -328,3 +342,21 @@ class StartupController(QObject):
         frame = self.window.frameGeometry()
         frame.moveCenter(geometry.center())
         self.window.move(frame.topLeft())
+
+
+class StartupWarmupWorker(QObject):
+    progressChanged = pyqtSignal(str, int)
+    succeeded = pyqtSignal(object)
+    failed = pyqtSignal(str)
+    finished = pyqtSignal()
+
+    def run(self) -> None:
+        try:
+            snapshot = warmup_startup_context(progress=self.progressChanged.emit)
+        except Exception as exc:
+            LOGGER.warning("Startup warmup worker failed", exc_info=True)
+            self.failed.emit(str(exc))
+        else:
+            self.succeeded.emit(snapshot)
+        finally:
+            self.finished.emit()

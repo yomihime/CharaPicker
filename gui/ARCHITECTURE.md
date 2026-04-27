@@ -17,7 +17,7 @@
 ## 关键文件
 
 - `main_window.py`：主窗口。创建页面、导航项、`Extractor`，并连接预览、保存配置、主题和语言信号。
-- `splash_screen.py`：启动流程和启动界面。
+- `splash_screen.py`：启动流程和启动界面；在加载阶段通过子线程执行启动预热中间件，并在预热完成后创建主窗口。
 - `pages/project_page.py`：项目配置页。收集目标角色、提取模式、素材路径和素材处理配置；启动异步素材导入；展示素材状态和洞察流。
 - `pages/output_page.py`：角色卡 Markdown 预览页。
 - `pages/prompt_page.py`：提示词设置页。显示默认提示词，保存或清除用户自定义提示词覆盖。
@@ -44,6 +44,7 @@
 - `InsightStreamPanel` 只展示关键洞察，不展示普通调试日志。
 - Qt Signal 传输的数据尽量保持为可序列化 `dict`。
 - 长耗时素材处理应放在线程 worker 中执行，页面只负责进度弹窗、取消信号和完成反馈。
+- 启动阶段的耗时预加载应放在线程 worker 中执行，启动页完成前不要提前进入主窗口。
 
 ## Dialog middleware note
 

@@ -62,6 +62,7 @@ from utils.ffmpeg_downloader import (
     download_and_install_ffmpeg,
 )
 from utils.ffmpeg_tool import DeviceOption, is_device_compatible_for_codec, list_available_device_options
+from utils.ffmpeg_tool import has_ffmpeg_binary
 from utils.material_processing_middleware import (
     MaterialProcessingError,
     SOURCE_PROCESSING_CANCELLED_MESSAGE,
@@ -432,10 +433,17 @@ class ProjectPage(QWidget):
     previewRequested = pyqtSignal(ProjectConfig)
     configSaved = pyqtSignal(ProjectConfig)
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        initial_projects: list[ProjectConfig] | None = None,
+        initial_encoder_options: list[DeviceOption] | None = None,
+        initial_ffmpeg_ready: bool | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("projectPage")
-        self.projects = list_project_configs()
+        self.projects = list(initial_projects) if initial_projects is not None else list_project_configs()
         self._loading_project = False
         self._ffmpeg_download_thread: QThread | None = None
         self._ffmpeg_download_worker: FfmpegDownloadWorker | None = None
@@ -443,7 +451,9 @@ class ProjectPage(QWidget):
         self._source_processing_thread: QThread | None = None
         self._source_processing_worker: SourceProcessingWorker | None = None
         self._source_processing_dialog: SourceProcessingDialog | None = None
-        self._encoder_options: list[DeviceOption] = []
+        self._encoder_options: list[DeviceOption] = list(initial_encoder_options) if initial_encoder_options else []
+        self._ffmpeg_ready_cache = initial_ffmpeg_ready
+        self._use_preloaded_encoder_options = initial_encoder_options is not None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(22, 18, 22, 18)
@@ -701,10 +711,10 @@ class ProjectPage(QWidget):
         self.processing_preset_combo.currentIndexChanged.connect(self._sync_processing_options)
         self.segment_mode_combo.currentIndexChanged.connect(self._sync_segment_mode)
         self.segment_count_slider.valueChanged.connect(self._sync_segment_count_label)
-        self._refresh_encoder_options()
+        self._refresh_encoder_options(force_probe=not self._use_preloaded_encoder_options)
         self._refresh_project_combo()
         self._sync_preview_button_text()
-        self._refresh_ffmpeg_state()
+        self._refresh_ffmpeg_state(force_probe=self._ffmpeg_ready_cache is None)
         self._sync_processing_options()
         self._sync_segment_mode()
         self.apply_theme_colors()
@@ -810,16 +820,18 @@ class ProjectPage(QWidget):
         key = "project.preview" if self.mode_combo.currentIndex() == 0 else "project.fullExtraction"
         self.preview_button.setText(t(key))
 
-    def _refresh_ffmpeg_state(self) -> None:
-        validation = validate_source_processing_tools(self._current_processing_config())
+    def _refresh_ffmpeg_state(self, *, force_probe: bool = False) -> None:
+        requires_ffmpeg = self._current_processing_config().preset != SourceProcessingPreset.ORIGINAL
+        if force_probe or self._ffmpeg_ready_cache is None:
+            self._ffmpeg_ready_cache = has_ffmpeg_binary()
         self.ffmpeg_status_label.setText(
             t("project.ffmpeg.status.notRequired")
-            if not validation.requires_ffmpeg
+            if not requires_ffmpeg
             else t("project.ffmpeg.status.ready")
-            if validation.ffmpeg_ready
+            if self._ffmpeg_ready_cache
             else t("project.ffmpeg.status.missing")
         )
-        self.download_ffmpeg_button.setVisible(validation.requires_ffmpeg and not validation.ffmpeg_ready)
+        self.download_ffmpeg_button.setVisible(requires_ffmpeg and not self._ffmpeg_ready_cache)
 
     def _uses_original_sources(self) -> bool:
         return self.processing_preset_combo.currentIndex() == 0
@@ -1057,7 +1069,8 @@ class ProjectPage(QWidget):
             self._ffmpeg_download_dialog.mark_finished()
             self._ffmpeg_download_dialog.set_progress(100, t("project.ffmpeg.download.progress.done"))
             self._ffmpeg_download_dialog.close()
-        self._refresh_encoder_options()
+        self._ffmpeg_ready_cache = True
+        self._refresh_encoder_options(force_probe=True)
         self._refresh_ffmpeg_state()
         InfoBar.success(
             title=t("project.ffmpeg.download.success.title"),
@@ -1115,13 +1128,16 @@ class ProjectPage(QWidget):
             return None
         return payload if isinstance(payload, dict) else None
 
-    def _refresh_encoder_options(self) -> None:
+    def _refresh_encoder_options(self, *, force_probe: bool = False) -> None:
         previous_value = self.encoder_combo.currentData()
         if previous_value is None:
             previous_value = self.encoder_combo.currentText()
 
         self.encoder_combo.clear()
-        self._encoder_options = list_available_device_options()
+        if force_probe:
+            self._use_preloaded_encoder_options = False
+        if not self._use_preloaded_encoder_options:
+            self._encoder_options = list_available_device_options()
         if not self._encoder_options:
             fallback = DeviceOption(
                 device_id="cpu",
@@ -1130,10 +1146,13 @@ class ProjectPage(QWidget):
                 encoders={"h264": "libx264", "hevc": "libx265"},
             )
             self._encoder_options = [fallback]
+        else:
+            self._ffmpeg_ready_cache = True
 
         for option in self._encoder_options:
             self.encoder_combo.addItem(option.label, userData=option.device_id)
         self._set_encoder_selection(str(previous_value or ""))
+        self._use_preloaded_encoder_options = False
 
     def _set_encoder_selection(self, encoder_value: str) -> None:
         normalized_value = encoder_value.strip()

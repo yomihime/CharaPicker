@@ -211,7 +211,13 @@ class CloudModelSelectDialog(FluentDialog):
 
 
 class ModelPage(QWidget):
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        initial_llamacpp_ready: bool | None = None,
+        initial_cloud_presets: list[CloudModelPreset] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("modelPage")
         self._download_thread: QThread | None = None
@@ -221,6 +227,7 @@ class ModelPage(QWidget):
         self._cloud_models_worker: CloudModelListWorker | None = None
         self._cloud_presets: list[CloudModelPreset] = []
         self._loading_cloud_preset = False
+        self._llamacpp_ready_cache = initial_llamacpp_ready
 
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 24, 28, 24)
@@ -260,7 +267,7 @@ class ModelPage(QWidget):
         runner_row.addWidget(self.local_runner_combo, 1)
 
         self.download_llamacpp_button = PushButton(t("model.local.downloadLlamacpp"), self.local_card)
-        self.download_llamacpp_button.setVisible(not has_llamacpp_binary())
+        self.download_llamacpp_button.setVisible(not self._llamacpp_ready())
         runner_row.addWidget(self.download_llamacpp_button)
 
         self.use_cache = SwitchButton(self.local_card)
@@ -344,7 +351,7 @@ class ModelPage(QWidget):
         self.save_cloud_preset_button.clicked.connect(self._save_current_cloud_preset)
         self.delete_cloud_preset_button.clicked.connect(self._delete_selected_cloud_preset)
         self._refresh_local_models()
-        self._refresh_cloud_presets()
+        self._refresh_cloud_presets(preloaded_presets=initial_cloud_presets)
         self._set_cloud_mode(False)
 
     def _set_cloud_mode(self, enabled: bool) -> None:
@@ -387,6 +394,7 @@ class ModelPage(QWidget):
             self._download_dialog.mark_finished()
             self._download_dialog.set_progress(100, t("model.local.download.progress.done"))
             self._download_dialog.close()
+        self._llamacpp_ready_cache = True
         self.download_llamacpp_button.setVisible(False)
         InfoBar.success(
             title=t("model.local.download.success.title"),
@@ -422,7 +430,8 @@ class ModelPage(QWidget):
 
     def _clear_download_worker(self) -> None:
         self.download_llamacpp_button.setEnabled(True)
-        self.download_llamacpp_button.setVisible(not has_llamacpp_binary())
+        self._llamacpp_ready_cache = None
+        self.download_llamacpp_button.setVisible(not self._llamacpp_ready())
         self._download_thread = None
         self._download_worker = None
         self._download_dialog = None
@@ -551,8 +560,13 @@ class ModelPage(QWidget):
             )
         )
 
-    def _refresh_cloud_presets(self, selected_name: str | None = None) -> None:
-        self._cloud_presets = load_cloud_model_presets()
+    def _refresh_cloud_presets(
+        self,
+        selected_name: str | None = None,
+        *,
+        preloaded_presets: list[CloudModelPreset] | None = None,
+    ) -> None:
+        self._cloud_presets = list(preloaded_presets) if preloaded_presets is not None else load_cloud_model_presets()
         self._loading_cloud_preset = True
         self.cloud_preset_combo.clear()
         self.cloud_preset_combo.addItem(t("model.cloud.preset.none"))
@@ -568,6 +582,11 @@ class ModelPage(QWidget):
         self.cloud_preset_combo.setCurrentIndex(index)
         self._loading_cloud_preset = False
         self._load_selected_cloud_preset()
+
+    def _llamacpp_ready(self) -> bool:
+        if self._llamacpp_ready_cache is None:
+            self._llamacpp_ready_cache = has_llamacpp_binary()
+        return self._llamacpp_ready_cache
 
     def _load_selected_cloud_preset(self) -> None:
         if self._loading_cloud_preset:

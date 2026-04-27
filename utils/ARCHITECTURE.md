@@ -29,6 +29,7 @@
 - `ffmpeg_downloader.py`：下载并安装 ffmpeg 运行时到 `bin/`。
 - `source_importer.py`：把外部原始素材按项目目录规则复制到 `projects/{project_id}/raw`，计算外部路径对应的 raw 目标，准备 `materials`，并支持 raw 清理和素材移除。
 - `material_processing_middleware.py`：统一接收上层的素材处理请求与工具可用性校验请求，桥接 `source_importer.py` 和 `ffmpeg_tool.py`。
+- `startup_middleware.py`：启动阶段预加载中间件，集中探测 FFmpeg/llama.cpp、预取项目配置和云模型预设，供启动页线程复用。
 - `logging_preferences.py`：管理日志等级偏好。
 - `logging_middleware.py`：安装全局日志中间件，日志只写入文件。
 - `ai_model_middleware.py`：统一模型调用入口，负责加载默认提示词、构造标准消息、屏蔽敏感日志并路由下层模型后端。
@@ -46,10 +47,12 @@
 - `paths.py` 统一指向 `projects/` 下的工程目录。
 - `source_importer.py` 由 `gui/pages/project_page.py` 调用；它只处理文件系统操作，不负责弹窗、按钮状态或用户提示。
 - `gui/pages/project_page.py` 通过 `material_processing_middleware.py` 触发素材处理和工具校验，不直接承担下层处理细节。
+- `gui/splash_screen.py` 通过 `startup_middleware.py` 在子线程预热启动数据，再交给主窗口和页面复用。
 
 ## 维护注意事项
 
 - 工具函数保持无界面依赖，除非它本身就是 Qt 适配层。
+- 启动预热逻辑集中在 `startup_middleware.py`，避免页面构造阶段重复执行同步探测。
 - 路径相关逻辑集中放在 `paths.py`，避免各处拼接项目目录。
 - 素材导入和清理逻辑集中放在 `source_importer.py`，页面层不要直接复制、链接或删除项目素材文件。
 - 全局用户数据和配置选项统一通过 `global_store.py` 读写。
