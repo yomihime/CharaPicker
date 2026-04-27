@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import base64
 import logging
+import mimetypes
+import subprocess
+import tempfile
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
@@ -36,18 +40,104 @@ from utils.cloud_model_presets import (
     upsert_cloud_model_preset,
 )
 from utils.env_manager import has_llamacpp_binary
-from utils.i18n import t
+from utils.i18n import current_locale, t
 from utils.llamacpp_downloader import (
     LlamaCppDownloadCancelled,
     LlamaCppDownloadError,
     download_and_install_llamacpp,
 )
 from utils.paths import APP_ROOT
+from utils.ffmpeg_tool import find_usable_ffmpeg_binary
+from utils.ai_model_middleware import (
+    ModelMiddlewareError,
+    ModelCallRequest,
+    ModelMessage,
+    call_model,
+)
 
 
 MODELS_ROOT = APP_ROOT / "models"
+TEST_MEDIA_ROOT = APP_ROOT / "res" / "test_media"
+IMAGE_TEST_ASSET = TEST_MEDIA_ROOT / "model_test_input.jpg"
+VIDEO_TEST_ASSET = TEST_MEDIA_ROOT / "model_test_input.mp4"
 LOCAL_MODEL_SUFFIXES = {".bin", ".gguf", ".model", ".onnx", ".pt", ".pth", ".safetensors"}
 LOGGER = logging.getLogger(__name__)
+LOCALE_LANGUAGE_HINTS = {
+    "zh_CN": "Simplified Chinese",
+    "zh_TW": "Traditional Chinese",
+    "en_US": "English",
+    "ja_JP": "Japanese",
+}
+
+
+def _build_data_url(asset_path: Path, default_mime: str) -> str:
+    if not asset_path.exists():
+        raise ModelMiddlewareError(f"Test asset does not exist: {asset_path}")
+    mime_type, _ = mimetypes.guess_type(asset_path.name)
+    mime_type = mime_type or default_mime
+    encoded = base64.b64encode(asset_path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def _response_language_name(locale: str) -> str:
+    return LOCALE_LANGUAGE_HINTS.get(locale, LOCALE_LANGUAGE_HINTS["zh_CN"])
+
+
+def _response_language_instruction(locale: str) -> str:
+    return f"Respond in {_response_language_name(locale)}."
+
+
+def _join_failed_items(items: list[str], locale: str) -> str:
+    if not items:
+        return ""
+    if locale.startswith("en"):
+        return ", ".join(items)
+    if locale.startswith("ja"):
+        return "、".join(items)
+    return "、".join(items)
+
+
+def _build_video_frame_sequence(video_path: Path, *, frame_count: int = 4) -> list[str]:
+    ffmpeg_binary = find_usable_ffmpeg_binary()
+    if ffmpeg_binary is None:
+        raise ModelMiddlewareError(t("model.test.video.ffmpegMissing"))
+    if frame_count <= 0:
+        frame_count = 1
+    with tempfile.TemporaryDirectory(prefix="model-video-test-seq-") as temp_dir:
+        pattern = Path(temp_dir) / "frame_%03d.jpg"
+        command = [
+            str(ffmpeg_binary),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-ss",
+            "00:00:00",
+            "-i",
+            str(video_path),
+            "-vf",
+            "fps=1",
+            "-frames:v",
+            str(frame_count),
+            "-q:v",
+            "3",
+            str(pattern),
+        ]
+        try:
+            completed = subprocess.run(command, capture_output=True, check=False)
+        except OSError as exc:
+            raise ModelMiddlewareError(str(exc)) from exc
+
+        frame_paths = sorted(Path(temp_dir).glob("frame_*.jpg"))
+        if completed.returncode != 0 or not frame_paths:
+            stderr = completed.stderr.decode("utf-8", errors="replace").strip()
+            raise ModelMiddlewareError(
+                t(
+                    "model.test.video.frameExtractFailed",
+                    error=stderr or str(completed.returncode),
+                )
+            )
+        return [_build_data_url(frame_path, "image/jpeg") for frame_path in frame_paths]
 
 
 class LlamaCppDownloadWorker(QObject):
@@ -106,6 +196,339 @@ class CloudModelListWorker(QObject):
             self.succeeded.emit(models)
         finally:
             self.finished.emit()
+
+
+class CloudTextTestWorker(QObject):
+    progressChanged = pyqtSignal(str)
+    succeeded = pyqtSignal(str)
+    failed = pyqtSignal(str)
+    finished = pyqtSignal()
+
+    def __init__(self, *, base_url: str, api_key: str, model_name: str, locale: str) -> None:
+        super().__init__()
+        self.base_url = base_url
+        self.api_key = api_key
+        self.model_name = model_name
+        self.locale = locale
+
+    def run(self) -> None:
+        LOGGER.info(
+            "Cloud text understanding test started; base_url=%s model=%s",
+            self.base_url,
+            self.model_name,
+        )
+        try:
+            request = ModelCallRequest(
+                purpose="connectivity_test",
+                backend="openai_compatible",
+                model_name=self.model_name,
+                base_url=self.base_url,
+                api_key=self.api_key,
+                temperature=0,
+                max_tokens=64,
+                stream=True,
+                messages=[
+                    ModelMessage(role="system", content="You are a model connectivity test assistant."),
+                    ModelMessage(
+                        role="user",
+                        content=(
+                            f"{_response_language_instruction(self.locale)} "
+                            "Output exactly two lines: "
+                            "MODEL: <the model id you are running as>; "
+                            "SUMMARY: <one-sentence self-introduction>."
+                        ),
+                    ),
+                ],
+                metadata={"scene": "model_page_text_test"},
+            )
+            result = call_model(
+                request,
+                on_stream_delta=lambda delta: self.progressChanged.emit(delta),
+            )
+        except (ModelMiddlewareError, ValueError) as exc:
+            LOGGER.warning("Cloud text understanding test failed", exc_info=True)
+            self.failed.emit(str(exc))
+        else:
+            LOGGER.info("Cloud text understanding test succeeded")
+            self.succeeded.emit(result.content)
+        finally:
+            self.finished.emit()
+
+
+class CloudImageTestWorker(QObject):
+    progressChanged = pyqtSignal(str)
+    succeeded = pyqtSignal(str)
+    failed = pyqtSignal(str)
+    finished = pyqtSignal()
+
+    def __init__(self, *, base_url: str, api_key: str, model_name: str, image_path: Path, locale: str) -> None:
+        super().__init__()
+        self.base_url = base_url
+        self.api_key = api_key
+        self.model_name = model_name
+        self.image_path = image_path
+        self.locale = locale
+
+    def run(self) -> None:
+        LOGGER.info(
+            "Cloud image understanding test started; base_url=%s model=%s image=%s",
+            self.base_url,
+            self.model_name,
+            self.image_path,
+        )
+        try:
+            image_data_url = _build_data_url(self.image_path, "image/jpeg")
+            request = ModelCallRequest(
+                purpose="connectivity_test_image",
+                backend="openai_compatible",
+                model_name=self.model_name,
+                base_url=self.base_url,
+                api_key=self.api_key,
+                temperature=0,
+                max_tokens=96,
+                stream=True,
+                messages=[
+                    ModelMessage(role="system", content="You are a vision connectivity test assistant."),
+                    ModelMessage(
+                        role="user",
+                        content=[
+                            {
+                                "type": "text",
+                                "text": (
+                                    f"{_response_language_instruction(self.locale)} "
+                                    "Describe the main subject in one short sentence. Start with CHARA_IMAGE_OK: "
+                                ),
+                            },
+                            {"type": "image_url", "image_url": {"url": image_data_url}},
+                        ],
+                    ),
+                ],
+                metadata={"scene": "model_page_image_test"},
+            )
+            result = call_model(
+                request,
+                on_stream_delta=lambda delta: self.progressChanged.emit(delta),
+            )
+        except (ModelMiddlewareError, OSError, ValueError) as exc:
+            LOGGER.warning("Cloud image understanding test failed", exc_info=True)
+            self.failed.emit(str(exc))
+        else:
+            LOGGER.info("Cloud image understanding test succeeded")
+            self.succeeded.emit(result.content)
+        finally:
+            self.finished.emit()
+
+
+class CloudVideoTestWorker(QObject):
+    progressChanged = pyqtSignal(str)
+    succeeded = pyqtSignal(str)
+    failed = pyqtSignal(str)
+    finished = pyqtSignal()
+
+    def __init__(self, *, base_url: str, api_key: str, model_name: str, video_path: Path, locale: str) -> None:
+        super().__init__()
+        self.base_url = base_url
+        self.api_key = api_key
+        self.model_name = model_name
+        self.video_path = video_path
+        self.locale = locale
+
+    def run(self) -> None:
+        LOGGER.info(
+            "Cloud video understanding test started; base_url=%s model=%s video=%s",
+            self.base_url,
+            self.model_name,
+            self.video_path,
+        )
+        try:
+            frame_sequence = _build_video_frame_sequence(self.video_path)
+            request = ModelCallRequest(
+                purpose="connectivity_test_video",
+                backend="openai_compatible",
+                model_name=self.model_name,
+                base_url=self.base_url,
+                api_key=self.api_key,
+                temperature=0,
+                max_tokens=96,
+                stream=True,
+                messages=[
+                    ModelMessage(role="system", content="You are a video connectivity test assistant."),
+                    ModelMessage(
+                        role="user",
+                        content=[
+                            {
+                                "type": "text",
+                                "text": (
+                                    f"{_response_language_instruction(self.locale)} "
+                                    "The video is represented as sampled frames. "
+                                    "Describe the video's main scene in one short sentence. "
+                                    "Start with CHARA_VIDEO_OK: "
+                                ),
+                            },
+                            {"type": "video", "video": frame_sequence},
+                        ],
+                    ),
+                ],
+                metadata={"scene": "model_page_video_test"},
+            )
+            result = call_model(
+                request,
+                on_stream_delta=lambda delta: self.progressChanged.emit(delta),
+            )
+        except (ModelMiddlewareError, OSError, ValueError) as exc:
+            LOGGER.warning("Cloud video understanding test failed", exc_info=True)
+            self.failed.emit(str(exc))
+        else:
+            LOGGER.info("Cloud video understanding test succeeded")
+            self.succeeded.emit(result.content)
+        finally:
+            self.finished.emit()
+
+
+class CloudAllTestWorker(QObject):
+    progressChanged = pyqtSignal(str, str)
+    sectionStarted = pyqtSignal(str)
+    sectionFinished = pyqtSignal(str, str)
+    succeeded = pyqtSignal(dict)
+    failed = pyqtSignal(str)
+    finished = pyqtSignal()
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str,
+        model_name: str,
+        image_path: Path,
+        video_path: Path,
+        locale: str,
+    ) -> None:
+        super().__init__()
+        self.base_url = base_url
+        self.api_key = api_key
+        self.model_name = model_name
+        self.image_path = image_path
+        self.video_path = video_path
+        self.locale = locale
+
+    def run(self) -> None:
+        LOGGER.info("Cloud all-modal test started; base_url=%s model=%s", self.base_url, self.model_name)
+        try:
+            results = {
+                "text": self._run_text_test(),
+                "image": self._run_image_test(),
+                "video": self._run_video_test(),
+            }
+            self.succeeded.emit(results)
+        except (ModelMiddlewareError, OSError, ValueError) as exc:
+            LOGGER.warning("Cloud all-modal test failed", exc_info=True)
+            self.failed.emit(str(exc))
+        finally:
+            self.finished.emit()
+
+    def _safe_call(self, request: ModelCallRequest, section: str) -> dict[str, str]:
+        self.sectionStarted.emit(section)
+        try:
+            result = call_model(
+                request,
+                on_stream_delta=lambda delta: self.progressChanged.emit(section, delta),
+            )
+            payload = {"status": "ok", "content": result.content.strip()}
+            self.sectionFinished.emit(section, "ok")
+            return payload
+        except Exception as exc:  # noqa: BLE001
+            self.sectionFinished.emit(section, "error")
+            return {"status": "error", "content": str(exc)}
+
+    def _run_text_test(self) -> dict[str, str]:
+        request = ModelCallRequest(
+            purpose="connectivity_test",
+            backend="openai_compatible",
+            model_name=self.model_name,
+            base_url=self.base_url,
+            api_key=self.api_key,
+            temperature=0,
+            max_tokens=64,
+            stream=True,
+            messages=[
+                ModelMessage(role="system", content="You are a model connectivity test assistant."),
+                ModelMessage(
+                    role="user",
+                    content=(
+                        f"{_response_language_instruction(self.locale)} "
+                        "Output exactly two lines: "
+                        "MODEL: <the model id you are running as>; "
+                        "SUMMARY: <one-sentence self-introduction>."
+                    ),
+                ),
+            ],
+            metadata={"scene": "model_page_text_test"},
+        )
+        return self._safe_call(request, "text")
+
+    def _run_image_test(self) -> dict[str, str]:
+        image_data_url = _build_data_url(self.image_path, "image/jpeg")
+        request = ModelCallRequest(
+            purpose="connectivity_test_image",
+            backend="openai_compatible",
+            model_name=self.model_name,
+            base_url=self.base_url,
+            api_key=self.api_key,
+            temperature=0,
+            max_tokens=96,
+            stream=True,
+            messages=[
+                ModelMessage(role="system", content="You are a vision connectivity test assistant."),
+                ModelMessage(
+                    role="user",
+                    content=[
+                        {
+                            "type": "text",
+                            "text": (
+                                f"{_response_language_instruction(self.locale)} "
+                                "Describe the main subject in one short sentence. Start with CHARA_IMAGE_OK: "
+                            ),
+                        },
+                        {"type": "image_url", "image_url": {"url": image_data_url}},
+                    ],
+                ),
+            ],
+            metadata={"scene": "model_page_image_test"},
+        )
+        return self._safe_call(request, "image")
+
+    def _run_video_test(self) -> dict[str, str]:
+        frame_sequence = _build_video_frame_sequence(self.video_path)
+        request = ModelCallRequest(
+            purpose="connectivity_test_video",
+            backend="openai_compatible",
+            model_name=self.model_name,
+            base_url=self.base_url,
+            api_key=self.api_key,
+            temperature=0,
+            max_tokens=96,
+            stream=True,
+            messages=[
+                ModelMessage(role="system", content="You are a video connectivity test assistant."),
+                ModelMessage(
+                    role="user",
+                    content=[
+                        {
+                            "type": "text",
+                            "text": (
+                                f"{_response_language_instruction(self.locale)} "
+                                "The video is represented as sampled frames. "
+                                "Describe the video's main scene in one short sentence. "
+                                "Start with CHARA_VIDEO_OK: "
+                            ),
+                        },
+                        {"type": "video", "video": frame_sequence},
+                    ],
+                ),
+            ],
+            metadata={"scene": "model_page_video_test"},
+        )
+        return self._safe_call(request, "video")
 
 
 class LlamaCppDownloadDialog(FluentDialog):
@@ -225,6 +648,20 @@ class ModelPage(QWidget):
         self._download_dialog: LlamaCppDownloadDialog | None = None
         self._cloud_models_thread: QThread | None = None
         self._cloud_models_worker: CloudModelListWorker | None = None
+        self._cloud_text_test_thread: QThread | None = None
+        self._cloud_text_test_worker: CloudTextTestWorker | None = None
+        self._cloud_image_test_thread: QThread | None = None
+        self._cloud_image_test_worker: CloudImageTestWorker | None = None
+        self._cloud_video_test_thread: QThread | None = None
+        self._cloud_video_test_worker: CloudVideoTestWorker | None = None
+        self._cloud_all_test_thread: QThread | None = None
+        self._cloud_all_test_worker: CloudAllTestWorker | None = None
+        self._cloud_text_stream_buffer = ""
+        self._cloud_image_stream_buffer = ""
+        self._cloud_video_stream_buffer = ""
+        self._cloud_all_stream_buffers: dict[str, str] = {"text": "", "image": "", "video": ""}
+        self._cloud_all_section_status: dict[str, str] = {"text": "queued", "image": "queued", "video": "queued"}
+        self._cloud_all_final_summary = ""
         self._cloud_presets: list[CloudModelPreset] = []
         self._loading_cloud_preset = False
         self._llamacpp_ready_cache = initial_llamacpp_ready
@@ -274,6 +711,11 @@ class ModelPage(QWidget):
         self.use_cache.setChecked(True)
 
         self.test_local_model_button = PushButton(t("model.local.test"), self.local_card)
+        self.local_test_type_combo = ComboBox(self.local_card)
+        self.local_test_type_combo.addItem(t("model.test.type.all"), "all")
+        self.local_test_type_combo.addItem(t("model.test.type.text"), "text")
+        self.local_test_type_combo.addItem(t("model.test.type.image"), "image")
+        self.local_test_type_combo.addItem(t("model.test.type.video"), "video")
         self.local_test_result = PlainTextEdit(self.local_card)
         self.local_test_result.setPlaceholderText(t("model.local.test.placeholder"))
         self.local_test_result.setReadOnly(True)
@@ -282,6 +724,7 @@ class ModelPage(QWidget):
         local_form.addRow(t("model.local.select"), local_model_row)
         local_form.addRow(t("model.local.runner"), runner_row)
         local_form.addRow(t("model.local.cache"), self.use_cache)
+        local_form.addRow(t("model.test.type"), self.local_test_type_combo)
         local_form.addRow(t("model.local.test.action"), self.test_local_model_button)
         local_form.addRow(t("model.local.test.result"), self.local_test_result)
         root.addWidget(self.local_card)
@@ -325,6 +768,11 @@ class ModelPage(QWidget):
         model_name_row.addWidget(self.fetch_cloud_models_button)
 
         self.test_cloud_model_button = PushButton(t("model.cloud.test"), self.cloud_card)
+        self.cloud_test_type_combo = ComboBox(self.cloud_card)
+        self.cloud_test_type_combo.addItem(t("model.test.type.all"), "all")
+        self.cloud_test_type_combo.addItem(t("model.test.type.text"), "text")
+        self.cloud_test_type_combo.addItem(t("model.test.type.image"), "image")
+        self.cloud_test_type_combo.addItem(t("model.test.type.video"), "video")
         self.cloud_test_result = PlainTextEdit(self.cloud_card)
         self.cloud_test_result.setPlaceholderText(t("model.cloud.test.placeholder"))
         self.cloud_test_result.setReadOnly(True)
@@ -335,6 +783,7 @@ class ModelPage(QWidget):
         cloud_form.addRow(t("model.cloud.baseUrl"), self.cloud_base_url)
         cloud_form.addRow(t("model.cloud.apiKey"), self.cloud_api_key)
         cloud_form.addRow(t("model.cloud.modelName"), model_name_row)
+        cloud_form.addRow(t("model.test.type"), self.cloud_test_type_combo)
         cloud_form.addRow(t("model.cloud.test.action"), self.test_cloud_model_button)
         cloud_form.addRow(t("model.cloud.test.result"), self.cloud_test_result)
         root.addWidget(self.cloud_card)
@@ -344,9 +793,9 @@ class ModelPage(QWidget):
         self.cloud_mode_switch.checkedChanged.connect(self._set_cloud_mode)
         self.download_llamacpp_button.clicked.connect(self._download_llamacpp)
         self.refresh_local_models_button.clicked.connect(self._refresh_local_models)
-        self.test_local_model_button.clicked.connect(self._fake_test_local_model)
+        self.test_local_model_button.clicked.connect(self._test_local_model)
         self.fetch_cloud_models_button.clicked.connect(self._fetch_cloud_models)
-        self.test_cloud_model_button.clicked.connect(self._fake_test_cloud_model)
+        self.test_cloud_model_button.clicked.connect(self._test_cloud_model)
         self.cloud_preset_combo.currentIndexChanged.connect(self._load_selected_cloud_preset)
         self.save_cloud_preset_button.clicked.connect(self._save_current_cloud_preset)
         self.delete_cloud_preset_button.clicked.connect(self._delete_selected_cloud_preset)
@@ -443,6 +892,11 @@ class ModelPage(QWidget):
             return error
         return f"{error[:max_length]}..."
 
+    def _set_cloud_test_result_text(self, text: str) -> None:
+        self.cloud_test_result.setPlainText(text)
+        scrollbar = self.cloud_test_result.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
     def _refresh_local_models(self) -> None:
         selected_path = self.local_model_combo.currentData()
         candidates = self._local_model_candidates()
@@ -483,10 +937,32 @@ class ModelPage(QWidget):
     def _is_model_file(self, path: Path) -> bool:
         return path.suffix.lower() in LOCAL_MODEL_SUFFIXES
 
-    def _fake_test_local_model(self) -> None:
+    def _test_local_model(self) -> None:
+        test_type = self.local_test_type_combo.currentData() or "all"
+        if test_type == "all":
+            self.local_test_result.setPlainText(
+                t(
+                    "model.local.test.all.placeholderResult",
+                    model_path=self.local_model_combo.currentData() or t("model.local.test.empty"),
+                    runner=self.local_runner_combo.currentText(),
+                    cache=t("model.local.test.cache.enabled")
+                    if self.use_cache.isChecked()
+                    else t("model.local.test.cache.disabled"),
+                    image_asset=IMAGE_TEST_ASSET.relative_to(APP_ROOT).as_posix(),
+                    video_asset=VIDEO_TEST_ASSET.relative_to(APP_ROOT).as_posix(),
+                )
+            )
+            return
+        if test_type == "image":
+            self.local_test_result.setPlainText(t("model.test.image.placeholderResult"))
+            return
+        if test_type == "video":
+            self.local_test_result.setPlainText(t("model.test.video.placeholderResult"))
+            return
+
         self.local_test_result.setPlainText(
             t(
-                "model.local.test.fakeResult",
+                "model.local.test.text.placeholderResult",
                 model_path=self.local_model_combo.currentData() or t("model.local.test.empty"),
                 runner=self.local_runner_combo.currentText(),
                 cache=t("model.local.test.cache.enabled")
@@ -550,15 +1026,579 @@ class ModelPage(QWidget):
         self._cloud_models_thread = None
         self._cloud_models_worker = None
 
-    def _fake_test_cloud_model(self) -> None:
-        self.cloud_test_result.setPlainText(
+    def _test_cloud_model(self) -> None:
+        test_type = self.cloud_test_type_combo.currentData() or "all"
+        if test_type == "all":
+            self._test_cloud_all()
+            return
+        if test_type == "image":
+            self._test_cloud_image()
+            return
+        if test_type == "video":
+            self._test_cloud_video()
+            return
+
+        if self._is_cloud_test_running():
+            LOGGER.info("Cloud text understanding test ignored because a test is already running")
+            return
+
+        base_url = self.cloud_base_url.text().strip()
+        model_name = self.cloud_model_name.text().strip()
+        if not base_url:
+            InfoBar.warning(
+                title=t("model.cloud.test.failure.title"),
+                content=t("model.cloud.models.baseUrlRequired"),
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=4000,
+            )
+            return
+        if not model_name:
+            InfoBar.warning(
+                title=t("model.cloud.test.failure.title"),
+                content=t("model.cloud.test.modelRequired"),
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=4000,
+            )
+            return
+
+        self.test_cloud_model_button.setEnabled(False)
+        self.test_cloud_model_button.setText(t("model.cloud.test.running"))
+        locale = current_locale()
+        self._cloud_text_test_thread = QThread(self)
+        self._cloud_text_test_worker = CloudTextTestWorker(
+            base_url=base_url,
+            api_key=self.cloud_api_key.text().strip(),
+            model_name=model_name,
+            locale=locale,
+        )
+        self._cloud_text_stream_buffer = ""
+        self._cloud_text_test_worker.moveToThread(self._cloud_text_test_thread)
+        self._cloud_text_test_thread.started.connect(self._cloud_text_test_worker.run)
+        self._cloud_text_test_worker.progressChanged.connect(self._show_cloud_text_test_stream)
+        self._cloud_text_test_worker.succeeded.connect(self._show_cloud_text_test_success)
+        self._cloud_text_test_worker.failed.connect(self._show_cloud_text_test_failure)
+        self._cloud_text_test_worker.finished.connect(self._cloud_text_test_thread.quit)
+        self._cloud_text_test_worker.finished.connect(self._cloud_text_test_worker.deleteLater)
+        self._cloud_text_test_thread.finished.connect(self._cloud_text_test_thread.deleteLater)
+        self._cloud_text_test_thread.finished.connect(self._clear_cloud_text_test_worker)
+        self._cloud_text_test_thread.start()
+
+    def _test_cloud_image(self) -> None:
+        if self._is_cloud_test_running():
+            LOGGER.info("Cloud image understanding test ignored because a test is already running")
+            return
+
+        base_url = self.cloud_base_url.text().strip()
+        model_name = self.cloud_model_name.text().strip()
+        if not base_url:
+            InfoBar.warning(
+                title=t("model.cloud.test.failure.title"),
+                content=t("model.cloud.models.baseUrlRequired"),
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=4000,
+            )
+            return
+        if not model_name:
+            InfoBar.warning(
+                title=t("model.cloud.test.failure.title"),
+                content=t("model.cloud.test.modelRequired"),
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=4000,
+            )
+            return
+        if not IMAGE_TEST_ASSET.exists():
+            short_error = self._short_error(t("model.test.image.assetMissing", path=IMAGE_TEST_ASSET.as_posix()))
+            self._set_cloud_test_result_text(
+                t(
+                    "model.cloud.test.image.failureResult",
+                    provider=self.cloud_provider_combo.currentText(),
+                    base_url=base_url,
+                    model_name=model_name,
+                    asset=IMAGE_TEST_ASSET.as_posix(),
+                    error=short_error,
+                )
+            )
+            InfoBar.warning(
+                title=t("model.cloud.test.failure.title"),
+                content=short_error,
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=5000,
+            )
+            return
+
+        self.test_cloud_model_button.setEnabled(False)
+        self.test_cloud_model_button.setText(t("model.cloud.test.running"))
+        locale = current_locale()
+        self._cloud_image_test_thread = QThread(self)
+        self._cloud_image_test_worker = CloudImageTestWorker(
+            base_url=base_url,
+            api_key=self.cloud_api_key.text().strip(),
+            model_name=model_name,
+            image_path=IMAGE_TEST_ASSET,
+            locale=locale,
+        )
+        self._cloud_image_stream_buffer = ""
+        self._cloud_image_test_worker.moveToThread(self._cloud_image_test_thread)
+        self._cloud_image_test_thread.started.connect(self._cloud_image_test_worker.run)
+        self._cloud_image_test_worker.progressChanged.connect(self._show_cloud_image_test_stream)
+        self._cloud_image_test_worker.succeeded.connect(self._show_cloud_image_test_success)
+        self._cloud_image_test_worker.failed.connect(self._show_cloud_image_test_failure)
+        self._cloud_image_test_worker.finished.connect(self._cloud_image_test_thread.quit)
+        self._cloud_image_test_worker.finished.connect(self._cloud_image_test_worker.deleteLater)
+        self._cloud_image_test_thread.finished.connect(self._cloud_image_test_thread.deleteLater)
+        self._cloud_image_test_thread.finished.connect(self._clear_cloud_image_test_worker)
+        self._cloud_image_test_thread.start()
+
+    def _test_cloud_video(self) -> None:
+        if self._is_cloud_test_running():
+            LOGGER.info("Cloud video understanding test ignored because a test is already running")
+            return
+
+        base_url = self.cloud_base_url.text().strip()
+        model_name = self.cloud_model_name.text().strip()
+        if not base_url:
+            InfoBar.warning(
+                title=t("model.cloud.test.failure.title"),
+                content=t("model.cloud.models.baseUrlRequired"),
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=4000,
+            )
+            return
+        if not model_name:
+            InfoBar.warning(
+                title=t("model.cloud.test.failure.title"),
+                content=t("model.cloud.test.modelRequired"),
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=4000,
+            )
+            return
+        if not VIDEO_TEST_ASSET.exists():
+            short_error = self._short_error(t("model.test.video.assetMissing", path=VIDEO_TEST_ASSET.as_posix()))
+            self._set_cloud_test_result_text(
+                t(
+                    "model.cloud.test.video.failureResult",
+                    provider=self.cloud_provider_combo.currentText(),
+                    base_url=base_url,
+                    model_name=model_name,
+                    asset=VIDEO_TEST_ASSET.as_posix(),
+                    error=short_error,
+                )
+            )
+            InfoBar.warning(
+                title=t("model.cloud.test.failure.title"),
+                content=short_error,
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=5000,
+            )
+            return
+
+        self.test_cloud_model_button.setEnabled(False)
+        self.test_cloud_model_button.setText(t("model.cloud.test.running"))
+        locale = current_locale()
+        self._cloud_video_test_thread = QThread(self)
+        self._cloud_video_test_worker = CloudVideoTestWorker(
+            base_url=base_url,
+            api_key=self.cloud_api_key.text().strip(),
+            model_name=model_name,
+            video_path=VIDEO_TEST_ASSET,
+            locale=locale,
+        )
+        self._cloud_video_stream_buffer = ""
+        self._cloud_video_test_worker.moveToThread(self._cloud_video_test_thread)
+        self._cloud_video_test_thread.started.connect(self._cloud_video_test_worker.run)
+        self._cloud_video_test_worker.progressChanged.connect(self._show_cloud_video_test_stream)
+        self._cloud_video_test_worker.succeeded.connect(self._show_cloud_video_test_success)
+        self._cloud_video_test_worker.failed.connect(self._show_cloud_video_test_failure)
+        self._cloud_video_test_worker.finished.connect(self._cloud_video_test_thread.quit)
+        self._cloud_video_test_worker.finished.connect(self._cloud_video_test_worker.deleteLater)
+        self._cloud_video_test_thread.finished.connect(self._cloud_video_test_thread.deleteLater)
+        self._cloud_video_test_thread.finished.connect(self._clear_cloud_video_test_worker)
+        self._cloud_video_test_thread.start()
+
+    def _test_cloud_all(self) -> None:
+        if self._is_cloud_test_running():
+            LOGGER.info("Cloud all-modal test ignored because a test is already running")
+            return
+
+        base_url = self.cloud_base_url.text().strip()
+        model_name = self.cloud_model_name.text().strip()
+        if not base_url:
+            InfoBar.warning(
+                title=t("model.cloud.test.failure.title"),
+                content=t("model.cloud.models.baseUrlRequired"),
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=4000,
+            )
+            return
+        if not model_name:
+            InfoBar.warning(
+                title=t("model.cloud.test.failure.title"),
+                content=t("model.cloud.test.modelRequired"),
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=4000,
+            )
+            return
+
+        self.test_cloud_model_button.setEnabled(False)
+        self.test_cloud_model_button.setText(t("model.cloud.test.running"))
+        locale = current_locale()
+        self._cloud_all_test_thread = QThread(self)
+        self._cloud_all_test_worker = CloudAllTestWorker(
+            base_url=base_url,
+            api_key=self.cloud_api_key.text().strip(),
+            model_name=model_name,
+            image_path=IMAGE_TEST_ASSET,
+            video_path=VIDEO_TEST_ASSET,
+            locale=locale,
+        )
+        self._cloud_all_stream_buffers = {"text": "", "image": "", "video": ""}
+        self._cloud_all_section_status = {"text": "queued", "image": "queued", "video": "queued"}
+        self._cloud_all_final_summary = ""
+        self._set_cloud_test_result_text(self._render_cloud_all_report(None))
+        self._cloud_all_test_worker.moveToThread(self._cloud_all_test_thread)
+        self._cloud_all_test_thread.started.connect(self._cloud_all_test_worker.run)
+        self._cloud_all_test_worker.progressChanged.connect(self._show_cloud_all_test_stream)
+        self._cloud_all_test_worker.sectionStarted.connect(self._show_cloud_all_test_section_started)
+        self._cloud_all_test_worker.sectionFinished.connect(self._show_cloud_all_test_section_finished)
+        self._cloud_all_test_worker.succeeded.connect(self._show_cloud_all_test_result)
+        self._cloud_all_test_worker.failed.connect(self._show_cloud_all_test_failure)
+        self._cloud_all_test_worker.finished.connect(self._cloud_all_test_thread.quit)
+        self._cloud_all_test_worker.finished.connect(self._cloud_all_test_worker.deleteLater)
+        self._cloud_all_test_thread.finished.connect(self._cloud_all_test_thread.deleteLater)
+        self._cloud_all_test_thread.finished.connect(self._clear_cloud_all_test_worker)
+        self._cloud_all_test_thread.start()
+
+    def _show_cloud_text_test_success(self, content: str) -> None:
+        locale = current_locale()
+        self._set_cloud_test_result_text(
             t(
-                "model.cloud.test.fakeResult",
+                "model.cloud.test.text.successResult",
                 provider=self.cloud_provider_combo.currentText(),
                 base_url=self.cloud_base_url.text().strip() or t("model.cloud.test.empty"),
                 model_name=self.cloud_model_name.text().strip() or t("model.cloud.test.empty"),
+                target_language=_response_language_name(locale),
+                response=content.strip() or t("model.cloud.test.empty"),
             )
         )
+        InfoBar.success(
+            title=t("model.cloud.test.success.title"),
+            content=t("model.cloud.test.success.content"),
+            parent=self.window(),
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=3000,
+        )
+
+    def _show_cloud_text_test_stream(self, delta: str) -> None:
+        self._cloud_text_stream_buffer += delta
+        locale = current_locale()
+        self._set_cloud_test_result_text(
+            t(
+                "model.cloud.test.text.successResult",
+                provider=self.cloud_provider_combo.currentText(),
+                base_url=self.cloud_base_url.text().strip() or t("model.cloud.test.empty"),
+                model_name=self.cloud_model_name.text().strip() or t("model.cloud.test.empty"),
+                target_language=_response_language_name(locale),
+                response=self._cloud_text_stream_buffer or t("model.cloud.test.empty"),
+            )
+        )
+
+    def _show_cloud_text_test_failure(self, error: str) -> None:
+        short_error = self._short_error(error)
+        self._set_cloud_test_result_text(
+            t(
+                "model.cloud.test.text.failureResult",
+                provider=self.cloud_provider_combo.currentText(),
+                base_url=self.cloud_base_url.text().strip() or t("model.cloud.test.empty"),
+                model_name=self.cloud_model_name.text().strip() or t("model.cloud.test.empty"),
+                error=short_error,
+            )
+        )
+        InfoBar.warning(
+            title=t("model.cloud.test.failure.title"),
+            content=t("model.cloud.test.failure.content", error=short_error),
+            parent=self.window(),
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=7000,
+        )
+
+    def _show_cloud_image_test_success(self, content: str) -> None:
+        locale = current_locale()
+        self._set_cloud_test_result_text(
+            t(
+                "model.cloud.test.image.successResult",
+                provider=self.cloud_provider_combo.currentText(),
+                base_url=self.cloud_base_url.text().strip() or t("model.cloud.test.empty"),
+                model_name=self.cloud_model_name.text().strip() or t("model.cloud.test.empty"),
+                asset=IMAGE_TEST_ASSET.relative_to(APP_ROOT).as_posix(),
+                target_language=_response_language_name(locale),
+                response=content.strip() or t("model.cloud.test.empty"),
+            )
+        )
+        InfoBar.success(
+            title=t("model.cloud.test.success.title"),
+            content=t("model.cloud.test.success.content"),
+            parent=self.window(),
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=3000,
+        )
+
+    def _show_cloud_image_test_stream(self, delta: str) -> None:
+        self._cloud_image_stream_buffer += delta
+        locale = current_locale()
+        self._set_cloud_test_result_text(
+            t(
+                "model.cloud.test.image.successResult",
+                provider=self.cloud_provider_combo.currentText(),
+                base_url=self.cloud_base_url.text().strip() or t("model.cloud.test.empty"),
+                model_name=self.cloud_model_name.text().strip() or t("model.cloud.test.empty"),
+                asset=IMAGE_TEST_ASSET.relative_to(APP_ROOT).as_posix(),
+                target_language=_response_language_name(locale),
+                response=self._cloud_image_stream_buffer or t("model.cloud.test.empty"),
+            )
+        )
+
+    def _show_cloud_image_test_failure(self, error: str) -> None:
+        short_error = self._short_error(error)
+        self._set_cloud_test_result_text(
+            t(
+                "model.cloud.test.image.failureResult",
+                provider=self.cloud_provider_combo.currentText(),
+                base_url=self.cloud_base_url.text().strip() or t("model.cloud.test.empty"),
+                model_name=self.cloud_model_name.text().strip() or t("model.cloud.test.empty"),
+                asset=IMAGE_TEST_ASSET.relative_to(APP_ROOT).as_posix(),
+                error=short_error,
+            )
+        )
+        InfoBar.warning(
+            title=t("model.cloud.test.failure.title"),
+            content=t("model.cloud.test.failure.content", error=short_error),
+            parent=self.window(),
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=7000,
+        )
+
+    def _is_cloud_test_running(self) -> bool:
+        return any(
+            thread is not None
+            for thread in (
+                self._cloud_text_test_thread,
+                self._cloud_image_test_thread,
+                self._cloud_video_test_thread,
+                self._cloud_all_test_thread,
+            )
+        )
+
+    def _clear_cloud_text_test_worker(self) -> None:
+        self.test_cloud_model_button.setEnabled(True)
+        self.test_cloud_model_button.setText(t("model.cloud.test"))
+        self._cloud_text_test_thread = None
+        self._cloud_text_test_worker = None
+
+    def _clear_cloud_image_test_worker(self) -> None:
+        self.test_cloud_model_button.setEnabled(True)
+        self.test_cloud_model_button.setText(t("model.cloud.test"))
+        self._cloud_image_test_thread = None
+        self._cloud_image_test_worker = None
+
+    def _show_cloud_video_test_success(self, content: str) -> None:
+        locale = current_locale()
+        self._set_cloud_test_result_text(
+            t(
+                "model.cloud.test.video.successResult",
+                provider=self.cloud_provider_combo.currentText(),
+                base_url=self.cloud_base_url.text().strip() or t("model.cloud.test.empty"),
+                model_name=self.cloud_model_name.text().strip() or t("model.cloud.test.empty"),
+                asset=VIDEO_TEST_ASSET.relative_to(APP_ROOT).as_posix(),
+                target_language=_response_language_name(locale),
+                response=content.strip() or t("model.cloud.test.empty"),
+            )
+        )
+        InfoBar.success(
+            title=t("model.cloud.test.success.title"),
+            content=t("model.cloud.test.success.content"),
+            parent=self.window(),
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=3000,
+        )
+
+    def _show_cloud_video_test_stream(self, delta: str) -> None:
+        self._cloud_video_stream_buffer += delta
+        locale = current_locale()
+        self._set_cloud_test_result_text(
+            t(
+                "model.cloud.test.video.successResult",
+                provider=self.cloud_provider_combo.currentText(),
+                base_url=self.cloud_base_url.text().strip() or t("model.cloud.test.empty"),
+                model_name=self.cloud_model_name.text().strip() or t("model.cloud.test.empty"),
+                asset=VIDEO_TEST_ASSET.relative_to(APP_ROOT).as_posix(),
+                target_language=_response_language_name(locale),
+                response=self._cloud_video_stream_buffer or t("model.cloud.test.empty"),
+            )
+        )
+
+    def _show_cloud_video_test_failure(self, error: str) -> None:
+        short_error = self._short_error(error)
+        self._set_cloud_test_result_text(
+            t(
+                "model.cloud.test.video.failureResult",
+                provider=self.cloud_provider_combo.currentText(),
+                base_url=self.cloud_base_url.text().strip() or t("model.cloud.test.empty"),
+                model_name=self.cloud_model_name.text().strip() or t("model.cloud.test.empty"),
+                asset=VIDEO_TEST_ASSET.relative_to(APP_ROOT).as_posix(),
+                error=short_error,
+            )
+        )
+        InfoBar.warning(
+            title=t("model.cloud.test.failure.title"),
+            content=t("model.cloud.test.failure.content", error=short_error),
+            parent=self.window(),
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=7000,
+        )
+
+    def _clear_cloud_video_test_worker(self) -> None:
+        self.test_cloud_model_button.setEnabled(True)
+        self.test_cloud_model_button.setText(t("model.cloud.test"))
+        self._cloud_video_test_thread = None
+        self._cloud_video_test_worker = None
+
+    def _show_cloud_all_test_result(self, results: dict) -> None:
+        text_result = results.get("text", {})
+        image_result = results.get("image", {})
+        video_result = results.get("video", {})
+        locale = current_locale()
+        success_count = sum(1 for item in (text_result, image_result, video_result) if item.get("status") == "ok")
+        all_ok = success_count == 3
+        failed_items: list[str] = []
+        for key, item in (("text", text_result), ("image", image_result), ("video", video_result)):
+            if item.get("status") != "ok":
+                failed_items.append(t(f"model.test.type.{key}"))
+        summary = (
+            t("model.cloud.test.all.final.success")
+            if all_ok
+            else t("model.cloud.test.all.final.failure", failed_items=_join_failed_items(failed_items, locale))
+        )
+        if text_result.get("status") == "ok":
+            self._cloud_all_stream_buffers["text"] = text_result.get("content", "")
+            self._cloud_all_section_status["text"] = "ok"
+        else:
+            self._cloud_all_section_status["text"] = "error"
+        if image_result.get("status") == "ok":
+            self._cloud_all_stream_buffers["image"] = image_result.get("content", "")
+            self._cloud_all_section_status["image"] = "ok"
+        else:
+            self._cloud_all_section_status["image"] = "error"
+        if video_result.get("status") == "ok":
+            self._cloud_all_stream_buffers["video"] = video_result.get("content", "")
+            self._cloud_all_section_status["video"] = "ok"
+        else:
+            self._cloud_all_section_status["video"] = "error"
+        self._cloud_all_final_summary = summary
+        self._set_cloud_test_result_text(self._render_cloud_all_report(summary))
+        if all_ok:
+            InfoBar.success(
+                title=t("model.cloud.test.success.title"),
+                content=t("model.cloud.test.success.content"),
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=3000,
+            )
+        else:
+            InfoBar.warning(
+                title=t("model.cloud.test.failure.title"),
+                content=t("model.cloud.test.partialFailure.content"),
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=5000,
+            )
+
+    def _show_cloud_all_test_stream(self, section: str, delta: str) -> None:
+        if section not in self._cloud_all_stream_buffers:
+            return
+        if self._cloud_all_section_status.get(section) == "queued":
+            self._cloud_all_section_status[section] = "running"
+        self._cloud_all_stream_buffers[section] += delta
+        self._set_cloud_test_result_text(self._render_cloud_all_report(None))
+
+    def _show_cloud_all_test_section_started(self, section: str) -> None:
+        if section not in self._cloud_all_section_status:
+            return
+        self._cloud_all_section_status[section] = "running"
+        self._set_cloud_test_result_text(self._render_cloud_all_report(None))
+
+    def _show_cloud_all_test_section_finished(self, section: str, status: str) -> None:
+        if section not in self._cloud_all_section_status:
+            return
+        self._cloud_all_section_status[section] = "ok" if status == "ok" else "error"
+        self._set_cloud_test_result_text(self._render_cloud_all_report(None))
+
+    def _render_cloud_all_report(self, final_summary: str | None) -> str:
+        locale = current_locale()
+        header_lines = [
+            f"{t('model.cloud.provider')}：{self.cloud_provider_combo.currentText()}",
+            f"{t('model.cloud.baseUrl')}：{self.cloud_base_url.text().strip() or t('model.cloud.test.empty')}",
+            f"{t('model.cloud.modelName')}：{self.cloud_model_name.text().strip() or t('model.cloud.test.empty')}",
+            f"{t('model.cloud.test.report.targetLanguage')}：{_response_language_name(locale)}",
+            f"{t('model.cloud.test.report.imageAsset')}：{IMAGE_TEST_ASSET.relative_to(APP_ROOT).as_posix()}",
+            f"{t('model.cloud.test.report.videoAsset')}：{VIDEO_TEST_ASSET.relative_to(APP_ROOT).as_posix()}",
+        ]
+        sections: list[str] = []
+        for key in ("text", "image", "video"):
+            status_key = self._cloud_all_section_status.get(key, "queued")
+            content = self._cloud_all_stream_buffers.get(key, "")
+            if status_key == "queued" and not content:
+                continue
+            status_text = t(f"model.cloud.test.status.{status_key}")
+            body = content or status_text
+            sections.extend(
+                [
+                    f"[{t(f'model.test.type.{key}')}] {status_text}",
+                    body,
+                    "",
+                ]
+            )
+        if not sections:
+            sections.append(t("model.cloud.test.all.summary.running"))
+        if final_summary:
+            sections.extend(
+                [
+                    "",
+                    f"{t('model.cloud.test.report.finalSummary')}：{final_summary}",
+                ]
+            )
+        return "\n".join(header_lines + [""] + sections)
+
+    def _show_cloud_all_test_failure(self, error: str) -> None:
+        short_error = self._short_error(error)
+        self._set_cloud_test_result_text(
+            t(
+                "model.cloud.test.failure.content",
+                error=short_error,
+            )
+        )
+        InfoBar.warning(
+            title=t("model.cloud.test.failure.title"),
+            content=t("model.cloud.test.failure.content", error=short_error),
+            parent=self.window(),
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=7000,
+        )
+
+    def _clear_cloud_all_test_worker(self) -> None:
+        self.test_cloud_model_button.setEnabled(True)
+        self.test_cloud_model_button.setText(t("model.cloud.test"))
+        self._cloud_all_test_thread = None
+        self._cloud_all_test_worker = None
 
     def _refresh_cloud_presets(
         self,

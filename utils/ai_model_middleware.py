@@ -6,6 +6,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 from string import Formatter
+from collections.abc import Callable
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -20,6 +21,7 @@ USER_AGENT = "CharaPicker/0.1"
 
 MessageRole = Literal["system", "user", "assistant"]
 ModelBackend = Literal["openai_compatible", "local"]
+ModelMessageContent = str | list[dict[str, Any]]
 
 
 class ModelMiddlewareError(RuntimeError):
@@ -36,7 +38,7 @@ class ModelCallError(ModelMiddlewareError):
 
 class ModelMessage(BaseModel):
     role: MessageRole
-    content: str
+    content: ModelMessageContent
 
 
 class ModelCallRequest(BaseModel):
@@ -48,6 +50,7 @@ class ModelCallRequest(BaseModel):
     api_key: str = ""
     temperature: float = 0.2
     max_tokens: int | None = None
+    stream: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -92,6 +95,7 @@ def build_model_call_request(
     api_key: str = "",
     temperature: float = 0.2,
     max_tokens: int | None = None,
+    stream: bool = False,
     metadata: dict[str, Any] | None = None,
 ) -> ModelCallRequest:
     prompts = load_default_prompts()
@@ -118,6 +122,7 @@ def build_model_call_request(
         api_key=api_key,
         temperature=temperature,
         max_tokens=max_tokens,
+        stream=stream,
         metadata=metadata or {},
         messages=[
             ModelMessage(role="system", content=system_prompt),
@@ -126,9 +131,13 @@ def build_model_call_request(
     )
 
 
-def call_model(request: ModelCallRequest) -> ModelCallResult:
+def call_model(
+    request: ModelCallRequest,
+    *,
+    on_stream_delta: Callable[[str], None] | None = None,
+) -> ModelCallResult:
     if request.backend == "openai_compatible":
-        return _call_openai_compatible(request)
+        return _call_openai_compatible(request, on_stream_delta=on_stream_delta)
     if request.backend == "local":
         raise ModelCallError(
             "Local model execution is not wired yet; "
@@ -163,7 +172,11 @@ def _chat_completions_endpoint(base_url: str) -> str:
     return f"{base_url}/chat/completions"
 
 
-def _call_openai_compatible(request: ModelCallRequest) -> ModelCallResult:
+def _call_openai_compatible(
+    request: ModelCallRequest,
+    *,
+    on_stream_delta: Callable[[str], None] | None = None,
+) -> ModelCallResult:
     endpoint = _chat_completions_endpoint(request.base_url)
     if not request.model_name:
         raise ModelCallError("Model name is required.")
@@ -175,6 +188,8 @@ def _call_openai_compatible(request: ModelCallRequest) -> ModelCallResult:
     }
     if request.max_tokens is not None:
         payload["max_tokens"] = request.max_tokens
+    if request.stream:
+        payload["stream"] = True
 
     headers = {
         "Content-Type": "application/json",
@@ -186,11 +201,12 @@ def _call_openai_compatible(request: ModelCallRequest) -> ModelCallResult:
 
     LOGGER.info(
         "Calling model through middleware; "
-        "purpose=%s backend=%s endpoint=%s model=%s has_api_key=%s",
+        "purpose=%s backend=%s endpoint=%s model=%s stream=%s has_api_key=%s",
         request.purpose,
         request.backend,
         endpoint,
         request.model_name,
+        request.stream,
         bool(api_key),
     )
     http_request = urllib.request.Request(
@@ -201,7 +217,29 @@ def _call_openai_compatible(request: ModelCallRequest) -> ModelCallResult:
     )
     try:
         with urllib.request.urlopen(http_request, timeout=120) as response:
+            if request.stream:
+                return _read_streamed_response(response, request, on_stream_delta=on_stream_delta)
             raw = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        error_body = ""
+        try:
+            payload = exc.read()
+            if payload:
+                error_body = payload.decode("utf-8", errors="replace").strip()
+        except OSError:
+            error_body = ""
+        LOGGER.warning(
+            "Model call failed; purpose=%s endpoint=%s status=%s body=%s",
+            request.purpose,
+            endpoint,
+            exc.code,
+            error_body,
+            exc_info=True,
+        )
+        detail = f"HTTP {exc.code} {exc.reason}"
+        if error_body:
+            detail = f"{detail}: {error_body}"
+        raise ModelCallError(detail) from exc
     except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
         LOGGER.warning(
             "Model call failed; purpose=%s endpoint=%s",
@@ -215,6 +253,75 @@ def _call_openai_compatible(request: ModelCallRequest) -> ModelCallResult:
     return ModelCallResult(content=content, raw=raw, metadata=request.metadata)
 
 
+def _read_streamed_response(
+    response: Any,
+    request: ModelCallRequest,
+    *,
+    on_stream_delta: Callable[[str], None] | None = None,
+) -> ModelCallResult:
+    chunks: list[dict[str, Any]] = []
+    text_parts: list[str] = []
+    for raw_line in response:
+        line = raw_line.decode("utf-8", errors="replace").strip()
+        if not line or not line.startswith("data:"):
+            continue
+        payload_text = line[5:].strip()
+        if payload_text == "[DONE]":
+            break
+        try:
+            chunk = json.loads(payload_text)
+        except json.JSONDecodeError:
+            continue
+        chunks.append(chunk)
+        delta_text = _extract_stream_delta_text(chunk)
+        if delta_text:
+            text_parts.append(delta_text)
+            if on_stream_delta is not None:
+                for char in delta_text:
+                    on_stream_delta(char)
+
+    content = "".join(text_parts).strip()
+    if not content and chunks:
+        try:
+            content = _extract_message_content(chunks[-1]).strip()
+        except ModelCallError:
+            content = ""
+    if not content:
+        raise ModelCallError("Streamed model response does not include text content.")
+    return ModelCallResult(
+        content=content,
+        raw={"stream": True, "chunks": chunks},
+        metadata=request.metadata,
+    )
+
+
+def _extract_stream_delta_text(payload: dict[str, Any]) -> str:
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first_choice = choices[0]
+    if not isinstance(first_choice, dict):
+        return ""
+    delta = first_choice.get("delta")
+    if not isinstance(delta, dict):
+        return ""
+    content = delta.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") != "text":
+                continue
+            text = item.get("text")
+            if isinstance(text, str):
+                text_parts.append(text)
+        return "".join(text_parts)
+    return ""
+
+
 def _extract_message_content(payload: dict[str, Any]) -> str:
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices:
@@ -226,6 +333,18 @@ def _extract_message_content(payload: dict[str, Any]) -> str:
     if not isinstance(message, dict):
         raise ModelCallError("Model response choice does not include a message.")
     content = message.get("content")
-    if not isinstance(content, str):
-        raise ModelCallError("Model response message content is not text.")
-    return content
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") != "text":
+                continue
+            text = item.get("text")
+            if isinstance(text, str):
+                text_parts.append(text)
+        if text_parts:
+            return "\n".join(text_parts)
+    raise ModelCallError("Model response message content is not text.")
