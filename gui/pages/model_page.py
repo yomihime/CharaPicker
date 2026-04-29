@@ -70,6 +70,16 @@ LOCALE_LANGUAGE_HINTS = {
 }
 
 
+def _token_usage_log_fields(metadata: dict) -> tuple[int | None, int | None, int | None]:
+    usage = metadata.get("token_usage")
+    if not isinstance(usage, dict):
+        return (None, None, None)
+    prompt_tokens = usage.get("prompt_tokens") if isinstance(usage.get("prompt_tokens"), int) else None
+    completion_tokens = usage.get("completion_tokens") if isinstance(usage.get("completion_tokens"), int) else None
+    total_tokens = usage.get("total_tokens") if isinstance(usage.get("total_tokens"), int) else None
+    return (prompt_tokens, completion_tokens, total_tokens)
+
+
 def _build_data_url(asset_path: Path, default_mime: str) -> str:
     if not asset_path.exists():
         raise ModelMiddlewareError(f"Test asset does not exist: {asset_path}")
@@ -249,7 +259,13 @@ class CloudTextTestWorker(QObject):
             LOGGER.warning("Cloud text understanding test failed", exc_info=True)
             self.failed.emit(str(exc))
         else:
-            LOGGER.info("Cloud text understanding test succeeded")
+            prompt_tokens, completion_tokens, total_tokens = _token_usage_log_fields(result.metadata)
+            LOGGER.info(
+                "Cloud text understanding test succeeded; prompt_tokens=%s completion_tokens=%s total_tokens=%s",
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
+            )
             self.succeeded.emit(result.content)
         finally:
             self.finished.emit()
@@ -313,7 +329,13 @@ class CloudImageTestWorker(QObject):
             LOGGER.warning("Cloud image understanding test failed", exc_info=True)
             self.failed.emit(str(exc))
         else:
-            LOGGER.info("Cloud image understanding test succeeded")
+            prompt_tokens, completion_tokens, total_tokens = _token_usage_log_fields(result.metadata)
+            LOGGER.info(
+                "Cloud image understanding test succeeded; prompt_tokens=%s completion_tokens=%s total_tokens=%s",
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
+            )
             self.succeeded.emit(result.content)
         finally:
             self.finished.emit()
@@ -379,7 +401,13 @@ class CloudVideoTestWorker(QObject):
             LOGGER.warning("Cloud video understanding test failed", exc_info=True)
             self.failed.emit(str(exc))
         else:
-            LOGGER.info("Cloud video understanding test succeeded")
+            prompt_tokens, completion_tokens, total_tokens = _token_usage_log_fields(result.metadata)
+            LOGGER.info(
+                "Cloud video understanding test succeeded; prompt_tokens=%s completion_tokens=%s total_tokens=%s",
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
+            )
             self.succeeded.emit(result.content)
         finally:
             self.finished.emit()
@@ -432,6 +460,14 @@ class CloudAllTestWorker(QObject):
             result = call_model(
                 request,
                 on_stream_delta=lambda delta: self.progressChanged.emit(section, delta),
+            )
+            prompt_tokens, completion_tokens, total_tokens = _token_usage_log_fields(result.metadata)
+            LOGGER.info(
+                "Cloud all-modal section succeeded; section=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s",
+                section,
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
             )
             payload = {"status": "ok", "content": result.content.strip()}
             self.sectionFinished.emit(section, "ok")

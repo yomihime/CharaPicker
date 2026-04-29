@@ -190,6 +190,7 @@ def _call_openai_compatible(
         payload["max_tokens"] = request.max_tokens
     if request.stream:
         payload["stream"] = True
+        payload["stream_options"] = {"include_usage": True}
 
     headers = {
         "Content-Type": "application/json",
@@ -250,7 +251,20 @@ def _call_openai_compatible(
         raise ModelCallError(str(exc)) from exc
 
     content = _extract_message_content(raw)
-    return ModelCallResult(content=content, raw=raw, metadata=request.metadata)
+    usage = _extract_token_usage(raw)
+    if usage:
+        LOGGER.info(
+            "Model token usage; purpose=%s model=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s",
+            request.purpose,
+            request.model_name,
+            usage.get("prompt_tokens"),
+            usage.get("completion_tokens"),
+            usage.get("total_tokens"),
+        )
+    metadata = dict(request.metadata)
+    if usage:
+        metadata["token_usage"] = usage
+    return ModelCallResult(content=content, raw=raw, metadata=metadata)
 
 
 def _read_streamed_response(
@@ -288,11 +302,56 @@ def _read_streamed_response(
             content = ""
     if not content:
         raise ModelCallError("Streamed model response does not include text content.")
+    usage = _extract_token_usage_from_chunks(chunks)
+    if usage:
+        LOGGER.info(
+            "Model token usage (stream); purpose=%s model=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s",
+            request.purpose,
+            request.model_name,
+            usage.get("prompt_tokens"),
+            usage.get("completion_tokens"),
+            usage.get("total_tokens"),
+        )
+    metadata = dict(request.metadata)
+    if usage:
+        metadata["token_usage"] = usage
     return ModelCallResult(
         content=content,
         raw={"stream": True, "chunks": chunks},
-        metadata=request.metadata,
+        metadata=metadata,
     )
+
+
+def _extract_token_usage(payload: dict[str, Any]) -> dict[str, int]:
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        return {}
+    prompt_tokens = usage.get("prompt_tokens")
+    if not isinstance(prompt_tokens, int):
+        prompt_tokens = usage.get("input_tokens")
+    completion_tokens = usage.get("completion_tokens")
+    if not isinstance(completion_tokens, int):
+        completion_tokens = usage.get("output_tokens")
+    total_tokens = usage.get("total_tokens")
+    if not isinstance(total_tokens, int) and isinstance(prompt_tokens, int) and isinstance(completion_tokens, int):
+        total_tokens = prompt_tokens + completion_tokens
+
+    normalized: dict[str, int] = {}
+    if isinstance(prompt_tokens, int):
+        normalized["prompt_tokens"] = prompt_tokens
+    if isinstance(completion_tokens, int):
+        normalized["completion_tokens"] = completion_tokens
+    if isinstance(total_tokens, int):
+        normalized["total_tokens"] = total_tokens
+    return normalized
+
+
+def _extract_token_usage_from_chunks(chunks: list[dict[str, Any]]) -> dict[str, int]:
+    for chunk in reversed(chunks):
+        usage = _extract_token_usage(chunk)
+        if usage:
+            return usage
+    return {}
 
 
 def _extract_stream_delta_text(payload: dict[str, Any]) -> str:
