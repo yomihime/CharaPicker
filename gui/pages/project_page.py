@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 )
 from qfluentwidgets import (
     BodyLabel,
+    CaptionLabel,
     CardWidget,
     CheckBox,
     ComboBox,
@@ -674,10 +675,14 @@ class ProjectPage(QWidget):
 
         insight_header = QHBoxLayout()
         insight_header.addWidget(SubtitleLabel(t("project.insights.title"), insight_card))
-        insight_header.addStretch(1)
         insight_layout.addLayout(insight_header)
 
-        insight_layout.addWidget(BodyLabel(t("project.progress.label"), insight_card))
+        progress_header = QHBoxLayout()
+        progress_header.addWidget(BodyLabel(t("project.progress.label"), insight_card))
+        progress_header.addStretch(1)
+        self.token_usage_label = CaptionLabel(t("model.cloud.test.tokenUsage.empty"), insight_card)
+        progress_header.addWidget(self.token_usage_label, 0, Qt.AlignmentFlag.AlignRight)
+        insight_layout.addLayout(progress_header)
         self.progress = ProgressBar(insight_card)
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
@@ -750,10 +755,39 @@ class ProjectPage(QWidget):
 
     def clear_events(self) -> None:
         self.progress.setValue(0)
+        self.token_usage_label.setText(t("model.cloud.test.tokenUsage.empty"))
         self.stream_panel.clear_events()
 
     def set_progress(self, value: int) -> None:
         self.progress.setValue(value)
+
+    def set_token_usage(self, token_usage: dict[str, int] | None) -> None:
+        usage = token_usage if isinstance(token_usage, dict) else {}
+        char_count = usage.get("char_count")
+        if isinstance(char_count, int):
+            self.token_usage_label.setText(
+                t(
+                    "model.cloud.test.tokenUsage",
+                    prompt_tokens="-",
+                    completion_tokens="-",
+                    total_tokens=f"~{char_count}",
+                )
+            )
+            return
+        prompt_tokens = usage.get("prompt_tokens")
+        completion_tokens = usage.get("completion_tokens")
+        total_tokens = usage.get("total_tokens")
+        if not any(isinstance(value, int) for value in (prompt_tokens, completion_tokens, total_tokens)):
+            self.token_usage_label.setText(t("model.cloud.test.tokenUsage.empty"))
+            return
+        self.token_usage_label.setText(
+            t(
+                "model.cloud.test.tokenUsage",
+                prompt_tokens=prompt_tokens if isinstance(prompt_tokens, int) else "-",
+                completion_tokens=completion_tokens if isinstance(completion_tokens, int) else "-",
+                total_tokens=total_tokens if isinstance(total_tokens, int) else "-",
+            )
+        )
 
     def apply_theme_colors(self) -> None:
         if isDarkTheme():

@@ -53,7 +53,8 @@ class InsightCard(CardWidget):
         timeline = QVBoxLayout()
         timeline.setContentsMargins(0, 4, 0, 4)
         timeline.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        timeline.addWidget(TimelineMarker(color))
+        self._marker = TimelineMarker(color)
+        timeline.addWidget(self._marker)
 
         line = QFrame(self)
         line.setFixedWidth(2)
@@ -66,19 +67,38 @@ class InsightCard(CardWidget):
         content.setSpacing(6)
 
         header = QHBoxLayout()
-        title = StrongBodyLabel(event.get("title", t("insight.untitled")), self)
-        status_label = CaptionLabel(t(STATUS_TEXT.get(status, "insight.status.queued")), self)
-        status_label.setStyleSheet(f"color: {color};")
-        header.addWidget(title, 1)
-        header.addWidget(status_label, 0, Qt.AlignmentFlag.AlignRight)
+        self.title_label = StrongBodyLabel(event.get("title", t("insight.untitled")), self)
+        self.status_label = CaptionLabel(t(STATUS_TEXT.get(status, "insight.status.queued")), self)
+        self.status_label.setStyleSheet(f"color: {color};")
+        header.addWidget(self.title_label, 1)
+        header.addWidget(self.status_label, 0, Qt.AlignmentFlag.AlignRight)
 
-        description = BodyLabel(event.get("description", ""), self)
-        description.setWordWrap(True)
-        description.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.description_label = BodyLabel(event.get("description", ""), self)
+        self.description_label.setWordWrap(True)
+        self.description_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
         content.addLayout(header)
-        content.addWidget(description)
+        content.addWidget(self.description_label)
         layout.addLayout(content, 1)
+        self._line = line
+        self._status = status
+
+    def update_event(self, event: dict) -> None:
+        status = event.get("status", self._status)
+        color = INSIGHT_STATUS_COLORS.get(
+            status,
+            INSIGHT_STATUS_COLORS[InsightStatus.QUEUED.value],
+        )
+        self._status = status
+        self.title_label.setText(event.get("title", t("insight.untitled")))
+        self.description_label.setText(event.get("description", ""))
+        self.status_label.setText(t(STATUS_TEXT.get(status, "insight.status.queued")))
+        self.status_label.setStyleSheet(f"color: {color};")
+        self._line.setStyleSheet(f"background: {color}; border: none;")
+        self._marker.setStyleSheet(
+            "border-radius: 6px;"
+            f"background: {color};"
+        )
 
 
 class InsightStreamPanel(ScrollArea):
@@ -101,17 +121,28 @@ class InsightStreamPanel(ScrollArea):
         self.layout.setAlignment(self.empty_label, Qt.AlignmentFlag.AlignCenter)
 
         self.setWidget(self.container)
+        self._stream_cards: dict[str, InsightCard] = {}
         self.apply_theme_colors()
 
     def set_empty_text_key(self, key: str) -> None:
         self.empty_label.setText(t(key))
 
     def append_event(self, event: dict) -> None:
+        meta = event.get("meta")
+        stream_id = meta.get("stream_id") if isinstance(meta, dict) else None
+        is_update = bool(meta.get("update")) if isinstance(meta, dict) else False
+        if isinstance(stream_id, str) and is_update and stream_id in self._stream_cards:
+            self._stream_cards[stream_id].update_event(event)
+            return
         if self.empty_label.isVisible():
             self.empty_label.hide()
-        self.layout.addWidget(InsightCard(event, self.container))
+        card = InsightCard(event, self.container)
+        self.layout.addWidget(card)
+        if isinstance(stream_id, str):
+            self._stream_cards[stream_id] = card
 
     def clear_events(self) -> None:
+        self._stream_cards.clear()
         while self.layout.count():
             item = self.layout.takeAt(0)
             widget = item.widget()
