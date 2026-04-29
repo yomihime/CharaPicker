@@ -32,6 +32,7 @@ from qfluentwidgets import (
 )
 
 from gui.widgets.dialog_middleware import FluentDialog
+from gui.widgets.streaming_text_session import StreamingTextSession
 from utils.cloud_models import CloudModelListError, fetch_openai_compatible_models
 from utils.cloud_model_presets import (
     CloudModelPreset,
@@ -729,6 +730,8 @@ class ModelPage(QWidget):
         self._cloud_all_token_usage: dict[str, dict[str, int]] = {"text": {}, "image": {}, "video": {}}
         self._cloud_all_section_status: dict[str, str] = {"text": "queued", "image": "queued", "video": "queued"}
         self._cloud_all_final_summary = ""
+        self._cloud_stream_session: StreamingTextSession | None = None
+        self._cloud_stream_kind = ""
         self._cloud_presets: list[CloudModelPreset] = []
         self._loading_cloud_preset = False
         self._llamacpp_ready_cache = initial_llamacpp_ready
@@ -844,6 +847,7 @@ class ModelPage(QWidget):
         self.cloud_test_result.setPlaceholderText(t("model.cloud.test.placeholder"))
         self.cloud_test_result.setReadOnly(True)
         self.cloud_test_result.setMinimumHeight(96)
+        self._cloud_stream_session = StreamingTextSession(self.cloud_test_result)
 
         cloud_form.addRow(t("model.cloud.preset"), preset_row)
         cloud_form.addRow(t("model.cloud.provider"), self.cloud_provider_combo)
@@ -960,9 +964,64 @@ class ModelPage(QWidget):
         return f"{error[:max_length]}..."
 
     def _set_cloud_test_result_text(self, text: str) -> None:
-        self.cloud_test_result.setPlainText(text)
-        scrollbar = self.cloud_test_result.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        if self._cloud_stream_session is not None:
+            self._cloud_stream_session.reset(text)
+        else:
+            self.cloud_test_result.setPlainText(text)
+            scrollbar = self.cloud_test_result.verticalScrollBar()
+            scrollbar.setValue(scrollbar.maximum())
+
+    def _start_cloud_stream_render(self, kind: str) -> None:
+        if self._cloud_stream_session is None:
+            return
+        if self._cloud_stream_session.active and self._cloud_stream_kind == kind:
+            return
+        self._cloud_stream_kind = kind
+        self._cloud_stream_session.start(self._build_cloud_stream_header(kind))
+
+    def _append_cloud_stream_delta(self, kind: str, delta: str) -> None:
+        if not delta:
+            return
+        if self._cloud_stream_session is None:
+            return
+        self._start_cloud_stream_render(kind)
+        self._cloud_stream_session.append_delta(delta)
+
+    def _build_cloud_stream_header(self, kind: str) -> str:
+        locale = current_locale()
+        base_url = self.cloud_base_url.text().strip() or t("model.cloud.test.empty")
+        model_name = self.cloud_model_name.text().strip() or t("model.cloud.test.empty")
+        provider = self.cloud_provider_combo.currentText()
+        if kind == "text":
+            return t(
+                "model.cloud.test.text.successResult",
+                provider=provider,
+                base_url=base_url,
+                model_name=model_name,
+                target_language=_response_language_name(locale),
+                response="",
+            )
+        if kind == "image":
+            return t(
+                "model.cloud.test.image.successResult",
+                provider=provider,
+                base_url=base_url,
+                model_name=model_name,
+                asset=IMAGE_TEST_ASSET.relative_to(APP_ROOT).as_posix(),
+                target_language=_response_language_name(locale),
+                response="",
+            )
+        if kind == "video":
+            return t(
+                "model.cloud.test.video.successResult",
+                provider=provider,
+                base_url=base_url,
+                model_name=model_name,
+                asset=VIDEO_TEST_ASSET.relative_to(APP_ROOT).as_posix(),
+                target_language=_response_language_name(locale),
+                response="",
+            )
+        return ""
 
     def _refresh_local_models(self) -> None:
         selected_path = self.local_model_combo.currentData()
@@ -1132,6 +1191,7 @@ class ModelPage(QWidget):
 
         self.test_cloud_model_button.setEnabled(False)
         self.test_cloud_model_button.setText(t("model.cloud.test.running"))
+        self._cloud_stream_kind = ""
         locale = current_locale()
         self._cloud_text_test_thread = QThread(self)
         self._cloud_text_test_worker = CloudTextTestWorker(
@@ -1200,6 +1260,7 @@ class ModelPage(QWidget):
 
         self.test_cloud_model_button.setEnabled(False)
         self.test_cloud_model_button.setText(t("model.cloud.test.running"))
+        self._cloud_stream_kind = ""
         locale = current_locale()
         self._cloud_image_test_thread = QThread(self)
         self._cloud_image_test_worker = CloudImageTestWorker(
@@ -1269,6 +1330,7 @@ class ModelPage(QWidget):
 
         self.test_cloud_model_button.setEnabled(False)
         self.test_cloud_model_button.setText(t("model.cloud.test.running"))
+        self._cloud_stream_kind = ""
         locale = current_locale()
         self._cloud_video_test_thread = QThread(self)
         self._cloud_video_test_worker = CloudVideoTestWorker(
@@ -1371,17 +1433,7 @@ class ModelPage(QWidget):
 
     def _show_cloud_text_test_stream(self, delta: str) -> None:
         self._cloud_text_stream_buffer += delta
-        locale = current_locale()
-        self._set_cloud_test_result_text(
-            t(
-                "model.cloud.test.text.successResult",
-                provider=self.cloud_provider_combo.currentText(),
-                base_url=self.cloud_base_url.text().strip() or t("model.cloud.test.empty"),
-                model_name=self.cloud_model_name.text().strip() or t("model.cloud.test.empty"),
-                target_language=_response_language_name(locale),
-                response=self._cloud_text_stream_buffer or t("model.cloud.test.empty"),
-            )
-        )
+        self._append_cloud_stream_delta("text", delta)
 
     def _show_cloud_text_test_failure(self, error: str) -> None:
         short_error = self._short_error(error)
@@ -1428,18 +1480,7 @@ class ModelPage(QWidget):
 
     def _show_cloud_image_test_stream(self, delta: str) -> None:
         self._cloud_image_stream_buffer += delta
-        locale = current_locale()
-        self._set_cloud_test_result_text(
-            t(
-                "model.cloud.test.image.successResult",
-                provider=self.cloud_provider_combo.currentText(),
-                base_url=self.cloud_base_url.text().strip() or t("model.cloud.test.empty"),
-                model_name=self.cloud_model_name.text().strip() or t("model.cloud.test.empty"),
-                asset=IMAGE_TEST_ASSET.relative_to(APP_ROOT).as_posix(),
-                target_language=_response_language_name(locale),
-                response=self._cloud_image_stream_buffer or t("model.cloud.test.empty"),
-            )
-        )
+        self._append_cloud_stream_delta("image", delta)
 
     def _show_cloud_image_test_failure(self, error: str) -> None:
         short_error = self._short_error(error)
@@ -1510,18 +1551,7 @@ class ModelPage(QWidget):
 
     def _show_cloud_video_test_stream(self, delta: str) -> None:
         self._cloud_video_stream_buffer += delta
-        locale = current_locale()
-        self._set_cloud_test_result_text(
-            t(
-                "model.cloud.test.video.successResult",
-                provider=self.cloud_provider_combo.currentText(),
-                base_url=self.cloud_base_url.text().strip() or t("model.cloud.test.empty"),
-                model_name=self.cloud_model_name.text().strip() or t("model.cloud.test.empty"),
-                asset=VIDEO_TEST_ASSET.relative_to(APP_ROOT).as_posix(),
-                target_language=_response_language_name(locale),
-                response=self._cloud_video_stream_buffer or t("model.cloud.test.empty"),
-            )
-        )
+        self._append_cloud_stream_delta("video", delta)
 
     def _show_cloud_video_test_failure(self, error: str) -> None:
         short_error = self._short_error(error)
