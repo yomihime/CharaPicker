@@ -236,6 +236,8 @@
   "model.cloud.test.report.imageAsset": "Image asset",
   "model.cloud.test.report.videoAsset": "Video asset",
   "model.cloud.test.report.finalSummary": "Final summary",
+  "model.cloud.test.tokenUsage": "Token usage: prompt={prompt_tokens}, completion={completion_tokens}, total={total_tokens}",
+  "model.cloud.test.tokenUsage.empty": "Token usage: unavailable",
   "model.test.type": "Test Type",
   "model.test.type.all": "Run All (Default)",
   "model.test.type.text": "Text Understanding",

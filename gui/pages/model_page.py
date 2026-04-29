@@ -80,6 +80,32 @@ def _token_usage_log_fields(metadata: dict) -> tuple[int | None, int | None, int
     return (prompt_tokens, completion_tokens, total_tokens)
 
 
+def _token_usage_from_metadata(metadata: dict) -> dict[str, int]:
+    usage = metadata.get("token_usage")
+    if not isinstance(usage, dict):
+        return {}
+    normalized: dict[str, int] = {}
+    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = usage.get(key)
+        if isinstance(value, int):
+            normalized[key] = value
+    return normalized
+
+
+def _format_token_usage_line(token_usage: dict[str, int]) -> str:
+    prompt_tokens = token_usage.get("prompt_tokens")
+    completion_tokens = token_usage.get("completion_tokens")
+    total_tokens = token_usage.get("total_tokens")
+    if not any(isinstance(value, int) for value in (prompt_tokens, completion_tokens, total_tokens)):
+        return t("model.cloud.test.tokenUsage.empty")
+    return t(
+        "model.cloud.test.tokenUsage",
+        prompt_tokens=prompt_tokens if isinstance(prompt_tokens, int) else "-",
+        completion_tokens=completion_tokens if isinstance(completion_tokens, int) else "-",
+        total_tokens=total_tokens if isinstance(total_tokens, int) else "-",
+    )
+
+
 def _build_data_url(asset_path: Path, default_mime: str) -> str:
     if not asset_path.exists():
         raise ModelMiddlewareError(f"Test asset does not exist: {asset_path}")
@@ -210,7 +236,7 @@ class CloudModelListWorker(QObject):
 
 class CloudTextTestWorker(QObject):
     progressChanged = pyqtSignal(str)
-    succeeded = pyqtSignal(str)
+    succeeded = pyqtSignal(dict)
     failed = pyqtSignal(str)
     finished = pyqtSignal()
 
@@ -266,14 +292,14 @@ class CloudTextTestWorker(QObject):
                 completion_tokens,
                 total_tokens,
             )
-            self.succeeded.emit(result.content)
+            self.succeeded.emit({"content": result.content, "token_usage": _token_usage_from_metadata(result.metadata)})
         finally:
             self.finished.emit()
 
 
 class CloudImageTestWorker(QObject):
     progressChanged = pyqtSignal(str)
-    succeeded = pyqtSignal(str)
+    succeeded = pyqtSignal(dict)
     failed = pyqtSignal(str)
     finished = pyqtSignal()
 
@@ -336,14 +362,14 @@ class CloudImageTestWorker(QObject):
                 completion_tokens,
                 total_tokens,
             )
-            self.succeeded.emit(result.content)
+            self.succeeded.emit({"content": result.content, "token_usage": _token_usage_from_metadata(result.metadata)})
         finally:
             self.finished.emit()
 
 
 class CloudVideoTestWorker(QObject):
     progressChanged = pyqtSignal(str)
-    succeeded = pyqtSignal(str)
+    succeeded = pyqtSignal(dict)
     failed = pyqtSignal(str)
     finished = pyqtSignal()
 
@@ -408,7 +434,7 @@ class CloudVideoTestWorker(QObject):
                 completion_tokens,
                 total_tokens,
             )
-            self.succeeded.emit(result.content)
+            self.succeeded.emit({"content": result.content, "token_usage": _token_usage_from_metadata(result.metadata)})
         finally:
             self.finished.emit()
 
@@ -454,7 +480,7 @@ class CloudAllTestWorker(QObject):
         finally:
             self.finished.emit()
 
-    def _safe_call(self, request: ModelCallRequest, section: str) -> dict[str, str]:
+    def _safe_call(self, request: ModelCallRequest, section: str) -> dict[str, Any]:
         self.sectionStarted.emit(section)
         try:
             result = call_model(
@@ -469,7 +495,11 @@ class CloudAllTestWorker(QObject):
                 completion_tokens,
                 total_tokens,
             )
-            payload = {"status": "ok", "content": result.content.strip()}
+            payload = {
+                "status": "ok",
+                "content": result.content.strip(),
+                "token_usage": _token_usage_from_metadata(result.metadata),
+            }
             self.sectionFinished.emit(section, "ok")
             return payload
         except Exception as exc:  # noqa: BLE001
@@ -696,6 +726,7 @@ class ModelPage(QWidget):
         self._cloud_image_stream_buffer = ""
         self._cloud_video_stream_buffer = ""
         self._cloud_all_stream_buffers: dict[str, str] = {"text": "", "image": "", "video": ""}
+        self._cloud_all_token_usage: dict[str, dict[str, int]] = {"text": {}, "image": {}, "video": {}}
         self._cloud_all_section_status: dict[str, str] = {"text": "queued", "image": "queued", "video": "queued"}
         self._cloud_all_final_summary = ""
         self._cloud_presets: list[CloudModelPreset] = []
@@ -1298,6 +1329,7 @@ class ModelPage(QWidget):
             locale=locale,
         )
         self._cloud_all_stream_buffers = {"text": "", "image": "", "video": ""}
+        self._cloud_all_token_usage = {"text": {}, "image": {}, "video": {}}
         self._cloud_all_section_status = {"text": "queued", "image": "queued", "video": "queued"}
         self._cloud_all_final_summary = ""
         self._set_cloud_test_result_text(self._render_cloud_all_report(None))
@@ -1314,7 +1346,10 @@ class ModelPage(QWidget):
         self._cloud_all_test_thread.finished.connect(self._clear_cloud_all_test_worker)
         self._cloud_all_test_thread.start()
 
-    def _show_cloud_text_test_success(self, content: str) -> None:
+    def _show_cloud_text_test_success(self, payload: dict) -> None:
+        content = str(payload.get("content", "")).strip() or t("model.cloud.test.empty")
+        token_usage = payload.get("token_usage") if isinstance(payload.get("token_usage"), dict) else {}
+        response = f"{content}\n{_format_token_usage_line(token_usage)}"
         locale = current_locale()
         self._set_cloud_test_result_text(
             t(
@@ -1323,7 +1358,7 @@ class ModelPage(QWidget):
                 base_url=self.cloud_base_url.text().strip() or t("model.cloud.test.empty"),
                 model_name=self.cloud_model_name.text().strip() or t("model.cloud.test.empty"),
                 target_language=_response_language_name(locale),
-                response=content.strip() or t("model.cloud.test.empty"),
+                response=response,
             )
         )
         InfoBar.success(
@@ -1367,7 +1402,10 @@ class ModelPage(QWidget):
             duration=7000,
         )
 
-    def _show_cloud_image_test_success(self, content: str) -> None:
+    def _show_cloud_image_test_success(self, payload: dict) -> None:
+        content = str(payload.get("content", "")).strip() or t("model.cloud.test.empty")
+        token_usage = payload.get("token_usage") if isinstance(payload.get("token_usage"), dict) else {}
+        response = f"{content}\n{_format_token_usage_line(token_usage)}"
         locale = current_locale()
         self._set_cloud_test_result_text(
             t(
@@ -1377,7 +1415,7 @@ class ModelPage(QWidget):
                 model_name=self.cloud_model_name.text().strip() or t("model.cloud.test.empty"),
                 asset=IMAGE_TEST_ASSET.relative_to(APP_ROOT).as_posix(),
                 target_language=_response_language_name(locale),
-                response=content.strip() or t("model.cloud.test.empty"),
+                response=response,
             )
         )
         InfoBar.success(
@@ -1446,7 +1484,10 @@ class ModelPage(QWidget):
         self._cloud_image_test_thread = None
         self._cloud_image_test_worker = None
 
-    def _show_cloud_video_test_success(self, content: str) -> None:
+    def _show_cloud_video_test_success(self, payload: dict) -> None:
+        content = str(payload.get("content", "")).strip() or t("model.cloud.test.empty")
+        token_usage = payload.get("token_usage") if isinstance(payload.get("token_usage"), dict) else {}
+        response = f"{content}\n{_format_token_usage_line(token_usage)}"
         locale = current_locale()
         self._set_cloud_test_result_text(
             t(
@@ -1456,7 +1497,7 @@ class ModelPage(QWidget):
                 model_name=self.cloud_model_name.text().strip() or t("model.cloud.test.empty"),
                 asset=VIDEO_TEST_ASSET.relative_to(APP_ROOT).as_posix(),
                 target_language=_response_language_name(locale),
-                response=content.strip() or t("model.cloud.test.empty"),
+                response=response,
             )
         )
         InfoBar.success(
@@ -1527,18 +1568,24 @@ class ModelPage(QWidget):
         if text_result.get("status") == "ok":
             self._cloud_all_stream_buffers["text"] = text_result.get("content", "")
             self._cloud_all_section_status["text"] = "ok"
+            self._cloud_all_token_usage["text"] = text_result.get("token_usage", {})
         else:
             self._cloud_all_section_status["text"] = "error"
+            self._cloud_all_token_usage["text"] = {}
         if image_result.get("status") == "ok":
             self._cloud_all_stream_buffers["image"] = image_result.get("content", "")
             self._cloud_all_section_status["image"] = "ok"
+            self._cloud_all_token_usage["image"] = image_result.get("token_usage", {})
         else:
             self._cloud_all_section_status["image"] = "error"
+            self._cloud_all_token_usage["image"] = {}
         if video_result.get("status") == "ok":
             self._cloud_all_stream_buffers["video"] = video_result.get("content", "")
             self._cloud_all_section_status["video"] = "ok"
+            self._cloud_all_token_usage["video"] = video_result.get("token_usage", {})
         else:
             self._cloud_all_section_status["video"] = "error"
+            self._cloud_all_token_usage["video"] = {}
         self._cloud_all_final_summary = summary
         self._set_cloud_test_result_text(self._render_cloud_all_report(summary))
         if all_ok:
@@ -1592,14 +1639,17 @@ class ModelPage(QWidget):
         for key in ("text", "image", "video"):
             status_key = self._cloud_all_section_status.get(key, "queued")
             content = self._cloud_all_stream_buffers.get(key, "")
+            token_usage = self._cloud_all_token_usage.get(key, {})
             if status_key == "queued" and not content:
                 continue
             status_text = t(f"model.cloud.test.status.{status_key}")
             body = content or status_text
+            token_line = _format_token_usage_line(token_usage) if status_key == "ok" else ""
             sections.extend(
                 [
                     f"[{t(f'model.test.type.{key}')}] {status_text}",
                     body,
+                    token_line,
                     "",
                 ]
             )
