@@ -320,6 +320,8 @@
   "insight.status.warning": "需留意",
   "insight.untitled": "未命名小洞察",
   "insight.empty": "點「開始預覽」後，拾卡姬會把關鍵發現一條條放在這裡。",
+  "insight.empty.preview": "點「開始預覽」後，拾卡姬會把關鍵發現一條條放在這裡。",
+  "insight.empty.fullExtraction": "點「開始提取」後，拾卡姬會把關鍵發現一條條放在這裡。",
   "insightsPage.title": "洞察小溪",
   "extractor.noTarget": "未指定角色",
   "extractor.config.title": "翻開專案設定",

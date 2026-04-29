@@ -817,8 +817,11 @@ class ProjectPage(QWidget):
         self.previewRequested.emit(self.current_config())
 
     def _sync_preview_button_text(self) -> None:
-        key = "project.preview" if self.mode_combo.currentIndex() == 0 else "project.fullExtraction"
-        self.preview_button.setText(t(key))
+        is_preview_mode = self.mode_combo.currentIndex() == 0
+        button_key = "project.preview" if is_preview_mode else "project.fullExtraction"
+        empty_key = "insight.empty.preview" if is_preview_mode else "insight.empty.fullExtraction"
+        self.preview_button.setText(t(button_key))
+        self.stream_panel.set_empty_text_key(empty_key)
 
     def _refresh_ffmpeg_state(self, *, force_probe: bool = False) -> None:
         requires_ffmpeg = self._current_processing_config().preset != SourceProcessingPreset.ORIGINAL

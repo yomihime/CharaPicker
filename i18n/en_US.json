@@ -320,6 +320,8 @@
   "insight.status.warning": "Review",
   "insight.untitled": "Untitled little insight",
   "insight.empty": "Click \"Start Preview\" and CharaPicker will place key findings here one by one.",
+  "insight.empty.preview": "Click \"Start Preview\" and CharaPicker will place key findings here one by one.",
+  "insight.empty.fullExtraction": "Click \"Start Extraction\" and CharaPicker will place key findings here one by one.",
   "insightsPage.title": "Insight Brook",
   "extractor.noTarget": "No target character",
   "extractor.config.title": "Opening project config",

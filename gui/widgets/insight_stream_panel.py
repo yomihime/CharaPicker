@@ -103,6 +103,9 @@ class InsightStreamPanel(ScrollArea):
         self.setWidget(self.container)
         self.apply_theme_colors()
 
+    def set_empty_text_key(self, key: str) -> None:
+        self.empty_label.setText(t(key))
+
     def append_event(self, event: dict) -> None:
         if self.empty_label.isVisible():
             self.empty_label.hide()

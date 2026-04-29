@@ -320,6 +320,8 @@
   "insight.status.warning": "要確認",
   "insight.untitled": "無題の小さな洞察",
   "insight.empty": "「プレビュー開始」をクリックすると、重要な発見がここにひとつずつ表示されます。",
+  "insight.empty.preview": "「プレビュー開始」をクリックすると、重要な発見がここにひとつずつ表示されます。",
+  "insight.empty.fullExtraction": "「抽出を開始」をクリックすると、重要な発見がここにひとつずつ表示されます。",
   "insightsPage.title": "洞察の小川",
   "extractor.noTarget": "対象キャラクター未指定",
   "extractor.config.title": "プロジェクト設定を開く",
