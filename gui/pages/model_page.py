@@ -443,7 +443,7 @@ class CloudVideoTestWorker(QObject):
 class CloudAllTestWorker(QObject):
     progressChanged = pyqtSignal(str, str)
     sectionStarted = pyqtSignal(str)
-    sectionFinished = pyqtSignal(str, str)
+    sectionFinished = pyqtSignal(str, str, dict)
     succeeded = pyqtSignal(dict)
     failed = pyqtSignal(str)
     finished = pyqtSignal()
@@ -501,10 +501,10 @@ class CloudAllTestWorker(QObject):
                 "content": result.content.strip(),
                 "token_usage": _token_usage_from_metadata(result.metadata),
             }
-            self.sectionFinished.emit(section, "ok")
+            self.sectionFinished.emit(section, "ok", payload["token_usage"])
             return payload
         except Exception as exc:  # noqa: BLE001
-            self.sectionFinished.emit(section, "error")
+            self.sectionFinished.emit(section, "error", {})
             return {"status": "error", "content": str(exc)}
 
     def _run_text_test(self) -> dict[str, str]:
@@ -1649,10 +1649,14 @@ class ModelPage(QWidget):
         self._cloud_all_section_status[section] = "running"
         self._set_cloud_test_result_text(self._render_cloud_all_report(None))
 
-    def _show_cloud_all_test_section_finished(self, section: str, status: str) -> None:
+    def _show_cloud_all_test_section_finished(self, section: str, status: str, token_usage: dict) -> None:
         if section not in self._cloud_all_section_status:
             return
         self._cloud_all_section_status[section] = "ok" if status == "ok" else "error"
+        if status == "ok" and isinstance(token_usage, dict):
+            self._cloud_all_token_usage[section] = token_usage
+        elif status != "ok":
+            self._cloud_all_token_usage[section] = {}
         self._set_cloud_test_result_text(self._render_cloud_all_report(None))
 
     def _render_cloud_all_report(self, final_summary: str | None) -> str:
@@ -1674,7 +1678,7 @@ class ModelPage(QWidget):
                 continue
             status_text = t(f"model.cloud.test.status.{status_key}")
             body = content or status_text
-            token_line = _format_token_usage_line(token_usage) if status_key == "ok" else ""
+            token_line = _format_token_usage_line(token_usage) if status_key == "ok" and token_usage else ""
             sections.extend(
                 [
                     f"[{t(f'model.test.type.{key}')}] {status_text}",
