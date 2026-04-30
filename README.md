@@ -59,6 +59,18 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
+## 构建
+
+```powershell
+build.bat
+```
+
+- 产物输出到 `release/` 目录。
+- 常用参数示例：
+  - `build.bat --tag=v0.1.0-alpha.1`
+  - `build.bat --version=0.1.0 --stage=release`
+  - `build.bat --local`
+
 ## 功能概览
 
 - 项目化素材管理（`projects/{project_id}`）

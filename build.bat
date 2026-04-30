@@ -5,24 +5,38 @@ set "ROOT_DIR=%~dp0"
 pushd "%ROOT_DIR%" >nul
 
 set "APP_NAME=CharaPicker"
-set "CONDA_ENV=CharaPicker"
-# TODO: Versioning and platform tagging are still manual. Integrate git/tag-based version control and dynamic platform identifier.
 set "VERSION=0.1.0"
+set "STAGE=release"
 set "PLATFORM_TAG=windows"
+set "ARCH_TAG=x64"
+set "LOCAL_BUILD=0"
+set "TAG_SOURCE="
+set "RAW_TAG="
+set "PYTHON_CMD=python"
+
+for /f "usebackq tokens=1,* delims==" %%A in (`%PYTHON_CMD% scripts\build_meta.py %*`) do (
+  if /i "%%A"=="ERROR" (
+    echo Build metadata error: %%B
+    goto :error
+  )
+  set "%%A=%%B"
+)
+
+if errorlevel 1 goto :error
+
 set "DIST_DIR=%ROOT_DIR%dist"
 set "BUILD_DIR=%ROOT_DIR%build"
 set "RELEASE_DIR=%ROOT_DIR%release"
 set "STAGE_DIR=%RELEASE_DIR%\%APP_NAME%"
-set "ZIP_NAME=%APP_NAME%-v%VERSION%-%PLATFORM_TAG%.zip"
+set "ZIP_NAME=%APP_NAME%-v%VERSION%-%STAGE%-%PLATFORM_TAG%-%ARCH_TAG%.zip"
 set "ZIP_PATH=%RELEASE_DIR%\%ZIP_NAME%"
-set "PYTHON_CMD=conda run -n %CONDA_ENV% python"
 
 if not exist "%RELEASE_DIR%" mkdir "%RELEASE_DIR%"
 
 %PYTHON_CMD% -c "import PyInstaller" >nul 2>&1
 if errorlevel 1 (
-  echo PyInstaller is missing in conda env "%CONDA_ENV%".
-  echo Install with: conda run -n %CONDA_ENV% python -m pip install pyinstaller
+  echo PyInstaller is missing in current Python environment.
+  echo Install with: python -m pip install pyinstaller
   goto :error
 )
 
@@ -33,6 +47,12 @@ if exist "%STAGE_DIR%" rmdir /s /q "%STAGE_DIR%"
 if exist "%ZIP_PATH%" del /q "%ZIP_PATH%"
 
 echo [1/4] Building one-folder package with main.spec...
+echo Version: v%VERSION%
+echo Stage: %STAGE%
+echo Platform: %PLATFORM_TAG%
+echo Arch: %ARCH_TAG%
+if defined RAW_TAG echo Tag: %RAW_TAG% (%TAG_SOURCE%)
+if "%LOCAL_BUILD%"=="1" echo Build mode: local
 %PYTHON_CMD% -m PyInstaller --noconfirm --clean main.spec
 if errorlevel 1 goto :error
 
