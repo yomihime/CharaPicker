@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from core.models import ProjectPaths
 
 
-APP_ROOT = Path(__file__).resolve().parents[1]
+def _resolve_app_root() -> Path:
+    # In frozen/packaged runtime, __file__ may resolve into a temp extraction
+    # directory; use the launch working directory as app root instead.
+    if getattr(sys, "frozen", False):
+        return Path.cwd().resolve()
+    return Path(__file__).resolve().parents[1]
+
+
+APP_ROOT = _resolve_app_root()
 PROJECTS_ROOT = APP_ROOT / "projects"
 LOGS_ROOT = APP_ROOT / "log"
 
