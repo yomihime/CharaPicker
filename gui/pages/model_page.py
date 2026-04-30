@@ -69,6 +69,14 @@ LOCALE_LANGUAGE_HINTS = {
     "en_US": "English",
     "ja_JP": "Japanese",
 }
+EASTER_TAP_TARGET = 9
+EASTER_PROMPT_OVERRIDE = (
+    "请使用中文写一段对 yomihime（如月怜） 的赞美文字，整体风格偏向赞颂美少女气质。"
+    "必须为原创连贯长文，长度不少于1000个中文汉字。"
+    "内容可以围绕：创作者气场、审美品味、温柔与坚韧并存的个性、灵感感染力、舞台感与表达力。"
+    "语气请真诚、有画面感，但不要使用低俗、露骨或色情内容。"
+    "不要输出列表，不要分点，直接输出完整正文。"
+)
 
 
 def _token_usage_log_fields(metadata: dict) -> tuple[int | None, int | None, int | None]:
@@ -457,6 +465,7 @@ class CloudAllTestWorker(QObject):
         image_path: Path,
         video_path: Path,
         locale: str,
+        text_prompt_override: str | None = None,
     ) -> None:
         super().__init__()
         self.base_url = base_url
@@ -465,6 +474,7 @@ class CloudAllTestWorker(QObject):
         self.image_path = image_path
         self.video_path = video_path
         self.locale = locale
+        self.text_prompt_override = text_prompt_override
 
     def run(self) -> None:
         LOGGER.info("Cloud all-modal test started; base_url=%s model=%s", self.base_url, self.model_name)
@@ -508,6 +518,17 @@ class CloudAllTestWorker(QObject):
             return {"status": "error", "content": str(exc)}
 
     def _run_text_test(self) -> dict[str, str]:
+        if self.text_prompt_override:
+            user_prompt = self.text_prompt_override
+            max_tokens = 2200
+        else:
+            user_prompt = (
+                f"{_response_language_instruction(self.locale)} "
+                "Output exactly two lines: "
+                "MODEL: <the model id you are running as>; "
+                "SUMMARY: <one-sentence self-introduction>."
+            )
+            max_tokens = 64
         request = ModelCallRequest(
             purpose="connectivity_test",
             backend="openai_compatible",
@@ -515,19 +536,11 @@ class CloudAllTestWorker(QObject):
             base_url=self.base_url,
             api_key=self.api_key,
             temperature=0,
-            max_tokens=64,
+            max_tokens=max_tokens,
             stream=True,
             messages=[
                 ModelMessage(role="system", content="You are a model connectivity test assistant."),
-                ModelMessage(
-                    role="user",
-                    content=(
-                        f"{_response_language_instruction(self.locale)} "
-                        "Output exactly two lines: "
-                        "MODEL: <the model id you are running as>; "
-                        "SUMMARY: <one-sentence self-introduction>."
-                    ),
-                ),
+                ModelMessage(role="user", content=user_prompt),
             ],
             metadata={"scene": "model_page_text_test"},
         )
@@ -700,6 +713,14 @@ class CloudModelSelectDialog(FluentDialog):
             self.model_list.setCurrentRow(0)
 
 
+class SecretTapLabel(BodyLabel):
+    clicked = pyqtSignal()
+
+    def mousePressEvent(self, event) -> None:  # type: ignore[override]
+        self.clicked.emit()
+        super().mousePressEvent(event)
+
+
 class ModelPage(QWidget):
     def __init__(
         self,
@@ -735,6 +756,7 @@ class ModelPage(QWidget):
         self._cloud_presets: list[CloudModelPreset] = []
         self._loading_cloud_preset = False
         self._llamacpp_ready_cache = initial_llamacpp_ready
+        self._cloud_easter_tap_count = 0
 
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 24, 28, 24)
@@ -838,6 +860,7 @@ class ModelPage(QWidget):
         model_name_row.addWidget(self.fetch_cloud_models_button)
 
         self.test_cloud_model_button = PushButton(t("model.cloud.test"), self.cloud_card)
+        self.cloud_test_action_label = SecretTapLabel(t("model.cloud.test.action"), self.cloud_card)
         self.cloud_test_type_combo = ComboBox(self.cloud_card)
         self.cloud_test_type_combo.addItem(t("model.test.type.all"), "all")
         self.cloud_test_type_combo.addItem(t("model.test.type.text"), "text")
@@ -855,7 +878,7 @@ class ModelPage(QWidget):
         cloud_form.addRow(t("model.cloud.apiKey"), self.cloud_api_key)
         cloud_form.addRow(t("model.cloud.modelName"), model_name_row)
         cloud_form.addRow(t("model.test.type"), self.cloud_test_type_combo)
-        cloud_form.addRow(t("model.cloud.test.action"), self.test_cloud_model_button)
+        cloud_form.addRow(self.cloud_test_action_label, self.test_cloud_model_button)
         cloud_form.addRow(t("model.cloud.test.result"), self.cloud_test_result)
         root.addWidget(self.cloud_card)
 
@@ -867,6 +890,7 @@ class ModelPage(QWidget):
         self.test_local_model_button.clicked.connect(self._test_local_model)
         self.fetch_cloud_models_button.clicked.connect(self._fetch_cloud_models)
         self.test_cloud_model_button.clicked.connect(self._test_cloud_model)
+        self.cloud_test_action_label.clicked.connect(self._record_cloud_easter_tap)
         self.cloud_preset_combo.currentIndexChanged.connect(self._load_selected_cloud_preset)
         self.save_cloud_preset_button.clicked.connect(self._save_current_cloud_preset)
         self.delete_cloud_preset_button.clicked.connect(self._delete_selected_cloud_preset)
@@ -1155,8 +1179,9 @@ class ModelPage(QWidget):
     def _test_cloud_model(self) -> None:
         test_type = self.cloud_test_type_combo.currentData() or "all"
         if test_type == "all":
-            self._test_cloud_all()
+            self._test_cloud_all(text_prompt_override=self._consume_cloud_all_easter_prompt())
             return
+        self._reset_cloud_easter_tap_counter()
         if test_type == "image":
             self._test_cloud_image()
             return
@@ -1352,7 +1377,7 @@ class ModelPage(QWidget):
         self._cloud_video_test_thread.finished.connect(self._clear_cloud_video_test_worker)
         self._cloud_video_test_thread.start()
 
-    def _test_cloud_all(self) -> None:
+    def _test_cloud_all(self, *, text_prompt_override: str | None = None) -> None:
         if self._is_cloud_test_running():
             LOGGER.info("Cloud all-modal test ignored because a test is already running")
             return
@@ -1389,6 +1414,7 @@ class ModelPage(QWidget):
             image_path=IMAGE_TEST_ASSET,
             video_path=VIDEO_TEST_ASSET,
             locale=locale,
+            text_prompt_override=text_prompt_override,
         )
         self._cloud_all_stream_buffers = {"text": "", "image": "", "video": ""}
         self._cloud_all_token_usage = {"text": {}, "image": {}, "video": {}}
@@ -1407,6 +1433,22 @@ class ModelPage(QWidget):
         self._cloud_all_test_thread.finished.connect(self._cloud_all_test_thread.deleteLater)
         self._cloud_all_test_thread.finished.connect(self._clear_cloud_all_test_worker)
         self._cloud_all_test_thread.start()
+
+    def _record_cloud_easter_tap(self) -> None:
+        if self._cloud_easter_tap_count >= EASTER_TAP_TARGET + 1:
+            self._cloud_easter_tap_count = 0
+        self._cloud_easter_tap_count += 1
+
+    def _consume_cloud_all_easter_prompt(self) -> str | None:
+        matched = self._cloud_easter_tap_count == EASTER_TAP_TARGET
+        self._reset_cloud_easter_tap_counter()
+        if matched:
+            LOGGER.info("Model page easter egg triggered")
+            return EASTER_PROMPT_OVERRIDE
+        return None
+
+    def _reset_cloud_easter_tap_counter(self) -> None:
+        self._cloud_easter_tap_count = 0
 
     def _show_cloud_text_test_success(self, payload: dict) -> None:
         content = str(payload.get("content", "")).strip() or t("model.cloud.test.empty")
