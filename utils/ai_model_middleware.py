@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -76,13 +77,31 @@ class _SafeFormatDict(dict[str, Any]):
 
 
 def load_default_prompts(path: Path = DEFAULT_PROMPTS_PATH) -> dict[str, _PromptTemplate]:
+    candidate_paths = _resolve_default_prompt_candidates(path)
+    resolved_path = next((candidate for candidate in candidate_paths if candidate.is_file()), path)
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(resolved_path.read_text(encoding="utf-8"))
         prompt_file = _PromptFile.model_validate(payload)
     except (OSError, json.JSONDecodeError, ValueError) as exc:
-        LOGGER.warning("Default prompts could not be loaded; path=%s", path, exc_info=True)
-        raise ModelMiddlewareError(f"Default prompts could not be loaded: {path}") from exc
+        LOGGER.warning(
+            "Default prompts could not be loaded; path=%s candidates=%s",
+            resolved_path,
+            [str(item) for item in candidate_paths],
+            exc_info=True,
+        )
+        raise ModelMiddlewareError(
+            f"Default prompts could not be loaded: {resolved_path}"
+        ) from exc
     return prompt_file.prompts
+
+
+def _resolve_default_prompt_candidates(primary_path: Path) -> list[Path]:
+    candidates: list[Path] = [primary_path]
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        candidates.append(exe_dir / "res" / "default_prompts.json")
+        candidates.append(exe_dir / "_internal" / "res" / "default_prompts.json")
+    return candidates
 
 
 def build_model_call_request(
