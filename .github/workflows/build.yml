@@ -30,7 +30,7 @@ jobs:
           python -m pip install pyinstaller
 
       - name: Build package
-        run: build.bat
+        run: .\build.bat
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
