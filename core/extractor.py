@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from core.models import InsightEvent, InsightStatus, ProjectConfig
 from utils.ai_model_middleware import ModelBackend, ModelCallRequest, build_model_call_request, call_model
 from utils.cloud_model_presets import load_cloud_model_presets
 from utils.i18n import t
+from utils.paths import ensure_project_tree
 
 
 LOGGER = logging.getLogger(__name__)
@@ -64,6 +66,16 @@ class Extractor(QObject):
             "source_root": str(root.resolve()),
             "seasons": seasons,
         }
+
+    def generate_source_manifest(self, project_id: str, source_root: str) -> Path:
+        manifest = self.scan_source_directory(source_root)
+        knowledge_base = ensure_project_tree(project_id).knowledge_base
+        manifest_path = knowledge_base / "source_manifest.json"
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return manifest_path
 
     def _build_chunk_payload(
         self,
