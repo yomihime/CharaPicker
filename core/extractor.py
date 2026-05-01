@@ -18,17 +18,43 @@ class Extractor(QObject):
     insightGenerated = pyqtSignal(dict)
     progressChanged = pyqtSignal(int)
 
+    def _build_chunk_payload(
+        self,
+        chunk_text: str,
+        *,
+        previous_episode_summary: str = "",
+        previous_chunk_insights: list[str] | None = None,
+        max_previous_chunks: int = 3,
+    ) -> str:
+        sections = [f"[CURRENT_CHUNK]\n{chunk_text.strip()}"]
+        if previous_episode_summary.strip():
+            sections.append(f"[PREVIOUS_EPISODE_SUMMARY]\n{previous_episode_summary.strip()}")
+        if previous_chunk_insights:
+            trimmed = [item.strip() for item in previous_chunk_insights if item.strip()]
+            if trimmed:
+                recent = trimmed[-max_previous_chunks:]
+                joined = "\n".join(f"- {item}" for item in recent)
+                sections.append(f"[PREVIOUS_CHUNK_INSIGHTS]\n{joined}")
+        return "\n\n".join(sections)
+
     def build_targeted_insight_request(
         self,
         config: ProjectConfig,
         chunk_text: str,
         *,
+        previous_episode_summary: str = "",
+        previous_chunk_insights: list[str] | None = None,
         backend: ModelBackend,
         model_name: str,
         base_url: str = "",
         api_key: str = "",
     ) -> ModelCallRequest:
         targets = config.target_characters or [t("extractor.noTarget")]
+        payload = self._build_chunk_payload(
+            chunk_text,
+            previous_episode_summary=previous_episode_summary,
+            previous_chunk_insights=previous_chunk_insights,
+        )
         return build_model_call_request(
             purpose="targeted_insight",
             backend=backend,
@@ -37,7 +63,7 @@ class Extractor(QObject):
             api_key=api_key,
             variables={
                 "target_characters": targets,
-                "chunk_text": chunk_text,
+                "chunk_text": payload,
             },
             metadata={
                 "project_id": config.project_id,
