@@ -238,6 +238,7 @@
   "model.cloud.test.report.finalSummary": "Final summary",
   "model.cloud.test.tokenUsage": "Token usage: prompt={prompt_tokens}, completion={completion_tokens}, total={total_tokens}",
   "model.cloud.test.tokenUsage.empty": "Token usage: unavailable",
+  "model.cloud.test.tokenUsage.pending": "Token usage: collecting...",
   "model.test.type": "Test Type",
   "model.test.type.all": "Run All (Default)",
   "model.test.type.text": "Text Understanding",
@@ -328,6 +329,10 @@
   "extractor.config.description": "Target characters: {targets}",
   "extractor.chunk.title": "Sampling tiny chunks",
   "extractor.chunk.description": "Preview run reads the first 2 chunks to check prompt and evidence quality.",
+  "extractor.chunk.bootstrapFromVideo": "No chunk JSON found; extracting structured data from processed video chunks...",
+  "extractor.chunk.extractingVideoChunk": "Extracting video chunk {current}/{total}: {name}",
+  "extractor.chunk.noChunkJson": "No readable chunk JSON found under knowledge_base; preview has been stopped.",
+  "extractor.chunk.usingChunkJson": "Preview is using real chunk JSON inputs ({count} chunks).",
   "extractor.insight.title": "Waiting for targeted insights",
   "extractor.insight.description": "After AI integration, CharaPicker will write key findings to knowledge_base/targeted_insights.json.",
   "compiler.placeholder.summary": "Compiler placeholder: later it will aggregate character state through Retrieval -> Chunking -> Rolling Update."

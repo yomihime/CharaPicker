@@ -765,14 +765,7 @@ class ProjectPage(QWidget):
         usage = token_usage if isinstance(token_usage, dict) else {}
         char_count = usage.get("char_count")
         if isinstance(char_count, int):
-            self.token_usage_label.setText(
-                t(
-                    "model.cloud.test.tokenUsage",
-                    prompt_tokens="-",
-                    completion_tokens="-",
-                    total_tokens=f"~{char_count}",
-                )
-            )
+            self.token_usage_label.setText(t("model.cloud.test.tokenUsage.pending"))
             return
         prompt_tokens = usage.get("prompt_tokens")
         completion_tokens = usage.get("completion_tokens")

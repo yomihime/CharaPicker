@@ -52,6 +52,9 @@ class PreviewWorker(QObject):
                 emit_progress=lambda value: self.progressChanged.emit(value),
                 emit_token_usage=lambda usage: self.tokenUsageChanged.emit(usage),
             )
+            if not content.strip():
+                self.failed.emit(t("extractor.chunk.noChunkJson"))
+                return
             self.succeeded.emit(content)
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("Preview worker failed", exc_info=True)

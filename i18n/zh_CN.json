@@ -238,6 +238,7 @@
   "model.cloud.test.report.finalSummary": "最终总结",
   "model.cloud.test.tokenUsage": "Token 消耗：输入={prompt_tokens}，输出={completion_tokens}，总计={total_tokens}",
   "model.cloud.test.tokenUsage.empty": "Token 消耗：暂无",
+  "model.cloud.test.tokenUsage.pending": "Token 消耗：统计中…",
   "model.test.type": "测试类型",
   "model.test.type.all": "三项都测（默认）",
   "model.test.type.text": "文本理解",
@@ -328,6 +329,10 @@
   "extractor.config.description": "目标角色：{targets}",
   "extractor.chunk.title": "抽样小切片",
   "extractor.chunk.description": "预览试跑会先读取前 2 个 chunk，用来检查提示词和证据质量。",
+  "extractor.chunk.bootstrapFromVideo": "未发现可用 chunk JSON，正在从处理后的视频切片提取结构化信息…",
+  "extractor.chunk.extractingVideoChunk": "正在提取视频切片 {current}/{total}：{name}",
+  "extractor.chunk.noChunkJson": "knowledge_base 下未检测到可读的 chunk JSON，预览已中止。",
+  "extractor.chunk.usingChunkJson": "预览将使用真实 chunk JSON 输入（共 {count} 个 chunk）。",
   "extractor.insight.title": "等待定向洞察",
   "extractor.insight.description": "AI 接入后，拾卡姬会把关键发现写入 knowledge_base/targeted_insights.json。",
   "compiler.placeholder.summary": "编译器占位实现：后续会按 Retrieval -> Chunking -> Rolling Update 汇总角色状态。"

@@ -238,6 +238,7 @@
   "model.cloud.test.report.finalSummary": "最終まとめ",
   "model.cloud.test.tokenUsage": "Token 消費: 入力={prompt_tokens}、出力={completion_tokens}、合計={total_tokens}",
   "model.cloud.test.tokenUsage.empty": "Token 消費: 取得できません",
+  "model.cloud.test.tokenUsage.pending": "Token 消費: 集計中...",
   "model.test.type": "テスト種別",
   "model.test.type.all": "三項目すべて（既定）",
   "model.test.type.text": "テキスト理解",
@@ -328,6 +329,10 @@
   "extractor.config.description": "対象キャラクター：{targets}",
   "extractor.chunk.title": "小さなチャンクをサンプリング",
   "extractor.chunk.description": "プレビュー実行では最初の 2 チャンクを読み、プロンプトと証拠品質を確認します。",
+  "extractor.chunk.bootstrapFromVideo": "利用可能な chunk JSON が見つからないため、処理済み動画 chunk から構造化情報を抽出しています…",
+  "extractor.chunk.extractingVideoChunk": "動画 chunk を抽出中 {current}/{total}：{name}",
+  "extractor.chunk.noChunkJson": "knowledge_base に読み取れる chunk JSON が見つからないため、プレビューを中止しました。",
+  "extractor.chunk.usingChunkJson": "プレビューは実際の chunk JSON 入力を使用します（{count} チャンク）。",
   "extractor.insight.title": "定向洞察を待機",
   "extractor.insight.description": "AI 連携後、CharaPicker は重要な発見を knowledge_base/targeted_insights.json に保存します。",
   "compiler.placeholder.summary": "コンパイラーのプレースホルダー：今後 Retrieval -> Chunking -> Rolling Update に沿ってキャラクター状態を集約します。"
