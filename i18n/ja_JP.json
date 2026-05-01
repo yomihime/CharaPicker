@@ -1,4 +1,4 @@
-﻿{
+{
   "app.nav.home": "ホーム",
   "app.nav.output": "出力",
   "app.nav.model": "モデル",
@@ -329,9 +329,8 @@
   "extractor.config.description": "対象キャラクター：{targets}",
   "extractor.chunk.title": "小さなチャンクをサンプリング",
   "extractor.chunk.description": "プレビュー実行では最初の 2 チャンクを読み、プロンプトと証拠品質を確認します。",
-  "extractor.chunk.bootstrapFromVideo": "利用可能な chunk JSON が見つからないため、動画スライスのフレームからプレビュー用テキストを生成しています…",
-  "extractor.chunk.ffmpegMissing": "利用可能な FFmpeg が見つからないため、動画スライスからフレームを抽出できません。",
-  "extractor.chunk.frameExtractFailed": "動画スライスのフレーム抽出に失敗しました: {error}",
+  "extractor.chunk.bootstrapFromVideo": "利用可能な chunk JSON が見つからないため、処理済み動画 chunk から構造化情報を抽出しています…",
+  "extractor.chunk.extractingVideoChunk": "動画 chunk を抽出中 {current}/{total}：{name}",
   "extractor.chunk.noChunkJson": "knowledge_base に読み取れる chunk JSON が見つからないため、プレビューを中止しました。",
   "extractor.chunk.usingChunkJson": "プレビューは実際の chunk JSON 入力を使用します（{count} チャンク）。",
   "extractor.insight.title": "定向洞察を待機",

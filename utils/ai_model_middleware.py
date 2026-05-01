@@ -21,7 +21,7 @@ DEFAULT_PROMPTS_PATH = APP_ROOT / "res" / "default_prompts.json"
 USER_AGENT = "CharaPicker/0.1"
 
 MessageRole = Literal["system", "user", "assistant"]
-ModelBackend = Literal["openai_compatible", "local"]
+ModelBackend = Literal["openai_compatible", "dashscope", "local"]
 ModelMessageContent = str | list[dict[str, Any]]
 
 
@@ -157,6 +157,8 @@ def call_model(
 ) -> ModelCallResult:
     if request.backend == "openai_compatible":
         return _call_openai_compatible(request, on_stream_delta=on_stream_delta)
+    if request.backend == "dashscope":
+        return _call_dashscope(request)
     if request.backend == "local":
         raise ModelCallError(
             "Local model execution is not wired yet; "
@@ -189,6 +191,151 @@ def _chat_completions_endpoint(base_url: str) -> str:
     if base_url.endswith("/chat/completions"):
         return base_url
     return f"{base_url}/chat/completions"
+
+
+def _dashscope_api_url(base_url: str) -> str:
+    base_url = base_url.strip().rstrip("/")
+    if not base_url:
+        return "https://dashscope.aliyuncs.com/api/v1"
+    if base_url.endswith("/compatible-mode/v1"):
+        return base_url[: -len("/compatible-mode/v1")] + "/api/v1"
+    if base_url.endswith("/chat/completions"):
+        return _dashscope_api_url(base_url[: -len("/chat/completions")])
+    if base_url.endswith("/api/v1"):
+        return base_url
+    return base_url
+
+
+def _call_dashscope(request: ModelCallRequest) -> ModelCallResult:
+    if not request.model_name:
+        raise ModelCallError("Model name is required.")
+    try:
+        import dashscope
+        from dashscope import MultiModalConversation
+    except ImportError as exc:
+        raise ModelCallError(
+            "DashScope Python SDK is required for local file path video input. "
+            "Install dependencies from requirements.txt first."
+        ) from exc
+
+    api_key = request.api_key.strip()
+    dashscope.base_http_api_url = _dashscope_api_url(request.base_url)
+    messages = [_to_dashscope_message(message) for message in request.messages]
+    LOGGER.info(
+        "Calling model through DashScope SDK; purpose=%s endpoint=%s model=%s has_api_key=%s",
+        request.purpose,
+        dashscope.base_http_api_url,
+        request.model_name,
+        bool(api_key),
+    )
+    try:
+        response = MultiModalConversation.call(
+            api_key=api_key or None,
+            model=request.model_name,
+            messages=messages,
+        )
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.warning(
+            "DashScope model call failed; purpose=%s endpoint=%s",
+            request.purpose,
+            dashscope.base_http_api_url,
+            exc_info=True,
+        )
+        raise ModelCallError(str(exc)) from exc
+
+    raw = _dashscope_response_to_dict(response)
+    status_code = raw.get("status_code")
+    if isinstance(status_code, int) and status_code >= 400:
+        message = raw.get("message") or raw.get("code") or "DashScope call failed"
+        raise ModelCallError(str(message))
+
+    content = _extract_dashscope_content(raw)
+    usage = _extract_token_usage(raw)
+    if not usage:
+        output = raw.get("output")
+        if isinstance(output, dict):
+            usage = _extract_token_usage(output)
+    metadata = dict(request.metadata)
+    if usage:
+        metadata["token_usage"] = usage
+    return ModelCallResult(content=content, raw=raw, metadata=metadata)
+
+
+def _to_dashscope_message(message: ModelMessage) -> dict[str, Any]:
+    if isinstance(message.content, str):
+        return {"role": message.role, "content": [{"text": message.content}]}
+
+    content: list[dict[str, Any]] = []
+    for item in message.content:
+        if not isinstance(item, dict):
+            continue
+        item_type = item.get("type")
+        if item_type == "text" or "text" in item:
+            text = item.get("text")
+            if isinstance(text, str):
+                content.append({"text": text})
+            continue
+        if "video" in item:
+            video = item.get("video")
+            if isinstance(video, str):
+                video_part: dict[str, Any] = {"video": video}
+                fps = item.get("fps")
+                if isinstance(fps, (int, float)):
+                    video_part["fps"] = fps
+                content.append(video_part)
+            continue
+        if item_type == "video_url":
+            video_url = item.get("video_url")
+            if isinstance(video_url, dict) and isinstance(video_url.get("url"), str):
+                video_part = {"video": video_url["url"]}
+                fps = item.get("fps")
+                if isinstance(fps, (int, float)):
+                    video_part["fps"] = fps
+                content.append(video_part)
+    return {"role": message.role, "content": content}
+
+
+def _dashscope_response_to_dict(response: Any) -> dict[str, Any]:
+    if isinstance(response, dict):
+        return response
+    to_dict = getattr(response, "to_dict", None)
+    if callable(to_dict):
+        value = to_dict()
+        if isinstance(value, dict):
+            return value
+    try:
+        return json.loads(json.dumps(response, default=lambda item: getattr(item, "__dict__", str(item))))
+    except (TypeError, ValueError):
+        return {"response": str(response)}
+
+
+def _extract_dashscope_content(payload: dict[str, Any]) -> str:
+    output = payload.get("output")
+    if not isinstance(output, dict):
+        return _extract_message_content(payload)
+    choices = output.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise ModelCallError("DashScope response does not include choices.")
+    first_choice = choices[0]
+    if not isinstance(first_choice, dict):
+        raise ModelCallError("DashScope response choice is not an object.")
+    message = first_choice.get("message")
+    if not isinstance(message, dict):
+        raise ModelCallError("DashScope response choice does not include a message.")
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text")
+            if isinstance(text, str):
+                text_parts.append(text)
+        if text_parts:
+            return "\n".join(text_parts)
+    raise ModelCallError("DashScope response message content is not text.")
 
 
 def _call_openai_compatible(
