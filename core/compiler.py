@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import json
 from pathlib import Path
+from collections import defaultdict
 
 from core.models import CharacterState
 from utils.ai_model_middleware import ModelBackend, ModelCallRequest, build_model_call_request
@@ -76,6 +77,47 @@ def compile_character_state_by_season_episode(project_id: str, character: str) -
         "final_state": state.model_dump(mode="json"),
         "timeline": timeline,
     }
+
+
+def write_character_stage_states(project_id: str, character: str) -> list[Path]:
+    compiled = compile_character_state_by_season_episode(project_id, character)
+    timeline = compiled.get("timeline", [])
+    grouped: dict[str, list[dict]] = defaultdict(list)
+    for item in timeline:
+        season_id = item.get("season_id")
+        if not isinstance(season_id, str):
+            continue
+        grouped[season_id].append(item)
+
+    knowledge_base = ensure_project_tree(project_id).knowledge_base
+    written_paths: list[Path] = []
+    for season_id in sorted(grouped.keys()):
+        season_dir = knowledge_base / "seasons" / season_id
+        season_dir.mkdir(parents=True, exist_ok=True)
+        stage_entries: list[dict] = []
+        for step in grouped[season_id]:
+            episode_id = step.get("episode_id", "")
+            state_payload = step.get("state", {})
+            if not isinstance(state_payload, dict):
+                continue
+            stage_entries.append(
+                {
+                    "season_id": season_id,
+                    "episode_id": episode_id,
+                    "character": character,
+                    "state": state_payload,
+                }
+            )
+        output = {
+            "season_id": season_id,
+            "character": character,
+            "stage_states": stage_entries,
+            "final_state": stage_entries[-1]["state"] if stage_entries else {},
+        }
+        output_path = season_dir / "character_stage_states.json"
+        output_path.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
+        written_paths.append(output_path)
+    return written_paths
 
 
 def _apply_episode_payload_to_state(state: CharacterState, payload: dict) -> CharacterState:
