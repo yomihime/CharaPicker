@@ -101,6 +101,24 @@ class Extractor(QObject):
                 (episode_root / episode_id / "chunks").mkdir(parents=True, exist_ok=True)
         return seasons_root
 
+    def save_chunk_extraction_result(self, project_id: str, result: ChunkExtractionResult) -> Path:
+        knowledge_base = ensure_project_tree(project_id).knowledge_base
+        chunk_dir = (
+            knowledge_base
+            / "seasons"
+            / result.season_id
+            / "episodes"
+            / result.episode_id
+            / "chunks"
+        )
+        chunk_dir.mkdir(parents=True, exist_ok=True)
+        chunk_path = chunk_dir / f"{result.chunk_id}.json"
+        chunk_path.write_text(
+            json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return chunk_path
+
     def _build_chunk_payload(
         self,
         chunk_text: str,
