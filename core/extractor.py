@@ -249,6 +249,37 @@ class Extractor(QObject):
         season_content_path.write_text(json.dumps(season_content, ensure_ascii=False, indent=2), encoding="utf-8")
         return season_content_path
 
+    def generate_season_summary(self, project_id: str, season_id: str) -> Path:
+        knowledge_base = ensure_project_tree(project_id).knowledge_base
+        season_dir = knowledge_base / "seasons" / season_id
+        season_content_path = season_dir / "season_content.json"
+        if not season_content_path.exists():
+            raise ValueError("season content not found; merge season content first")
+
+        season_content = json.loads(season_content_path.read_text(encoding="utf-8"))
+        episode_contents = season_content.get("episode_contents", [])
+        background_parts: list[str] = []
+        for episode in episode_contents:
+            if not isinstance(episode, dict):
+                continue
+            episode_id = episode.get("episode_id", "")
+            facts = episode.get("facts", [])
+            if isinstance(episode_id, str) and isinstance(facts, list) and facts:
+                background_parts.append(f"{episode_id}: {'; '.join(str(item) for item in facts)}")
+
+        summary = {
+            "season_id": season_id,
+            "final_character_states": season_content.get("character_state_changes", []),
+            "relationship_baseline": season_content.get("relationship_interactions", []),
+            "major_conflicts": season_content.get("conflicts", []),
+            "unresolved_threads": season_content.get("conflicts", []),
+            "growth_trajectory": season_content.get("behavior_traits", []),
+            "background_summary": " | ".join(background_parts),
+        }
+        summary_path = season_dir / "season_summary.json"
+        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        return summary_path
+
     def _deduplicate_preserve_order(self, values: list[str]) -> list[str]:
         seen: set[str] = set()
         unique_values: list[str] = []
