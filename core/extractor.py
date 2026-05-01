@@ -216,6 +216,7 @@ class Extractor(QObject):
         previous_episode_summary: str = "",
         previous_chunk_insights: list[str] | None = None,
         previous_episode_extracted_chunks: list[ChunkExtractionResult | dict[str, Any]] | None = None,
+        current_season_episode_summaries: list[dict[str, Any]] | None = None,
         max_previous_chunks: int = 3,
     ) -> str:
         sections = [f"[CURRENT_CHUNK]\n{chunk_text.strip()}"]
@@ -231,6 +232,11 @@ class Extractor(QObject):
                     "[CURRENT_EPISODE_EXTRACTED_CHUNKS]\n"
                     + json.dumps(structured_chunks, ensure_ascii=False, indent=2)
                 )
+        if current_season_episode_summaries:
+            sections.append(
+                "[CURRENT_SEASON_EPISODE_SUMMARIES]\n"
+                + json.dumps(current_season_episode_summaries, ensure_ascii=False, indent=2)
+            )
         if previous_episode_summary.strip():
             sections.append(f"[PREVIOUS_EPISODE_SUMMARY]\n{previous_episode_summary.strip()}")
         if previous_chunk_insights:
@@ -249,6 +255,7 @@ class Extractor(QObject):
         previous_episode_summary: str = "",
         previous_chunk_insights: list[str] | None = None,
         previous_episode_extracted_chunks: list[ChunkExtractionResult | dict[str, Any]] | None = None,
+        current_season_episode_summaries: list[dict[str, Any]] | None = None,
         backend: ModelBackend,
         model_name: str,
         base_url: str = "",
@@ -260,6 +267,7 @@ class Extractor(QObject):
             previous_episode_summary=previous_episode_summary,
             previous_chunk_insights=previous_chunk_insights,
             previous_episode_extracted_chunks=previous_episode_extracted_chunks,
+            current_season_episode_summaries=current_season_episode_summaries,
         )
         return build_model_call_request(
             purpose="targeted_insight",
@@ -276,6 +284,30 @@ class Extractor(QObject):
                 "extraction_mode": config.extraction_mode.value,
             },
         )
+
+    def load_current_season_episode_summaries(
+        self,
+        project_id: str,
+        season_id: str,
+        current_episode_id: str,
+    ) -> list[dict[str, Any]]:
+        knowledge_base = ensure_project_tree(project_id).knowledge_base
+        episodes_root = knowledge_base / "seasons" / season_id / "episodes"
+        if not episodes_root.exists():
+            return []
+
+        summaries: list[dict[str, Any]] = []
+        for episode_dir in sorted([path for path in episodes_root.iterdir() if path.is_dir()], key=lambda p: p.name.lower()):
+            episode_id = episode_dir.name
+            if episode_id >= current_episode_id:
+                continue
+            summary_path = episode_dir / "episode_summary.json"
+            if not summary_path.exists():
+                continue
+            payload = json.loads(summary_path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                summaries.append(payload)
+        return summaries
 
     def run_preview(self, config: ProjectConfig) -> None:
         self.run_preview_streaming(config)
