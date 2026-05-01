@@ -4,10 +4,11 @@ import logging
 import json
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from core.models import InsightEvent, InsightStatus, ProjectConfig
+from core.models import ChunkExtractionResult, InsightEvent, InsightStatus, ProjectConfig
 from utils.ai_model_middleware import ModelBackend, ModelCallRequest, build_model_call_request, call_model
 from utils.cloud_model_presets import load_cloud_model_presets
 from utils.i18n import t
@@ -106,9 +107,22 @@ class Extractor(QObject):
         *,
         previous_episode_summary: str = "",
         previous_chunk_insights: list[str] | None = None,
+        previous_episode_extracted_chunks: list[ChunkExtractionResult | dict[str, Any]] | None = None,
         max_previous_chunks: int = 3,
     ) -> str:
         sections = [f"[CURRENT_CHUNK]\n{chunk_text.strip()}"]
+        if previous_episode_extracted_chunks:
+            structured_chunks: list[dict[str, Any]] = []
+            for item in previous_episode_extracted_chunks:
+                if isinstance(item, ChunkExtractionResult):
+                    structured_chunks.append(item.model_dump(mode="json"))
+                elif isinstance(item, dict):
+                    structured_chunks.append(item)
+            if structured_chunks:
+                sections.append(
+                    "[CURRENT_EPISODE_EXTRACTED_CHUNKS]\n"
+                    + json.dumps(structured_chunks, ensure_ascii=False, indent=2)
+                )
         if previous_episode_summary.strip():
             sections.append(f"[PREVIOUS_EPISODE_SUMMARY]\n{previous_episode_summary.strip()}")
         if previous_chunk_insights:
@@ -126,6 +140,7 @@ class Extractor(QObject):
         *,
         previous_episode_summary: str = "",
         previous_chunk_insights: list[str] | None = None,
+        previous_episode_extracted_chunks: list[ChunkExtractionResult | dict[str, Any]] | None = None,
         backend: ModelBackend,
         model_name: str,
         base_url: str = "",
@@ -136,6 +151,7 @@ class Extractor(QObject):
             chunk_text,
             previous_episode_summary=previous_episode_summary,
             previous_chunk_insights=previous_chunk_insights,
+            previous_episode_extracted_chunks=previous_episode_extracted_chunks,
         )
         return build_model_call_request(
             purpose="targeted_insight",
