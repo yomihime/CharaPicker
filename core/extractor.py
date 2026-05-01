@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import base64
 import logging
 import json
+import subprocess
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -9,14 +12,17 @@ from typing import Any
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from core.models import ChunkExtractionResult, InsightEvent, InsightStatus, ProjectConfig
-from utils.ai_model_middleware import ModelBackend, ModelCallRequest, build_model_call_request, call_model
+from utils.ai_model_middleware import ModelBackend, ModelCallRequest, ModelMessage, build_model_call_request, call_model
 from utils.cloud_model_presets import load_cloud_model_presets
+from utils.ffmpeg_tool import find_usable_ffmpeg_binary
 from utils.i18n import t
 from utils.paths import ensure_project_tree
 
 
 LOGGER = logging.getLogger(__name__)
 VIDEO_SUFFIXES = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".wmv", ".m4v"}
+PREVIEW_MAX_CHUNKS = 2
+PREVIEW_FRAME_COUNT = 4
 
 
 class Extractor(QObject):
@@ -290,6 +296,210 @@ class Extractor(QObject):
             unique_values.append(value)
         return unique_values
 
+    def _collect_preview_chunk_json_inputs(self, project_id: str) -> list[str]:
+        knowledge_base = ensure_project_tree(project_id).knowledge_base
+        chunk_paths: list[Path] = []
+        seasons_root = knowledge_base / "seasons"
+        if seasons_root.exists():
+            chunk_paths.extend(
+                [
+                    path
+                    for path in seasons_root.rglob("*.json")
+                    if path.is_file() and "chunks" in path.parts
+                ]
+            )
+        top_level_chunks = knowledge_base / "chunks"
+        if top_level_chunks.exists():
+            chunk_paths.extend([path for path in top_level_chunks.rglob("*.json") if path.is_file()])
+        chunk_paths = sorted(
+            list({path.resolve(): path for path in chunk_paths}.values()),
+            key=lambda path: path.relative_to(knowledge_base).as_posix().lower(),
+        )
+        if not chunk_paths:
+            return []
+
+        preview_inputs: list[str] = []
+        for chunk_path in chunk_paths:
+            try:
+                payload = json.loads(chunk_path.read_text(encoding="utf-8"))
+                chunk = ChunkExtractionResult.model_validate(payload)
+            except (OSError, json.JSONDecodeError, ValueError):
+                LOGGER.warning("Preview chunk JSON read failed; path=%s", chunk_path, exc_info=True)
+                continue
+
+            sections: list[str] = [
+                f"[CHUNK_ID] {chunk.season_id}/{chunk.episode_id}/{chunk.chunk_id}",
+            ]
+
+            if chunk.insight_summary.strip():
+                sections.append(f"[INSIGHT_SUMMARY]\n{chunk.insight_summary.strip()}")
+
+            field_mappings = [
+                ("FACTS", chunk.facts),
+                ("BEHAVIOR_TRAITS", chunk.behavior_traits),
+                ("DIALOGUE_STYLE", chunk.dialogue_style),
+                ("RELATIONSHIPS", chunk.relationship_interactions),
+                ("CONFLICTS", chunk.conflicts),
+                ("STATE_CHANGES", chunk.character_state_changes),
+                ("EVIDENCE_REFS", chunk.evidence_refs),
+            ]
+            has_content = bool(chunk.insight_summary.strip())
+            for label, values in field_mappings:
+                cleaned = [item.strip() for item in values if isinstance(item, str) and item.strip()]
+                if not cleaned:
+                    continue
+                has_content = True
+                sections.append(f"[{label}]\n" + "\n".join(f"- {item}" for item in cleaned))
+            if not has_content:
+                continue
+
+            preview_inputs.append("\n\n".join(sections))
+            if len(preview_inputs) >= PREVIEW_MAX_CHUNKS:
+                break
+        return preview_inputs
+
+    def _collect_preview_video_chunks(self, project_id: str) -> list[Path]:
+        materials_root = ensure_project_tree(project_id).materials
+        if not materials_root.exists():
+            return []
+        return sorted(
+            [path for path in materials_root.rglob("*") if path.is_file() and path.suffix.lower() in VIDEO_SUFFIXES],
+            key=lambda path: path.relative_to(materials_root).as_posix().lower(),
+        )[:PREVIEW_MAX_CHUNKS]
+
+    def _build_data_url(self, file_path: Path, mime: str) -> str:
+        payload = base64.b64encode(file_path.read_bytes()).decode("ascii")
+        return f"data:{mime};base64,{payload}"
+
+    def _build_video_frame_sequence(self, video_path: Path, frame_count: int = PREVIEW_FRAME_COUNT) -> list[str]:
+        ffmpeg_binary = find_usable_ffmpeg_binary()
+        if ffmpeg_binary is None:
+            raise RuntimeError(t("extractor.chunk.ffmpegMissing"))
+        if frame_count <= 0:
+            frame_count = 1
+        with tempfile.TemporaryDirectory(prefix="extractor-preview-video-") as temp_dir:
+            pattern = Path(temp_dir) / "frame_%03d.jpg"
+            command = [
+                str(ffmpeg_binary),
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-ss",
+                "00:00:00",
+                "-i",
+                str(video_path),
+                "-vf",
+                "fps=1",
+                "-frames:v",
+                str(frame_count),
+                "-q:v",
+                "3",
+                str(pattern),
+            ]
+            completed = subprocess.run(command, capture_output=True, check=False)
+            frame_paths = sorted(Path(temp_dir).glob("frame_*.jpg"))
+            if completed.returncode != 0 or not frame_paths:
+                stderr = completed.stderr.decode("utf-8", errors="replace").strip()
+                raise RuntimeError(
+                    t("extractor.chunk.frameExtractFailed", error=stderr or str(completed.returncode))
+                )
+            return [self._build_data_url(frame_path, "image/jpeg") for frame_path in frame_paths]
+
+    def _extract_json_object(self, content: str) -> dict[str, Any]:
+        text = content.strip()
+        if not text:
+            raise ValueError("empty model response")
+        try:
+            payload = json.loads(text)
+            if isinstance(payload, dict):
+                return payload
+        except json.JSONDecodeError:
+            pass
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            candidate = text[start : end + 1]
+            payload = json.loads(candidate)
+            if isinstance(payload, dict):
+                return payload
+        raise ValueError("model response is not a JSON object")
+
+    def _coerce_string_list(self, value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        output: list[str] = []
+        for item in value:
+            if isinstance(item, str) and item.strip():
+                output.append(item.strip())
+        return output
+
+    def _bootstrap_preview_chunk_json_from_materials(
+        self,
+        config: ProjectConfig,
+        *,
+        model_name: str,
+        base_url: str,
+        api_key: str,
+    ) -> int:
+        targets = config.target_characters or [t("extractor.noTarget")]
+        videos = self._collect_preview_video_chunks(config.project_id)
+        if not videos:
+            return 0
+        created = 0
+        for index, video_path in enumerate(videos, start=1):
+            frames = self._build_video_frame_sequence(video_path, PREVIEW_FRAME_COUNT)
+            user_text = (
+                f"目标角色：{json.dumps(targets, ensure_ascii=False)}\n"
+                "以下是来自视频切片的抽帧序列。"
+                "请提取角色洞察并只输出 JSON 对象，字段必须包含："
+                "facts, behavior_traits, dialogue_style, relationships, conflicts, character_state_changes, insight_summary, evidence_refs。"
+                "所有列表字段都返回字符串数组；insight_summary 不超过 50 个中文字符。"
+            )
+            request = ModelCallRequest(
+                purpose="targeted_insight",
+                backend="openai_compatible",
+                model_name=model_name,
+                base_url=base_url,
+                api_key=api_key,
+                messages=[
+                    ModelMessage(
+                        role="system",
+                        content="你是 CharaPicker 的视频切片洞察助手。只依据输入画面输出结构化 JSON，不编造。",
+                    ),
+                    ModelMessage(
+                        role="user",
+                        content=[
+                            {"type": "text", "text": user_text},
+                            {"type": "video", "video": frames},
+                        ],
+                    ),
+                ],
+                temperature=0.2,
+                max_tokens=400,
+                stream=False,
+                metadata={"project_id": config.project_id, "stage": "preview_video_bootstrap"},
+            )
+            result = call_model(request)
+            payload = self._extract_json_object(result.content)
+            chunk = ChunkExtractionResult(
+                season_id="season_000",
+                episode_id="episode_000",
+                chunk_id=f"preview_chunk_{index:03d}",
+                targets=targets,
+                facts=self._coerce_string_list(payload.get("facts")),
+                behavior_traits=self._coerce_string_list(payload.get("behavior_traits")),
+                dialogue_style=self._coerce_string_list(payload.get("dialogue_style")),
+                relationship_interactions=self._coerce_string_list(payload.get("relationships")),
+                conflicts=self._coerce_string_list(payload.get("conflicts")),
+                character_state_changes=self._coerce_string_list(payload.get("character_state_changes")),
+                insight_summary=str(payload.get("insight_summary", "")).strip(),
+                evidence_refs=self._coerce_string_list(payload.get("evidence_refs")),
+            )
+            self.save_chunk_extraction_result(config.project_id, chunk)
+            created += 1
+        return created
+
     def _build_chunk_payload(
         self,
         chunk_text: str,
@@ -475,80 +685,120 @@ class Extractor(QObject):
             LOGGER.info("Preview extraction finished without cloud preset; project_id=%s", config.project_id)
             return ""
 
-        # TODO: Replace this metadata-only placeholder with real source ingestion:
-        # read project materials, chunk text/video transcripts, and pass actual chunk content.
-        source_hint = ", ".join(config.source_paths[:5]) if config.source_paths else "no source path"
-        chunk_text = (
-            f"Project={config.name}; mode={config.extraction_mode.value}; "
-            f"targets={targets}; sources={source_hint}"
-        )
-        request = self.build_targeted_insight_request(
-            config,
-            chunk_text,
-            backend="openai_compatible",
-            model_name=preset.model_name,
-            base_url=preset.base_url,
-            api_key=preset.api_key,
-        )
-        request.stream = True
-        request.max_tokens = 220
+        preview_inputs = self._collect_preview_chunk_json_inputs(config.project_id)[:PREVIEW_MAX_CHUNKS]
+        if not preview_inputs:
+            emit_event(
+                InsightEvent(
+                    title=t("extractor.chunk.title"),
+                    description=t("extractor.chunk.bootstrapFromVideo"),
+                    status=InsightStatus.RUNNING,
+                ).model_dump(mode="json")
+            )
+            try:
+                created_count = self._bootstrap_preview_chunk_json_from_materials(
+                    config,
+                    model_name=preset.model_name,
+                    base_url=preset.base_url,
+                    api_key=preset.api_key,
+                )
+            except Exception:
+                LOGGER.warning("Preview chunk bootstrap from video failed; project_id=%s", config.project_id, exc_info=True)
+                created_count = 0
+            if created_count > 0:
+                preview_inputs = self._collect_preview_chunk_json_inputs(config.project_id)[:PREVIEW_MAX_CHUNKS]
 
-        emit_event(
-            InsightEvent(
-                title=t("extractor.chunk.title"),
-                description=t("extractor.chunk.description"),
-                status=InsightStatus.RUNNING,
-            ).model_dump(mode="json")
-        )
+        if preview_inputs:
+            emit_event(
+                InsightEvent(
+                    title=t("extractor.chunk.title"),
+                    description=t("extractor.chunk.usingChunkJson", count=len(preview_inputs)),
+                    status=InsightStatus.RUNNING,
+                ).model_dump(mode="json")
+            )
+        else:
+            emit_event(
+                InsightEvent(
+                    title=t("extractor.chunk.title"),
+                    description=t("extractor.chunk.noChunkJson"),
+                    status=InsightStatus.WARNING,
+                ).model_dump(mode="json")
+            )
+            emit_progress(100)
+            LOGGER.info(
+                "Preview extraction aborted because no readable chunk JSON was found; project_id=%s",
+                config.project_id,
+            )
+            return ""
         emit_progress(30)
 
-        stream_text = ""
-        stream_chars = 0
-        stream_id = "preview_targeted_insight"
-        emit_event(
-            InsightEvent(
-                title=t("extractor.insight.title"),
-                description="",
-                status=InsightStatus.RUNNING,
-                meta={"stream_id": stream_id, "update": True},
-            ).model_dump(mode="json")
-        )
+        final_outputs: list[str] = []
+        total_chunks = max(1, len(preview_inputs))
+        total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        for index, preview_chunk_text in enumerate(preview_inputs, start=1):
+            request = self.build_targeted_insight_request(
+                config,
+                preview_chunk_text,
+                backend="openai_compatible",
+                model_name=preset.model_name,
+                base_url=preset.base_url,
+                api_key=preset.api_key,
+            )
+            request.stream = True
+            request.max_tokens = 220
 
-        def _on_stream_delta(delta: str) -> None:
-            nonlocal stream_text, stream_chars
-            stream_chars += len(delta)
-            emit_progress(min(95, 30 + stream_chars // 4))
-            stream_text += delta
+            stream_text = ""
+            stream_chars = 0
+            stream_id = f"preview_targeted_insight_{index}"
             emit_event(
                 InsightEvent(
                     title=t("extractor.insight.title"),
-                    description=stream_text.strip(),
+                    description="",
                     status=InsightStatus.RUNNING,
                     meta={"stream_id": stream_id, "update": True},
                 ).model_dump(mode="json")
             )
-            if emit_token_usage is not None:
-                emit_token_usage({"char_count": stream_chars})
 
-        result = call_model(request, on_stream_delta=_on_stream_delta)
-        final_text = result.content.strip()
-        emit_event(
-            InsightEvent(
-                title=t("extractor.insight.title"),
-                description=final_text or t("extractor.insight.description"),
-                status=InsightStatus.DONE,
-                meta={"stream_id": stream_id, "update": True},
-            ).model_dump(mode="json")
-        )
-        token_usage = result.metadata.get("token_usage")
-        if emit_token_usage is not None and isinstance(token_usage, dict):
-            normalized: dict[str, int] = {}
-            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-                value = token_usage.get(key)
-                if isinstance(value, int):
-                    normalized[key] = value
-            if normalized:
-                emit_token_usage(normalized)
+            chunk_progress_start = 30 + int((index - 1) * 60 / total_chunks)
+            chunk_progress_end = 30 + int(index * 60 / total_chunks)
+            emit_progress(chunk_progress_start)
+
+            def _on_stream_delta(delta: str) -> None:
+                nonlocal stream_text, stream_chars
+                stream_chars += len(delta)
+                stream_text += delta
+                emit_progress(min(chunk_progress_end, chunk_progress_start + stream_chars // 4))
+                emit_event(
+                    InsightEvent(
+                        title=t("extractor.insight.title"),
+                        description=stream_text.strip(),
+                        status=InsightStatus.RUNNING,
+                        meta={"stream_id": stream_id, "update": True},
+                    ).model_dump(mode="json")
+                )
+                if emit_token_usage is not None:
+                    emit_token_usage({"char_count": stream_chars})
+
+            result = call_model(request, on_stream_delta=_on_stream_delta)
+            final_text = result.content.strip()
+            final_outputs.append(final_text)
+            emit_event(
+                InsightEvent(
+                    title=t("extractor.insight.title"),
+                    description=final_text or t("extractor.insight.description"),
+                    status=InsightStatus.DONE,
+                    meta={"stream_id": stream_id, "update": True},
+                ).model_dump(mode="json")
+            )
+            token_usage = result.metadata.get("token_usage")
+            if isinstance(token_usage, dict):
+                for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                    value = token_usage.get(key)
+                    if isinstance(value, int):
+                        total_usage[key] += value
+            emit_progress(chunk_progress_end)
+
+        if emit_token_usage is not None and any(total_usage.values()):
+            emit_token_usage(total_usage)
         emit_progress(100)
         LOGGER.info("Preview extraction finished; project_id=%s", config.project_id)
-        return final_text
+        return "\n\n".join(item for item in final_outputs if item)

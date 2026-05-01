@@ -80,7 +80,7 @@ def load_messages(locale: str) -> dict[str, str]:
     if not path.exists():
         path = I18N_ROOT / f"{DEFAULT_LOCALE}.json"
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
         LOGGER.warning("Locale messages could not be loaded; locale=%s path=%s", locale, path, exc_info=True)
         return {}

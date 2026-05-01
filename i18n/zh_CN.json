@@ -1,4 +1,4 @@
-{
+﻿{
   "app.nav.home": "首页",
   "app.nav.output": "输出",
   "app.nav.model": "模型",
@@ -328,6 +328,11 @@
   "extractor.config.description": "目标角色：{targets}",
   "extractor.chunk.title": "抽样小切片",
   "extractor.chunk.description": "预览试跑会先读取前 2 个 chunk，用来检查提示词和证据质量。",
+  "extractor.chunk.bootstrapFromVideo": "未发现可用 chunk JSON，正在从视频切片抽帧生成预览文本…",
+  "extractor.chunk.ffmpegMissing": "未检测到可用 FFmpeg，无法从视频切片抽帧。",
+  "extractor.chunk.frameExtractFailed": "视频切片抽帧失败：{error}",
+  "extractor.chunk.noChunkJson": "knowledge_base 下未检测到可读的 chunk JSON，预览已中止。",
+  "extractor.chunk.usingChunkJson": "预览将使用真实 chunk JSON 输入（共 {count} 个 chunk）。",
   "extractor.insight.title": "等待定向洞察",
   "extractor.insight.description": "AI 接入后，拾卡姬会把关键发现写入 knowledge_base/targeted_insights.json。",
   "compiler.placeholder.summary": "编译器占位实现：后续会按 Retrieval -> Chunking -> Rolling Update 汇总角色状态。"
