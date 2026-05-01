@@ -15,7 +15,12 @@
 
 ## 关键文件
 
-- 当前目录暂未放置正式文档文件。
+- `extraction-workflow.zh_CN.md`：面向用户和研究者的提取工作流技术说明，简体中文版本。
+- `extraction-workflow.zh_TW.md`：面向用户和研究者的提取工作流技术说明，繁体中文版本。
+- `extraction-workflow.en_US.md`：面向用户和研究者的提取工作流技术说明，英语版本。
+- `extraction-workflow.ja_JP.md`：面向用户和研究者的提取工作流技术说明，日语版本。
+- `extraction-development-roadmap.zh_CN.md`：面向开发者的提取与角色成长编译开发路线。
+- `README.en_US.md`、`README.ja_JP.md`、`README.zh_TW.md`：README 的多语言补充版本。
 - 后续多语言文档应在文件名中标明语种，例如 `usage.zh_CN.md`。
 
 ## 与其他目录的关系
