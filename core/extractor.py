@@ -298,6 +298,7 @@ class Extractor(QObject):
         previous_chunk_insights: list[str] | None = None,
         previous_episode_extracted_chunks: list[ChunkExtractionResult | dict[str, Any]] | None = None,
         current_season_episode_summaries: list[dict[str, Any]] | None = None,
+        previous_season_background: dict[str, Any] | None = None,
         max_previous_chunks: int = 3,
     ) -> str:
         sections = [f"[CURRENT_CHUNK]\n{chunk_text.strip()}"]
@@ -318,6 +319,11 @@ class Extractor(QObject):
                 "[CURRENT_SEASON_EPISODE_SUMMARIES]\n"
                 + json.dumps(current_season_episode_summaries, ensure_ascii=False, indent=2)
             )
+        if previous_season_background:
+            sections.append(
+                "[PREVIOUS_SEASON_BACKGROUND]\n"
+                + json.dumps(previous_season_background, ensure_ascii=False, indent=2)
+            )
         if previous_episode_summary.strip():
             sections.append(f"[PREVIOUS_EPISODE_SUMMARY]\n{previous_episode_summary.strip()}")
         if previous_chunk_insights:
@@ -337,6 +343,7 @@ class Extractor(QObject):
         previous_chunk_insights: list[str] | None = None,
         previous_episode_extracted_chunks: list[ChunkExtractionResult | dict[str, Any]] | None = None,
         current_season_episode_summaries: list[dict[str, Any]] | None = None,
+        previous_season_background: dict[str, Any] | None = None,
         backend: ModelBackend,
         model_name: str,
         base_url: str = "",
@@ -349,6 +356,7 @@ class Extractor(QObject):
             previous_chunk_insights=previous_chunk_insights,
             previous_episode_extracted_chunks=previous_episode_extracted_chunks,
             current_season_episode_summaries=current_season_episode_summaries,
+            previous_season_background=previous_season_background,
         )
         return build_model_call_request(
             purpose="targeted_insight",
@@ -389,6 +397,30 @@ class Extractor(QObject):
             if isinstance(payload, dict):
                 summaries.append(payload)
         return summaries
+
+    def load_previous_season_background(
+        self,
+        project_id: str,
+        season_id: str,
+        *,
+        enabled: bool = True,
+    ) -> dict[str, Any] | None:
+        if not enabled:
+            return None
+        try:
+            season_index = int(season_id.split("_")[-1])
+        except (ValueError, IndexError):
+            return None
+        if season_index <= 1:
+            return None
+
+        previous_season_id = f"season_{season_index - 1:03d}"
+        knowledge_base = ensure_project_tree(project_id).knowledge_base
+        summary_path = knowledge_base / "seasons" / previous_season_id / "season_summary.json"
+        if not summary_path.exists():
+            return None
+        payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else None
 
     def run_preview(self, config: ProjectConfig) -> None:
         self.run_preview_streaming(config)

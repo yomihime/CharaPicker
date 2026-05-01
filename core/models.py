@@ -55,6 +55,7 @@ class ProjectConfig(BaseModel):
     extraction_mode: ExtractionMode = ExtractionMode.PREVIEW
     source_paths: list[str] = Field(default_factory=list)
     source_processing: SourceProcessingConfig = Field(default_factory=SourceProcessingConfig)
+    include_previous_season_background: bool = True
     raw_cleaned_paths: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
