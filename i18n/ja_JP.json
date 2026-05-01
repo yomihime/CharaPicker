@@ -238,6 +238,7 @@
   "model.cloud.test.report.finalSummary": "最終まとめ",
   "model.cloud.test.tokenUsage": "Token 消費: 入力={prompt_tokens}、出力={completion_tokens}、合計={total_tokens}",
   "model.cloud.test.tokenUsage.empty": "Token 消費: 取得できません",
+  "model.cloud.test.tokenUsage.pending": "Token 消費: 集計中...",
   "model.test.type": "テスト種別",
   "model.test.type.all": "三項目すべて（既定）",
   "model.test.type.text": "テキスト理解",

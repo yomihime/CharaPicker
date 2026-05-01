@@ -441,12 +441,13 @@ class Extractor(QObject):
         model_name: str,
         base_url: str,
         api_key: str,
-    ) -> int:
+    ) -> tuple[int, dict[str, int]]:
         targets = config.target_characters or [t("extractor.noTarget")]
         videos = self._collect_preview_video_chunks(config.project_id)
         if not videos:
-            return 0
+            return (0, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
         created = 0
+        usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         for index, video_path in enumerate(videos, start=1):
             frames = self._build_video_frame_sequence(video_path, PREVIEW_FRAME_COUNT)
             user_text = (
@@ -481,6 +482,12 @@ class Extractor(QObject):
                 metadata={"project_id": config.project_id, "stage": "preview_video_bootstrap"},
             )
             result = call_model(request)
+            token_usage = result.metadata.get("token_usage")
+            if isinstance(token_usage, dict):
+                for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                    value = token_usage.get(key)
+                    if isinstance(value, int):
+                        usage_total[key] += value
             payload = self._extract_json_object(result.content)
             chunk = ChunkExtractionResult(
                 season_id="season_000",
@@ -498,7 +505,7 @@ class Extractor(QObject):
             )
             self.save_chunk_extraction_result(config.project_id, chunk)
             created += 1
-        return created
+        return (created, usage_total)
 
     def _build_chunk_payload(
         self,
@@ -686,6 +693,7 @@ class Extractor(QObject):
             return ""
 
         preview_inputs = self._collect_preview_chunk_json_inputs(config.project_id)[:PREVIEW_MAX_CHUNKS]
+        overall_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         if not preview_inputs:
             emit_event(
                 InsightEvent(
@@ -695,7 +703,7 @@ class Extractor(QObject):
                 ).model_dump(mode="json")
             )
             try:
-                created_count = self._bootstrap_preview_chunk_json_from_materials(
+                created_count, bootstrap_usage = self._bootstrap_preview_chunk_json_from_materials(
                     config,
                     model_name=preset.model_name,
                     base_url=preset.base_url,
@@ -704,6 +712,9 @@ class Extractor(QObject):
             except Exception:
                 LOGGER.warning("Preview chunk bootstrap from video failed; project_id=%s", config.project_id, exc_info=True)
                 created_count = 0
+                bootstrap_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                overall_usage[key] += bootstrap_usage.get(key, 0)
             if created_count > 0:
                 preview_inputs = self._collect_preview_chunk_json_inputs(config.project_id)[:PREVIEW_MAX_CHUNKS]
 
@@ -733,7 +744,7 @@ class Extractor(QObject):
 
         final_outputs: list[str] = []
         total_chunks = max(1, len(preview_inputs))
-        total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        cumulative_char_count = 0
         for index, preview_chunk_text in enumerate(preview_inputs, start=1):
             request = self.build_targeted_insight_request(
                 config,
@@ -763,8 +774,9 @@ class Extractor(QObject):
             emit_progress(chunk_progress_start)
 
             def _on_stream_delta(delta: str) -> None:
-                nonlocal stream_text, stream_chars
+                nonlocal stream_text, stream_chars, cumulative_char_count
                 stream_chars += len(delta)
+                cumulative_char_count += len(delta)
                 stream_text += delta
                 emit_progress(min(chunk_progress_end, chunk_progress_start + stream_chars // 4))
                 emit_event(
@@ -776,7 +788,7 @@ class Extractor(QObject):
                     ).model_dump(mode="json")
                 )
                 if emit_token_usage is not None:
-                    emit_token_usage({"char_count": stream_chars})
+                    emit_token_usage({"char_count": cumulative_char_count})
 
             result = call_model(request, on_stream_delta=_on_stream_delta)
             final_text = result.content.strip()
@@ -794,11 +806,11 @@ class Extractor(QObject):
                 for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
                     value = token_usage.get(key)
                     if isinstance(value, int):
-                        total_usage[key] += value
+                        overall_usage[key] += value
+            if emit_token_usage is not None and any(overall_usage.values()):
+                emit_token_usage(overall_usage)
             emit_progress(chunk_progress_end)
 
-        if emit_token_usage is not None and any(total_usage.values()):
-            emit_token_usage(total_usage)
         emit_progress(100)
         LOGGER.info("Preview extraction finished; project_id=%s", config.project_id)
         return "\n\n".join(item for item in final_outputs if item)

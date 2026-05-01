@@ -238,6 +238,7 @@
   "model.cloud.test.report.finalSummary": "最终总结",
   "model.cloud.test.tokenUsage": "Token 消耗：输入={prompt_tokens}，输出={completion_tokens}，总计={total_tokens}",
   "model.cloud.test.tokenUsage.empty": "Token 消耗：暂无",
+  "model.cloud.test.tokenUsage.pending": "Token 消耗：统计中…",
   "model.test.type": "测试类型",
   "model.test.type.all": "三项都测（默认）",
   "model.test.type.text": "文本理解",
