@@ -55,6 +55,7 @@ class ProjectConfig(BaseModel):
     extraction_mode: ExtractionMode = ExtractionMode.PREVIEW
     source_paths: list[str] = Field(default_factory=list)
     source_processing: SourceProcessingConfig = Field(default_factory=SourceProcessingConfig)
+    include_previous_season_background: bool = True
     raw_cleaned_paths: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
@@ -74,6 +75,21 @@ class CharacterState(BaseModel):
     evidence_count: int = 0
     conflicts: list[str] = Field(default_factory=list)
     updated_at: datetime = Field(default_factory=datetime.now)
+
+
+class ChunkExtractionResult(BaseModel):
+    season_id: str
+    episode_id: str
+    chunk_id: str
+    targets: list[str] = Field(default_factory=list)
+    facts: list[str] = Field(default_factory=list)
+    behavior_traits: list[str] = Field(default_factory=list)
+    dialogue_style: list[str] = Field(default_factory=list)
+    relationship_interactions: list[str] = Field(default_factory=list)
+    conflicts: list[str] = Field(default_factory=list)
+    character_state_changes: list[str] = Field(default_factory=list)
+    insight_summary: str = ""
+    evidence_refs: list[str] = Field(default_factory=list)
 
 
 class ProjectPaths(BaseModel):
