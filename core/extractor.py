@@ -168,6 +168,37 @@ class Extractor(QObject):
         output_path.write_text(json.dumps(episode_content, ensure_ascii=False, indent=2), encoding="utf-8")
         return output_path
 
+    def generate_episode_summary(self, project_id: str, season_id: str, episode_id: str) -> Path:
+        knowledge_base = ensure_project_tree(project_id).knowledge_base
+        episode_dir = knowledge_base / "seasons" / season_id / "episodes" / episode_id
+        episode_content_path = episode_dir / "episode_content.json"
+        if not episode_content_path.exists():
+            raise ValueError("episode content not found; merge episode content first")
+
+        episode_content = json.loads(episode_content_path.read_text(encoding="utf-8"))
+        chunk_results = episode_content.get("chunk_results", [])
+        insight_summaries: list[str] = []
+        for chunk in chunk_results:
+            if not isinstance(chunk, dict):
+                continue
+            insight = chunk.get("insight_summary", "")
+            if isinstance(insight, str) and insight.strip():
+                insight_summaries.append(insight.strip())
+
+        summary = {
+            "season_id": season_id,
+            "episode_id": episode_id,
+            "character_summaries": episode_content.get("behavior_traits", []),
+            "relationship_changes": episode_content.get("relationship_interactions", []),
+            "major_events": episode_content.get("facts", []),
+            "open_conflicts": episode_content.get("conflicts", []),
+            "growth_signals": episode_content.get("character_state_changes", []),
+            "insight_summary": " | ".join(self._deduplicate_preserve_order(insight_summaries)),
+        }
+        summary_path = episode_dir / "episode_summary.json"
+        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+        return summary_path
+
     def _deduplicate_preserve_order(self, values: list[str]) -> list[str]:
         seen: set[str] = set()
         unique_values: list[str] = []
