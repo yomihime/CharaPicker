@@ -77,6 +77,29 @@ class Extractor(QObject):
         )
         return manifest_path
 
+    def initialize_knowledge_base_structure(self, project_id: str, manifest: dict | None = None) -> Path:
+        knowledge_base = ensure_project_tree(project_id).knowledge_base
+        manifest_data = manifest
+        if manifest_data is None:
+            manifest_path = knowledge_base / "source_manifest.json"
+            if not manifest_path.exists():
+                raise ValueError("source manifest not found; generate source_manifest.json first")
+            manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+        seasons = manifest_data.get("seasons", [])
+        seasons_root = knowledge_base / "seasons"
+        for season in seasons:
+            season_id = season.get("season_id")
+            if not isinstance(season_id, str) or not season_id.strip():
+                continue
+            episode_root = seasons_root / season_id / "episodes"
+            for episode in season.get("episodes", []):
+                episode_id = episode.get("episode_id")
+                if not isinstance(episode_id, str) or not episode_id.strip():
+                    continue
+                (episode_root / episode_id / "chunks").mkdir(parents=True, exist_ok=True)
+        return seasons_root
+
     def _build_chunk_payload(
         self,
         chunk_text: str,
