@@ -199,6 +199,56 @@ class Extractor(QObject):
         summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
         return summary_path
 
+    def merge_season_content(self, project_id: str, season_id: str) -> Path:
+        knowledge_base = ensure_project_tree(project_id).knowledge_base
+        episodes_root = knowledge_base / "seasons" / season_id / "episodes"
+        if not episodes_root.exists():
+            raise ValueError("season episodes not found; initialize knowledge base structure first")
+
+        episode_contents: list[dict[str, Any]] = []
+        targets: list[str] = []
+        facts: list[str] = []
+        behavior_traits: list[str] = []
+        dialogue_style: list[str] = []
+        relationship_interactions: list[str] = []
+        conflicts: list[str] = []
+        character_state_changes: list[str] = []
+        evidence_refs: list[str] = []
+
+        for episode_dir in sorted([path for path in episodes_root.iterdir() if path.is_dir()], key=lambda p: p.name.lower()):
+            episode_content_path = episode_dir / "episode_content.json"
+            if not episode_content_path.exists():
+                continue
+            payload = json.loads(episode_content_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict):
+                continue
+            episode_contents.append(payload)
+            targets.extend(payload.get("targets", []))
+            facts.extend(payload.get("facts", []))
+            behavior_traits.extend(payload.get("behavior_traits", []))
+            dialogue_style.extend(payload.get("dialogue_style", []))
+            relationship_interactions.extend(payload.get("relationship_interactions", []))
+            conflicts.extend(payload.get("conflicts", []))
+            character_state_changes.extend(payload.get("character_state_changes", []))
+            evidence_refs.extend(payload.get("evidence_refs", []))
+
+        season_content = {
+            "season_id": season_id,
+            "episode_contents": episode_contents,
+            "targets": self._deduplicate_preserve_order(targets),
+            "facts": self._deduplicate_preserve_order(facts),
+            "behavior_traits": self._deduplicate_preserve_order(behavior_traits),
+            "dialogue_style": self._deduplicate_preserve_order(dialogue_style),
+            "relationship_interactions": self._deduplicate_preserve_order(relationship_interactions),
+            "conflicts": self._deduplicate_preserve_order(conflicts),
+            "character_state_changes": self._deduplicate_preserve_order(character_state_changes),
+            "evidence_refs": self._deduplicate_preserve_order(evidence_refs),
+        }
+        season_dir = knowledge_base / "seasons" / season_id
+        season_content_path = season_dir / "season_content.json"
+        season_content_path.write_text(json.dumps(season_content, ensure_ascii=False, indent=2), encoding="utf-8")
+        return season_content_path
+
     def _deduplicate_preserve_order(self, values: list[str]) -> list[str]:
         seen: set[str] = set()
         unique_values: list[str] = []
