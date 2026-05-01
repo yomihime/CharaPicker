@@ -120,6 +120,21 @@ def write_character_stage_states(project_id: str, character: str) -> list[Path]:
     return written_paths
 
 
+def final_polish_character_state(project_id: str, character: str) -> CharacterState:
+    compiled = compile_character_state_by_season_episode(project_id, character)
+    final_state_payload = compiled.get("final_state", {})
+    final_state = CharacterState.model_validate(final_state_payload)
+    polished_summary = _polish_summary(final_state.summary)
+    polished_conflicts = list(dict.fromkeys([item.strip() for item in final_state.conflicts if item.strip()]))
+    polished_evidence_count = max(0, int(final_state.evidence_count))
+    return CharacterState(
+        character=final_state.character,
+        summary=polished_summary,
+        evidence_count=polished_evidence_count,
+        conflicts=polished_conflicts,
+    )
+
+
 def _apply_episode_payload_to_state(state: CharacterState, payload: dict) -> CharacterState:
     facts = [item for item in payload.get("facts", []) if isinstance(item, str) and item.strip()]
     behavior_traits = [
@@ -141,3 +156,10 @@ def _sorted_dirs(root: Path) -> list[Path]:
     if not root.exists():
         return []
     return sorted([path for path in root.iterdir() if path.is_dir()], key=lambda path: path.name.lower())
+
+
+def _polish_summary(summary: str) -> str:
+    if not summary.strip():
+        return summary
+    parts = [item.strip() for item in summary.split(";") if item.strip()]
+    return "; ".join(dict.fromkeys(parts))
