@@ -119,6 +119,65 @@ class Extractor(QObject):
         )
         return chunk_path
 
+    def merge_episode_content(self, project_id: str, season_id: str, episode_id: str) -> Path:
+        knowledge_base = ensure_project_tree(project_id).knowledge_base
+        episode_dir = knowledge_base / "seasons" / season_id / "episodes" / episode_id
+        chunk_dir = episode_dir / "chunks"
+        chunk_paths = sorted(
+            [path for path in chunk_dir.glob("*.json") if path.is_file()],
+            key=lambda path: path.name.lower(),
+        )
+
+        chunk_results: list[dict[str, Any]] = []
+        targets: list[str] = []
+        facts: list[str] = []
+        behavior_traits: list[str] = []
+        dialogue_style: list[str] = []
+        relationship_interactions: list[str] = []
+        conflicts: list[str] = []
+        character_state_changes: list[str] = []
+        evidence_refs: list[str] = []
+
+        for chunk_path in chunk_paths:
+            payload = json.loads(chunk_path.read_text(encoding="utf-8"))
+            chunk = ChunkExtractionResult.model_validate(payload)
+            chunk_results.append(chunk.model_dump(mode="json"))
+            targets.extend(chunk.targets)
+            facts.extend(chunk.facts)
+            behavior_traits.extend(chunk.behavior_traits)
+            dialogue_style.extend(chunk.dialogue_style)
+            relationship_interactions.extend(chunk.relationship_interactions)
+            conflicts.extend(chunk.conflicts)
+            character_state_changes.extend(chunk.character_state_changes)
+            evidence_refs.extend(chunk.evidence_refs)
+
+        episode_content = {
+            "season_id": season_id,
+            "episode_id": episode_id,
+            "targets": self._deduplicate_preserve_order(targets),
+            "chunk_results": chunk_results,
+            "facts": self._deduplicate_preserve_order(facts),
+            "behavior_traits": self._deduplicate_preserve_order(behavior_traits),
+            "dialogue_style": self._deduplicate_preserve_order(dialogue_style),
+            "relationship_interactions": self._deduplicate_preserve_order(relationship_interactions),
+            "conflicts": self._deduplicate_preserve_order(conflicts),
+            "character_state_changes": self._deduplicate_preserve_order(character_state_changes),
+            "evidence_refs": self._deduplicate_preserve_order(evidence_refs),
+        }
+        output_path = episode_dir / "episode_content.json"
+        output_path.write_text(json.dumps(episode_content, ensure_ascii=False, indent=2), encoding="utf-8")
+        return output_path
+
+    def _deduplicate_preserve_order(self, values: list[str]) -> list[str]:
+        seen: set[str] = set()
+        unique_values: list[str] = []
+        for value in values:
+            if value in seen:
+                continue
+            seen.add(value)
+            unique_values.append(value)
+        return unique_values
+
     def _build_chunk_payload(
         self,
         chunk_text: str,
