@@ -76,6 +76,21 @@ class CharacterState(BaseModel):
     updated_at: datetime = Field(default_factory=datetime.now)
 
 
+class ChunkExtractionResult(BaseModel):
+    season_id: str
+    episode_id: str
+    chunk_id: str
+    targets: list[str] = Field(default_factory=list)
+    facts: list[str] = Field(default_factory=list)
+    behavior_traits: list[str] = Field(default_factory=list)
+    dialogue_style: list[str] = Field(default_factory=list)
+    relationship_interactions: list[str] = Field(default_factory=list)
+    conflicts: list[str] = Field(default_factory=list)
+    character_state_changes: list[str] = Field(default_factory=list)
+    insight_summary: str = ""
+    evidence_refs: list[str] = Field(default_factory=list)
+
+
 class ProjectPaths(BaseModel):
     root: Path
     raw: Path
