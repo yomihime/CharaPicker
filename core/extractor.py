@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from pathlib import Path
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -12,11 +13,57 @@ from utils.i18n import t
 
 
 LOGGER = logging.getLogger(__name__)
+VIDEO_SUFFIXES = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".wmv", ".m4v"}
 
 
 class Extractor(QObject):
     insightGenerated = pyqtSignal(dict)
     progressChanged = pyqtSignal(int)
+
+    def scan_source_directory(self, source_root: str) -> dict:
+        root = Path(source_root).expanduser()
+        if not root.exists() or not root.is_dir():
+            raise ValueError(f"source root does not exist or is not a directory: {source_root}")
+
+        season_dirs = sorted(
+            [path for path in root.iterdir() if path.is_dir()],
+            key=lambda path: path.name.lower(),
+        )
+
+        seasons: list[dict] = []
+        for season_index, season_dir in enumerate(season_dirs, start=1):
+            episode_files = sorted(
+                [
+                    file_path
+                    for file_path in season_dir.iterdir()
+                    if file_path.is_file() and file_path.suffix.lower() in VIDEO_SUFFIXES
+                ],
+                key=lambda path: path.name.lower(),
+            )
+            episodes: list[dict] = []
+            for episode_index, episode_file in enumerate(episode_files, start=1):
+                episodes.append(
+                    {
+                        "episode_id": f"episode_{episode_index:03d}",
+                        "source_file": str(episode_file.resolve()),
+                        "display_title": episode_file.name,
+                        "sort_key": episode_file.name.lower(),
+                    }
+                )
+            seasons.append(
+                {
+                    "season_id": f"season_{season_index:03d}",
+                    "source_folder": str(season_dir.resolve()),
+                    "display_title": season_dir.name,
+                    "sort_key": season_dir.name.lower(),
+                    "episodes": episodes,
+                }
+            )
+
+        return {
+            "source_root": str(root.resolve()),
+            "seasons": seasons,
+        }
 
     def _build_chunk_payload(
         self,
