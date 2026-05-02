@@ -3,7 +3,7 @@
 ## 负责什么
 
 - 放置运行时需要的外部二进制工具。
-- 后续可存放 ffmpeg、llama 等本地可执行文件或其适配目录。
+- 后续可存放 ffmpeg、llama.cpp 等本地可执行文件或其适配目录。
 - 为离线或本地模式提供工具发现位置。
 
 ## 不负责什么
@@ -20,7 +20,9 @@
 
 ## 与其他目录的关系
 
-- `utils/env_manager.py` 后续应检测本目录下工具是否存在和版本是否可用。
+- `utils.env_manager.py` 检测本目录下 llama.cpp 工具是否存在和可用。
+- `utils.ffmpeg_tool.py` 检测本目录下 ffmpeg 工具是否存在和可用。
+- `utils.ffmpeg_downloader.py` 和 `utils.llamacpp_downloader.py` 可向本目录安装运行时工具。
 - `core` 后续媒体解析流程可通过环境检测结果调用这些工具。
 - 打包流程应决定哪些工具需要进入发布包。
 

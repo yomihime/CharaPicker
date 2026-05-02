@@ -21,7 +21,7 @@
 - `state_manager.py`：保存、读取和列出项目配置，项目配置写入 `projects/{project_id}/config.json`。
 - `theme.py`：管理主题偏好，并调用 qfluentwidgets 应用亮色、暗色或系统主题。
 - `chunker.py`：预留文本或素材分块工具。
-- `env_manager.py`：预留环境检测工具。
+- `env_manager.py`：提供 conda 命令前缀、llama.cpp 二进制发现和可用性检测。
 - `ffmpeg_tool.py`：封装 ffmpeg 工具探测、可用性校验与素材转码/分段执行（一个工具一个文件）。
 - `cloud_model_presets.py`：保存和读取云端模型配置预设。
 - `cloud_models.py`：拉取 OpenAI-compatible 云端模型列表。
@@ -39,7 +39,7 @@
 ## 与其他目录的关系
 
 - `gui` 调用 `i18n.py`、`theme.py`、`logging_preferences.py`、`prompt_preferences.py`、`cloud_model_presets.py` 和 `state_manager.py`。
-- `core` 可调用 `i18n.py` 获取当前占位流程文案。
+- `core` 可调用 `i18n.py` 获取流程文案，并通过 `ai_model_middleware.py` 访问模型后端。
 - `core` 的 AI 请求必须通过 `ai_model_middleware.py` 构造和执行，不能直接访问下层模型接口。
 - `ai_model_middleware.py` 从 `res/default_prompts.json` 加载默认提示词资源，并通过 `prompt_preferences.py` 读取非空用户覆盖。
 - `i18n.py`、`theme.py`、`logging_preferences.py`、`prompt_preferences.py` 和 `cloud_model_presets.py` 通过 `global_store.py` 管理全局用户偏好。
@@ -57,5 +57,5 @@
 - 素材导入和清理逻辑集中放在 `source_importer.py`，页面层不要直接复制、链接或删除项目素材文件。
 - 全局用户数据和配置选项统一通过 `global_store.py` 读写。
 - 项目配置读写保持 UTF-8 和结构化 JSON；全局配置读写保持 UTF-8 和结构化 YAML。
-- Model execution must enter backends through `call_text_model()`, `call_image_model()`, or `call_video_model()`.
+- 模型执行必须通过 `call_text_model()`、`call_image_model()` 或 `call_video_model()` 进入后端。
 - 日志不得输出 API Key、完整密钥、隐私文本或大型原始素材内容。

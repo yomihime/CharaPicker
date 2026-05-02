@@ -19,8 +19,8 @@
 
 ## 与其他目录的关系
 
-- `gui/pages/settings_page.py` 当前提供模型路径输入框。
-- `utils/env_manager.py` 后续可检测模型路径和可用性。
+- `gui/pages/model_page.py` 当前负责模型相关界面、云模型预设、本地运行时状态和连通性测试。
+- `utils.env_manager.py` 可检测本地 llama.cpp 运行时；具体模型文件路径由模型页后续扩展。
 - `core` 后续本地推理流程可读取用户配置指向的模型。
 
 ## 维护注意事项
