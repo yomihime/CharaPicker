@@ -3,8 +3,6 @@ from __future__ import annotations
 import base64
 import logging
 import mimetypes
-import subprocess
-import tempfile
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
@@ -48,12 +46,13 @@ from utils.llamacpp_downloader import (
     download_and_install_llamacpp,
 )
 from utils.paths import APP_ROOT
-from utils.ffmpeg_tool import find_usable_ffmpeg_binary
 from utils.ai_model_middleware import (
     ModelMiddlewareError,
     ModelCallRequest,
     ModelMessage,
-    call_model,
+    call_image_model,
+    call_text_model,
+    call_video_model,
 )
 
 
@@ -140,49 +139,6 @@ def _join_failed_items(items: list[str], locale: str) -> str:
     if locale.startswith("ja"):
         return "、".join(items)
     return "、".join(items)
-
-
-def _build_video_frame_sequence(video_path: Path, *, frame_count: int = 4) -> list[str]:
-    ffmpeg_binary = find_usable_ffmpeg_binary()
-    if ffmpeg_binary is None:
-        raise ModelMiddlewareError(t("model.test.video.ffmpegMissing"))
-    if frame_count <= 0:
-        frame_count = 1
-    with tempfile.TemporaryDirectory(prefix="model-video-test-seq-") as temp_dir:
-        pattern = Path(temp_dir) / "frame_%03d.jpg"
-        command = [
-            str(ffmpeg_binary),
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-ss",
-            "00:00:00",
-            "-i",
-            str(video_path),
-            "-vf",
-            "fps=1",
-            "-frames:v",
-            str(frame_count),
-            "-q:v",
-            "3",
-            str(pattern),
-        ]
-        try:
-            completed = subprocess.run(command, capture_output=True, check=False)
-        except OSError as exc:
-            raise ModelMiddlewareError(str(exc)) from exc
-
-        frame_paths = sorted(Path(temp_dir).glob("frame_*.jpg"))
-        if completed.returncode != 0 or not frame_paths:
-            stderr = completed.stderr.decode("utf-8", errors="replace").strip()
-            raise ModelMiddlewareError(
-                t(
-                    "model.test.video.frameExtractFailed",
-                    error=stderr or str(completed.returncode),
-                )
-            )
-        return [_build_data_url(frame_path, "image/jpeg") for frame_path in frame_paths]
 
 
 class LlamaCppDownloadWorker(QObject):
@@ -286,7 +242,7 @@ class CloudTextTestWorker(QObject):
                 ],
                 metadata={"scene": "model_page_text_test"},
             )
-            result = call_model(
+            result = call_text_model(
                 request,
                 on_stream_delta=lambda delta: self.progressChanged.emit(delta),
             )
@@ -356,7 +312,7 @@ class CloudImageTestWorker(QObject):
                 ],
                 metadata={"scene": "model_page_image_test"},
             )
-            result = call_model(
+            result = call_image_model(
                 request,
                 on_stream_delta=lambda delta: self.progressChanged.emit(delta),
             )
@@ -398,16 +354,14 @@ class CloudVideoTestWorker(QObject):
             self.video_path,
         )
         try:
-            frame_sequence = _build_video_frame_sequence(self.video_path)
             request = ModelCallRequest(
                 purpose="connectivity_test_video",
-                backend="openai_compatible",
+                backend="dashscope",
                 model_name=self.model_name,
                 base_url=self.base_url,
                 api_key=self.api_key,
                 temperature=0,
                 max_tokens=96,
-                stream=True,
                 messages=[
                     ModelMessage(role="system", content="You are a video connectivity test assistant."),
                     ModelMessage(
@@ -417,18 +371,18 @@ class CloudVideoTestWorker(QObject):
                                 "type": "text",
                                 "text": (
                                     f"{_response_language_instruction(self.locale)} "
-                                    "The video is represented as sampled frames. "
+                                    "The video is uploaded as a local video file. "
                                     "Describe the video's main scene in one short sentence. "
                                     "Start with CHARA_VIDEO_OK: "
                                 ),
                             },
-                            {"type": "video", "video": frame_sequence},
+                            {"type": "video", "video": str(self.video_path.resolve()), "fps": 2},
                         ],
                     ),
                 ],
                 metadata={"scene": "model_page_video_test"},
             )
-            result = call_model(
+            result = call_video_model(
                 request,
                 on_stream_delta=lambda delta: self.progressChanged.emit(delta),
             )
@@ -494,10 +448,21 @@ class CloudAllTestWorker(QObject):
     def _safe_call(self, request: ModelCallRequest, section: str) -> dict[str, Any]:
         self.sectionStarted.emit(section)
         try:
-            result = call_model(
-                request,
-                on_stream_delta=lambda delta: self.progressChanged.emit(section, delta),
-            )
+            if section == "image":
+                result = call_image_model(
+                    request,
+                    on_stream_delta=lambda delta: self.progressChanged.emit(section, delta),
+                )
+            elif section == "video":
+                result = call_video_model(
+                    request,
+                    on_stream_delta=lambda delta: self.progressChanged.emit(section, delta),
+                )
+            else:
+                result = call_text_model(
+                    request,
+                    on_stream_delta=lambda delta: self.progressChanged.emit(section, delta),
+                )
             prompt_tokens, completion_tokens, total_tokens = _token_usage_log_fields(result.metadata)
             LOGGER.info(
                 "Cloud all-modal section succeeded; section=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s",
@@ -578,16 +543,14 @@ class CloudAllTestWorker(QObject):
         return self._safe_call(request, "image")
 
     def _run_video_test(self) -> dict[str, str]:
-        frame_sequence = _build_video_frame_sequence(self.video_path)
         request = ModelCallRequest(
             purpose="connectivity_test_video",
-            backend="openai_compatible",
+            backend="dashscope",
             model_name=self.model_name,
             base_url=self.base_url,
             api_key=self.api_key,
             temperature=0,
             max_tokens=96,
-            stream=True,
             messages=[
                 ModelMessage(role="system", content="You are a video connectivity test assistant."),
                 ModelMessage(
@@ -597,12 +560,12 @@ class CloudAllTestWorker(QObject):
                             "type": "text",
                             "text": (
                                 f"{_response_language_instruction(self.locale)} "
-                                "The video is represented as sampled frames. "
+                                "The video is uploaded as a local video file. "
                                 "Describe the video's main scene in one short sentence. "
                                 "Start with CHARA_VIDEO_OK: "
                             ),
                         },
-                        {"type": "video", "video": frame_sequence},
+                        {"type": "video", "video": str(self.video_path.resolve()), "fps": 2},
                     ],
                 ),
             ],

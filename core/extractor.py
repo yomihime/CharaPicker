@@ -9,7 +9,13 @@ from typing import Any
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from core.models import ChunkExtractionResult, InsightEvent, InsightStatus, ProjectConfig
-from utils.ai_model_middleware import ModelBackend, ModelCallRequest, ModelMessage, build_model_call_request, call_model
+from utils.ai_model_middleware import (
+    ModelBackend,
+    ModelCallRequest,
+    ModelMessage,
+    build_model_call_request,
+    call_video_model,
+)
 from utils.cloud_model_presets import load_cloud_model_presets
 from utils.i18n import t
 from utils.paths import ensure_project_tree
@@ -491,7 +497,7 @@ class Extractor(QObject):
                 stream=False,
                 metadata={"project_id": config.project_id, "stage": "preview_chunk_extraction"},
             )
-            result = call_model(request)
+            result = call_video_model(request)
             token_usage = result.metadata.get("token_usage")
             if isinstance(token_usage, dict):
                 for key in ("prompt_tokens", "completion_tokens", "total_tokens"):

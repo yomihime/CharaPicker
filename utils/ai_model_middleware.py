@@ -150,7 +150,7 @@ def build_model_call_request(
     )
 
 
-def call_model(
+def _call_model(
     request: ModelCallRequest,
     *,
     on_stream_delta: Callable[[str], None] | None = None,
@@ -165,6 +165,30 @@ def call_model(
             "use this middleware entrypoint when it is added."
         )
     raise ModelCallError(f"Unsupported model backend: {request.backend}")
+
+
+def call_text_model(
+    request: ModelCallRequest,
+    *,
+    on_stream_delta: Callable[[str], None] | None = None,
+) -> ModelCallResult:
+    return _call_model(request, on_stream_delta=on_stream_delta)
+
+
+def call_image_model(
+    request: ModelCallRequest,
+    *,
+    on_stream_delta: Callable[[str], None] | None = None,
+) -> ModelCallResult:
+    return _call_model(request, on_stream_delta=on_stream_delta)
+
+
+def call_video_model(
+    request: ModelCallRequest,
+    *,
+    on_stream_delta: Callable[[str], None] | None = None,
+) -> ModelCallResult:
+    return _call_model(request, on_stream_delta=on_stream_delta)
 
 
 def _render_template(template: str, variables: dict[str, Any]) -> str:
@@ -278,7 +302,7 @@ def _to_dashscope_message(message: ModelMessage) -> dict[str, Any]:
         if "video" in item:
             video = item.get("video")
             if isinstance(video, str):
-                video_part: dict[str, Any] = {"video": video}
+                video_part: dict[str, Any] = {"video": _to_dashscope_file_reference(video)}
                 fps = item.get("fps")
                 if isinstance(fps, (int, float)):
                     video_part["fps"] = fps
@@ -287,12 +311,26 @@ def _to_dashscope_message(message: ModelMessage) -> dict[str, Any]:
         if item_type == "video_url":
             video_url = item.get("video_url")
             if isinstance(video_url, dict) and isinstance(video_url.get("url"), str):
-                video_part = {"video": video_url["url"]}
+                video_part = {"video": _to_dashscope_file_reference(video_url["url"])}
                 fps = item.get("fps")
                 if isinstance(fps, (int, float)):
                     video_part["fps"] = fps
                 content.append(video_part)
     return {"role": message.role, "content": content}
+
+
+def _to_dashscope_file_reference(value: str) -> str:
+    stripped = value.strip()
+    if not stripped:
+        return stripped
+    lower_value = stripped.lower()
+    if lower_value.startswith(("http://", "https://", "file://", "data:")):
+        return stripped
+
+    path = Path(stripped).expanduser()
+    if not path.exists():
+        return stripped
+    return f"file://{path.resolve().as_posix()}"
 
 
 def _dashscope_response_to_dict(response: Any) -> dict[str, Any]:

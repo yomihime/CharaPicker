@@ -57,5 +57,5 @@
 - 素材导入和清理逻辑集中放在 `source_importer.py`，页面层不要直接复制、链接或删除项目素材文件。
 - 全局用户数据和配置选项统一通过 `global_store.py` 读写。
 - 项目配置读写保持 UTF-8 和结构化 JSON；全局配置读写保持 UTF-8 和结构化 YAML。
-- 模型执行只能经由 `call_model()` 进入下层后端。
+- Model execution must enter backends through `call_text_model()`, `call_image_model()`, or `call_video_model()`.
 - 日志不得输出 API Key、完整密钥、隐私文本或大型原始素材内容。

@@ -220,7 +220,7 @@
   "model.cloud.test.text.failureResult": "テキスト理解テスト失敗\nサービス：{provider}\nAPI ベース URL：{base_url}\nモデル：{model_name}\nエラー：{error}",
   "model.cloud.test.image.successResult": "画像理解テスト結果\nサービス：{provider}\nAPI ベース URL：{base_url}\nモデル：{model_name}\nテスト画像：{asset}\n目標応答言語：{target_language}\n固定プローブ指示：Describe the main subject in one short sentence. Start with CHARA_IMAGE_OK:\nモデル出力：\n{response}",
   "model.cloud.test.image.failureResult": "画像理解テスト失敗\nサービス：{provider}\nAPI ベース URL：{base_url}\nモデル：{model_name}\nテスト画像：{asset}\nエラー：{error}",
-  "model.cloud.test.video.successResult": "動画理解テスト結果\nサービス：{provider}\nAPI ベース URL：{base_url}\nモデル：{model_name}\nテスト動画：{asset}\n目標応答言語：{target_language}\n固定プローブ指示：The video is represented as sampled frames. Describe the video's main scene in one short sentence. Start with CHARA_VIDEO_OK:\nモデル出力：\n{response}",
+  "model.cloud.test.video.successResult": "動画理解テスト結果\nサービス：{provider}\nAPI ベース URL：{base_url}\nモデル：{model_name}\nテスト動画：{asset}\n目標応答言語：{target_language}\n固定プローブ指示：The video is uploaded as a local video file. Describe the video's main scene in one short sentence. Start with CHARA_VIDEO_OK:\nモデル出力：\n{response}",
   "model.cloud.test.video.failureResult": "動画理解テスト失敗\nサービス：{provider}\nAPI ベース URL：{base_url}\nモデル：{model_name}\nテスト動画：{asset}\nエラー：{error}",
   "model.cloud.test.all.result": "三項目全テスト結果\nまとめ：{summary}\nサービス：{provider}\nAPI ベース URL：{base_url}\nモデル：{model_name}\n目標応答言語：{target_language}\n画像素材：{image_asset}\n動画素材：{video_asset}\n\n[テキスト] status={text_status}\n{text_content}\n\n[画像] status={image_status}\n{image_content}\n\n[動画] status={video_status}\n{video_content}",
   "model.cloud.test.all.summary.pass": "PASS（{success_count}/{total_count}）",

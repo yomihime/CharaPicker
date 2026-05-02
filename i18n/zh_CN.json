@@ -220,7 +220,7 @@
   "model.cloud.test.text.failureResult": "文本理解测试失败\n服务：{provider}\nAPI 地址：{base_url}\n模型：{model_name}\n错误：{error}",
   "model.cloud.test.image.successResult": "图片理解测试结果\n服务：{provider}\nAPI 地址：{base_url}\n模型：{model_name}\n测试图片：{asset}\n目标回复语言：{target_language}\n固定探活指令：Describe the main subject in one short sentence. Start with CHARA_IMAGE_OK:\n模型输出：\n{response}",
   "model.cloud.test.image.failureResult": "图片理解测试失败\n服务：{provider}\nAPI 地址：{base_url}\n模型：{model_name}\n测试图片：{asset}\n错误：{error}",
-  "model.cloud.test.video.successResult": "视频理解测试结果\n服务：{provider}\nAPI 地址：{base_url}\n模型：{model_name}\n测试视频：{asset}\n目标回复语言：{target_language}\n固定探活指令：The video is represented as sampled frames. Describe the video's main scene in one short sentence. Start with CHARA_VIDEO_OK:\n模型输出：\n{response}",
+  "model.cloud.test.video.successResult": "视频理解测试结果\n服务：{provider}\nAPI 地址：{base_url}\n模型：{model_name}\n测试视频：{asset}\n目标回复语言：{target_language}\n固定探活指令：The video is uploaded as a local video file. Describe the video's main scene in one short sentence. Start with CHARA_VIDEO_OK:\n模型输出：\n{response}",
   "model.cloud.test.video.failureResult": "视频理解测试失败\n服务：{provider}\nAPI 地址：{base_url}\n模型：{model_name}\n测试视频：{asset}\n错误：{error}",
   "model.cloud.test.all.result": "三项全测结果\n总结：{summary}\n服务：{provider}\nAPI 地址：{base_url}\n模型：{model_name}\n目标回复语言：{target_language}\n图片素材：{image_asset}\n视频素材：{video_asset}\n\n[文本理解] status={text_status}\n{text_content}\n\n[图片理解] status={image_status}\n{image_content}\n\n[视频理解] status={video_status}\n{video_content}",
   "model.cloud.test.all.summary.pass": "PASS（{success_count}/{total_count}）",

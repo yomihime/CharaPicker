@@ -220,7 +220,7 @@
   "model.cloud.test.text.failureResult": "文字理解測試失敗\n服務：{provider}\nAPI 位址：{base_url}\n模型：{model_name}\n錯誤：{error}",
   "model.cloud.test.image.successResult": "圖片理解測試結果\n服務：{provider}\nAPI 位址：{base_url}\n模型：{model_name}\n測試圖片：{asset}\n目標回覆語言：{target_language}\n固定探活指令：Describe the main subject in one short sentence. Start with CHARA_IMAGE_OK:\n模型輸出：\n{response}",
   "model.cloud.test.image.failureResult": "圖片理解測試失敗\n服務：{provider}\nAPI 位址：{base_url}\n模型：{model_name}\n測試圖片：{asset}\n錯誤：{error}",
-  "model.cloud.test.video.successResult": "影片理解測試結果\n服務：{provider}\nAPI 位址：{base_url}\n模型：{model_name}\n測試影片：{asset}\n目標回覆語言：{target_language}\n固定探活指令：The video is represented as sampled frames. Describe the video's main scene in one short sentence. Start with CHARA_VIDEO_OK:\n模型輸出：\n{response}",
+  "model.cloud.test.video.successResult": "影片理解測試結果\n服務：{provider}\nAPI 位址：{base_url}\n模型：{model_name}\n測試影片：{asset}\n目標回覆語言：{target_language}\n固定探活指令：The video is uploaded as a local video file. Describe the video's main scene in one short sentence. Start with CHARA_VIDEO_OK:\n模型輸出：\n{response}",
   "model.cloud.test.video.failureResult": "影片理解測試失敗\n服務：{provider}\nAPI 位址：{base_url}\n模型：{model_name}\n測試影片：{asset}\n錯誤：{error}",
   "model.cloud.test.all.result": "三項全測結果\n總結：{summary}\n服務：{provider}\nAPI 位址：{base_url}\n模型：{model_name}\n目標回覆語言：{target_language}\n圖片素材：{image_asset}\n影片素材：{video_asset}\n\n[文字理解] status={text_status}\n{text_content}\n\n[圖片理解] status={image_status}\n{image_content}\n\n[影片理解] status={video_status}\n{video_content}",
   "model.cloud.test.all.summary.pass": "PASS（{success_count}/{total_count}）",
