@@ -714,35 +714,27 @@ class Extractor(QObject):
             LOGGER.info("Preview extraction finished without cloud preset; project_id=%s", config.project_id)
             return ""
 
-        preview_chunks = self._collect_preview_chunk_results(config.project_id)[:PREVIEW_MAX_CHUNKS]
+        preview_chunks: list[ChunkExtractionResult] = []
         overall_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-        if not preview_chunks:
-            emit_event(
-                InsightEvent(
-                    title=t("extractor.chunk.title"),
-                    description=t("extractor.chunk.bootstrapFromVideo"),
-                    status=InsightStatus.RUNNING,
-                ).model_dump(mode="json")
+        try:
+            created_count, extraction_usage, extracted_chunks = self._extract_preview_chunk_json_from_materials(
+                config,
+                model_name=preset.model_name,
+                base_url=preset.base_url,
+                api_key=preset.api_key,
+                emit_token_usage=emit_token_usage,
+                emit_event=emit_event,
+                emit_progress=emit_progress,
             )
-            try:
-                created_count, extraction_usage, extracted_chunks = self._extract_preview_chunk_json_from_materials(
-                    config,
-                    model_name=preset.model_name,
-                    base_url=preset.base_url,
-                    api_key=preset.api_key,
-                    emit_token_usage=emit_token_usage,
-                    emit_event=emit_event,
-                    emit_progress=emit_progress,
-                )
-            except Exception:
-                LOGGER.warning("Preview chunk extraction from video failed; project_id=%s", config.project_id, exc_info=True)
-                created_count = 0
-                extraction_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-                extracted_chunks = []
-            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-                overall_usage[key] += extraction_usage.get(key, 0)
-            if created_count > 0:
-                preview_chunks = extracted_chunks[:PREVIEW_MAX_CHUNKS]
+        except Exception:
+            LOGGER.warning("Preview chunk extraction from video failed; project_id=%s", config.project_id, exc_info=True)
+            created_count = 0
+            extraction_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            extracted_chunks = []
+        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+            overall_usage[key] += extraction_usage.get(key, 0)
+        if created_count > 0:
+            preview_chunks = extracted_chunks[:PREVIEW_MAX_CHUNKS]
 
         if preview_chunks:
             emit_event(
