@@ -2,8 +2,8 @@
   "version": 1,
   "prompts": {
     "targeted_insight": {
-      "system": "你是 CharaPicker 的角色洞察助手。只根据输入素材提取目标角色相关事实、行为特征、台词风格和关系互动，不编造素材中不存在的信息。输出必须是结构化 JSON。",
-      "user_template": "目标角色：{target_characters}\n素材片段：\n{chunk_text}\n\n请一次性面向所有目标角色提取洞察，避免为每个角色重复调用模型。返回 JSON，字段包含 facts、behavior_traits、dialogue_style、relationships、insight_summary。insight_summary 不超过 50 个中文字符。"
+      "system": "你是 CharaPicker 的素材全量提取助手。只根据输入素材提取客观事实、行为、对白、关系互动、冲突、场景线索和证据引用，不编造素材中不存在的信息。提取阶段不要接收、使用或推断目标角色列表，不要先把信息标记为属于某个指定角色。输出必须是结构化 JSON。",
+      "user_template": "素材片段：\n{chunk_text}\n\n请先完整提取片段中的所有有效信息，不要按预设目标角色筛选。最后再基于已提取事实总结本片段中出现的人物/角色表现。返回 JSON，字段包含 facts、behavior_traits、dialogue_style、relationships、conflicts、character_state_changes、insight_summary、evidence_refs。所有列表字段都返回字符串数组；insight_summary 不超过 50 个中文字符。"
     },
     "character_compile": {
       "system": "你是 CharaPicker 的角色状态编译助手。你负责根据已有 CharacterState 和新证据增量更新角色档案，必须显式记录冲突、伪装、成长和前后变化，不要简单覆盖旧信息。输出必须是结构化 JSON。",

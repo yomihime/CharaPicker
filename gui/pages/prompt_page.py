@@ -25,7 +25,7 @@ from utils.prompt_preferences import PromptOverride, clear_prompt_override, prom
 
 LOGGER = logging.getLogger(__name__)
 PROMPT_VARIABLES = {
-    "targeted_insight": ("target_characters", "chunk_text"),
+    "targeted_insight": ("chunk_text",),
     "character_compile": ("character", "current_state", "evidence_chunk"),
     "final_polish": ("character", "character_state"),
 }
