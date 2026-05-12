@@ -143,6 +143,7 @@ class MainWindow(FluentWindow):
         )
         self.switchTo(self.project_page)
         self.project_page.clear_events()
+        self.project_page.set_preview_running(True)
         self._preview_thread = QThread(self)
         self._preview_worker = PreviewWorker(self.extractor, config)
         self._preview_worker.moveToThread(self._preview_thread)
@@ -180,6 +181,7 @@ class MainWindow(FluentWindow):
         )
 
     def _clear_preview_worker(self) -> None:
+        self.project_page.set_preview_running(False)
         self._preview_worker = None
         self._preview_thread = None
 

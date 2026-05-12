@@ -455,6 +455,7 @@ class ProjectPage(QWidget):
         self._encoder_options: list[DeviceOption] = list(initial_encoder_options) if initial_encoder_options else []
         self._ffmpeg_ready_cache = initial_ffmpeg_ready
         self._use_preloaded_encoder_options = initial_encoder_options is not None
+        self._preview_running = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(22, 18, 22, 18)
@@ -782,6 +783,10 @@ class ProjectPage(QWidget):
             )
         )
 
+    def set_preview_running(self, running: bool) -> None:
+        self._preview_running = running
+        self.preview_button.setEnabled(self._has_project() and not running)
+
     def apply_theme_colors(self) -> None:
         if isDarkTheme():
             self.sources_list.setStyleSheet(
@@ -839,7 +844,7 @@ class ProjectPage(QWidget):
         self.configSaved.emit(config)
 
     def _emit_preview(self) -> None:
-        if not self._has_project():
+        if not self._has_project() or self._preview_running:
             return
         self.previewRequested.emit(self.current_config())
 
@@ -1249,7 +1254,7 @@ class ProjectPage(QWidget):
         self.segment_check.setEnabled(has_project)
         self.process_sources_button.setEnabled(has_project)
         self.save_button.setEnabled(has_project)
-        self.preview_button.setEnabled(has_project)
+        self.preview_button.setEnabled(has_project and not self._preview_running)
         self._sync_processing_options()
 
     def _load_selected_project(self) -> None:
