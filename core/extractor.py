@@ -16,7 +16,7 @@ from utils.ai_model_middleware import (
     build_model_call_request,
     call_video_model,
 )
-from utils.cloud_model_presets import load_cloud_model_presets
+from utils.cloud_model_presets import cloud_model_provider, load_cloud_model_presets
 from utils.i18n import t
 from utils.paths import ensure_project_tree
 
@@ -436,6 +436,7 @@ class Extractor(QObject):
         self,
         config: ProjectConfig,
         *,
+        backend: ModelBackend,
         model_name: str,
         base_url: str,
         api_key: str,
@@ -475,7 +476,7 @@ class Extractor(QObject):
             )
             request = ModelCallRequest(
                 purpose="targeted_insight",
-                backend="dashscope",
+                backend=backend,
                 model_name=model_name,
                 base_url=base_url,
                 api_key=api_key,
@@ -719,6 +720,7 @@ class Extractor(QObject):
         try:
             created_count, extraction_usage, extracted_chunks = self._extract_preview_chunk_json_from_materials(
                 config,
+                backend=cloud_model_provider(preset.provider).backend_for("video"),
                 model_name=preset.model_name,
                 base_url=preset.base_url,
                 api_key=preset.api_key,

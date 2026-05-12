@@ -175,6 +175,7 @@
   "model.local.test.all.placeholderResult": "三項目全テスト（ローカルのプレースホルダー）\nモデル：{model_path}\nバックエンド：{runner}\nキャッシュ：{cache}\nテキスト探活：現在のUI言語で回答し、2行で出力：MODEL: <モデル名>；SUMMARY: <一文の自己紹介>\n画像素材：{image_asset}\n動画素材：{video_asset}\n状態：ローカルのマルチモーダルテスト経路はまだ未接続です。",
   "model.cloud.provider": "サービスタイプ",
   "model.cloud.provider.openaiCompatible": "OpenAI Compatible",
+  "model.cloud.provider.aliyunBailian": "Alibaba Bailian",
   "model.cloud.provider.custom": "カスタムサービス",
   "model.cloud.preset": "プリセット",
   "model.cloud.preset.none": "プリセット未選択",

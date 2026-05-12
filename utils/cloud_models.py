@@ -5,6 +5,8 @@ import logging
 import urllib.error
 import urllib.request
 
+from utils.cloud_model_presets import cloud_model_provider
+
 USER_AGENT = "CharaPicker/0.1"
 LOGGER = logging.getLogger(__name__)
 
@@ -54,3 +56,10 @@ def fetch_openai_compatible_models(base_url: str, api_key: str) -> list[str]:
         raise CloudModelListError("No models were returned.")
     LOGGER.info("Cloud model list fetched; endpoint=%s count=%s", endpoint, len(models))
     return models
+
+
+def fetch_cloud_models(provider: str, base_url: str, api_key: str) -> list[str]:
+    provider_config = cloud_model_provider(provider)
+    if provider_config.model_list_kind == "openai_compatible":
+        return fetch_openai_compatible_models(base_url, api_key)
+    raise CloudModelListError(f"Unsupported cloud model list kind: {provider_config.model_list_kind}")

@@ -175,6 +175,7 @@
   "model.local.test.all.placeholderResult": "三項全測（本地占位）\n模型：{model_path}\n後端：{runner}\n快取：{cache}\n文字探活：使用目前語言回覆，並輸出兩行：MODEL: <模型名>；SUMMARY: <一句話簡述>\n圖片素材：{image_asset}\n影片素材：{video_asset}\n狀態：本地多模態測試通道尚未接入。",
   "model.cloud.provider": "服務類型",
   "model.cloud.provider.openaiCompatible": "OpenAI Compatible",
+  "model.cloud.provider.aliyunBailian": "阿里百煉",
   "model.cloud.provider.custom": "自訂服務",
   "model.cloud.preset": "設定預設",
   "model.cloud.preset.none": "未選擇預設",

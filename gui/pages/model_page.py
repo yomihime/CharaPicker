@@ -31,11 +31,14 @@ from qfluentwidgets import (
 
 from gui.widgets.dialog_middleware import FluentDialog
 from gui.widgets.streaming_text_session import StreamingTextSession
-from utils.cloud_models import CloudModelListError, fetch_openai_compatible_models
+from utils.cloud_models import CloudModelListError, fetch_cloud_models
 from utils.cloud_model_presets import (
+    CLOUD_PROVIDER_IDS,
     CloudModelPreset,
+    cloud_model_provider,
     delete_cloud_model_preset,
     load_cloud_model_presets,
+    normalize_cloud_provider,
     upsert_cloud_model_preset,
 )
 from utils.env_manager import has_llamacpp_binary
@@ -180,15 +183,16 @@ class CloudModelListWorker(QObject):
     failed = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, base_url: str, api_key: str) -> None:
+    def __init__(self, provider: str, base_url: str, api_key: str) -> None:
         super().__init__()
+        self.provider = provider
         self.base_url = base_url
         self.api_key = api_key
 
     def run(self) -> None:
         LOGGER.info("Cloud model list worker started; base_url=%s", self.base_url)
         try:
-            models = fetch_openai_compatible_models(self.base_url, self.api_key)
+            models = fetch_cloud_models(self.provider, self.base_url, self.api_key)
         except CloudModelListError as exc:
             LOGGER.warning("Cloud model list worker failed; base_url=%s", self.base_url, exc_info=True)
             self.failed.emit(str(exc))
@@ -205,8 +209,9 @@ class CloudTextTestWorker(QObject):
     failed = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, *, base_url: str, api_key: str, model_name: str, locale: str) -> None:
+    def __init__(self, *, provider: str, base_url: str, api_key: str, model_name: str, locale: str) -> None:
         super().__init__()
+        self.provider = provider
         self.base_url = base_url
         self.api_key = api_key
         self.model_name = model_name
@@ -221,7 +226,7 @@ class CloudTextTestWorker(QObject):
         try:
             request = ModelCallRequest(
                 purpose="connectivity_test",
-                backend="openai_compatible",
+                backend=cloud_model_provider(self.provider).backend_for("text"),
                 model_name=self.model_name,
                 base_url=self.base_url,
                 api_key=self.api_key,
@@ -268,8 +273,9 @@ class CloudImageTestWorker(QObject):
     failed = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, *, base_url: str, api_key: str, model_name: str, image_path: Path, locale: str) -> None:
+    def __init__(self, *, provider: str, base_url: str, api_key: str, model_name: str, image_path: Path, locale: str) -> None:
         super().__init__()
+        self.provider = provider
         self.base_url = base_url
         self.api_key = api_key
         self.model_name = model_name
@@ -287,7 +293,7 @@ class CloudImageTestWorker(QObject):
             image_data_url = _build_data_url(self.image_path, "image/jpeg")
             request = ModelCallRequest(
                 purpose="connectivity_test_image",
-                backend="openai_compatible",
+                backend=cloud_model_provider(self.provider).backend_for("image"),
                 model_name=self.model_name,
                 base_url=self.base_url,
                 api_key=self.api_key,
@@ -338,8 +344,9 @@ class CloudVideoTestWorker(QObject):
     failed = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, *, base_url: str, api_key: str, model_name: str, video_path: Path, locale: str) -> None:
+    def __init__(self, *, provider: str, base_url: str, api_key: str, model_name: str, video_path: Path, locale: str) -> None:
         super().__init__()
+        self.provider = provider
         self.base_url = base_url
         self.api_key = api_key
         self.model_name = model_name
@@ -356,7 +363,7 @@ class CloudVideoTestWorker(QObject):
         try:
             request = ModelCallRequest(
                 purpose="connectivity_test_video",
-                backend="dashscope",
+                backend=cloud_model_provider(self.provider).backend_for("video"),
                 model_name=self.model_name,
                 base_url=self.base_url,
                 api_key=self.api_key,
@@ -413,6 +420,7 @@ class CloudAllTestWorker(QObject):
     def __init__(
         self,
         *,
+        provider: str,
         base_url: str,
         api_key: str,
         model_name: str,
@@ -422,6 +430,7 @@ class CloudAllTestWorker(QObject):
         text_prompt_override: str | None = None,
     ) -> None:
         super().__init__()
+        self.provider = provider
         self.base_url = base_url
         self.api_key = api_key
         self.model_name = model_name
@@ -496,7 +505,7 @@ class CloudAllTestWorker(QObject):
             max_tokens = 64
         request = ModelCallRequest(
             purpose="connectivity_test",
-            backend="openai_compatible",
+            backend=cloud_model_provider(self.provider).backend_for("text"),
             model_name=self.model_name,
             base_url=self.base_url,
             api_key=self.api_key,
@@ -515,7 +524,7 @@ class CloudAllTestWorker(QObject):
         image_data_url = _build_data_url(self.image_path, "image/jpeg")
         request = ModelCallRequest(
             purpose="connectivity_test_image",
-            backend="openai_compatible",
+            backend=cloud_model_provider(self.provider).backend_for("image"),
             model_name=self.model_name,
             base_url=self.base_url,
             api_key=self.api_key,
@@ -545,7 +554,7 @@ class CloudAllTestWorker(QObject):
     def _run_video_test(self) -> dict[str, str]:
         request = ModelCallRequest(
             purpose="connectivity_test_video",
-            backend="dashscope",
+            backend=cloud_model_provider(self.provider).backend_for("video"),
             model_name=self.model_name,
             base_url=self.base_url,
             api_key=self.api_key,
@@ -802,12 +811,9 @@ class ModelPage(QWidget):
         preset_row.addWidget(self.delete_cloud_preset_button)
 
         self.cloud_provider_combo = ComboBox(self.cloud_card)
-        self.cloud_provider_combo.addItems(
-            [
-                t("model.cloud.provider.openaiCompatible"),
-                t("model.cloud.provider.custom"),
-            ]
-        )
+        for provider_id in CLOUD_PROVIDER_IDS:
+            provider = cloud_model_provider(provider_id)
+            self.cloud_provider_combo.addItem(t(provider.label_key), provider.provider_id)
 
         self.cloud_base_url = LineEdit(self.cloud_card)
         self.cloud_base_url.setPlaceholderText(t("model.cloud.baseUrl.placeholder"))
@@ -1106,7 +1112,7 @@ class ModelPage(QWidget):
         self.fetch_cloud_models_button.setEnabled(False)
         self.fetch_cloud_models_button.setText(t("model.cloud.models.fetching"))
         self._cloud_models_thread = QThread(self)
-        self._cloud_models_worker = CloudModelListWorker(base_url, api_key)
+        self._cloud_models_worker = CloudModelListWorker(self._current_cloud_provider_id(), base_url, api_key)
         self._cloud_models_worker.moveToThread(self._cloud_models_thread)
         self._cloud_models_thread.started.connect(self._cloud_models_worker.run)
         self._cloud_models_worker.succeeded.connect(self._show_cloud_models)
@@ -1138,6 +1144,9 @@ class ModelPage(QWidget):
         self.fetch_cloud_models_button.setText(t("model.cloud.models.fetch"))
         self._cloud_models_thread = None
         self._cloud_models_worker = None
+
+    def _current_cloud_provider_id(self) -> str:
+        return normalize_cloud_provider(str(self.cloud_provider_combo.currentData() or ""))
 
     def _test_cloud_model(self) -> None:
         test_type = self.cloud_test_type_combo.currentData() or "all"
@@ -1183,6 +1192,7 @@ class ModelPage(QWidget):
         locale = current_locale()
         self._cloud_text_test_thread = QThread(self)
         self._cloud_text_test_worker = CloudTextTestWorker(
+            provider=self._current_cloud_provider_id(),
             base_url=base_url,
             api_key=self.cloud_api_key.text().strip(),
             model_name=model_name,
@@ -1252,6 +1262,7 @@ class ModelPage(QWidget):
         locale = current_locale()
         self._cloud_image_test_thread = QThread(self)
         self._cloud_image_test_worker = CloudImageTestWorker(
+            provider=self._current_cloud_provider_id(),
             base_url=base_url,
             api_key=self.cloud_api_key.text().strip(),
             model_name=model_name,
@@ -1322,6 +1333,7 @@ class ModelPage(QWidget):
         locale = current_locale()
         self._cloud_video_test_thread = QThread(self)
         self._cloud_video_test_worker = CloudVideoTestWorker(
+            provider=self._current_cloud_provider_id(),
             base_url=base_url,
             api_key=self.cloud_api_key.text().strip(),
             model_name=model_name,
@@ -1371,6 +1383,7 @@ class ModelPage(QWidget):
         locale = current_locale()
         self._cloud_all_test_thread = QThread(self)
         self._cloud_all_test_worker = CloudAllTestWorker(
+            provider=self._current_cloud_provider_id(),
             base_url=base_url,
             api_key=self.cloud_api_key.text().strip(),
             model_name=model_name,
@@ -1766,7 +1779,10 @@ class ModelPage(QWidget):
         self.cloud_base_url.setText(preset.base_url)
         self.cloud_api_key.setText(preset.api_key)
         self.cloud_model_name.setText(preset.model_name)
-        provider_index = 0 if preset.provider != "custom" else 1
+        provider_id = normalize_cloud_provider(preset.provider)
+        provider_index = self.cloud_provider_combo.findData(provider_id)
+        if provider_index < 0:
+            provider_index = 0
         self.cloud_provider_combo.setCurrentIndex(provider_index)
 
     def _save_current_cloud_preset(self) -> None:
@@ -1784,7 +1800,7 @@ class ModelPage(QWidget):
 
         preset = CloudModelPreset(
             name=name,
-            provider="custom" if self.cloud_provider_combo.currentIndex() == 1 else "openaiCompatible",
+            provider=self._current_cloud_provider_id(),
             base_url=self.cloud_base_url.text().strip(),
             api_key=self.cloud_api_key.text().strip(),
             model_name=self.cloud_model_name.text().strip(),

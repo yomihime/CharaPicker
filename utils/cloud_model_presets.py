@@ -3,11 +3,24 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import asdict, dataclass
+from typing import Literal
 
 from utils.global_store import get_global_value, set_global_value
 
 CLOUD_MODEL_PRESETS_KEY = "model/cloudPresets"
 LOGGER = logging.getLogger(__name__)
+CloudProviderId = Literal["aliyunBailian", "openaiCompatible", "custom"]
+CloudModelModality = Literal["text", "image", "video"]
+
+CLOUD_PROVIDER_ALIYUN_BAILIAN = "aliyunBailian"
+CLOUD_PROVIDER_OPENAI_COMPATIBLE = "openaiCompatible"
+CLOUD_PROVIDER_CUSTOM = "custom"
+
+CLOUD_PROVIDER_IDS: tuple[CloudProviderId, ...] = (
+    CLOUD_PROVIDER_ALIYUN_BAILIAN,
+    CLOUD_PROVIDER_OPENAI_COMPATIBLE,
+    CLOUD_PROVIDER_CUSTOM,
+)
 
 
 @dataclass(slots=True)
@@ -17,6 +30,73 @@ class CloudModelPreset:
     base_url: str
     api_key: str
     model_name: str
+
+
+@dataclass(frozen=True, slots=True)
+class CloudModelProvider:
+    provider_id: CloudProviderId
+    label_key: str
+    model_list_kind: str
+    text_backend: str
+    image_backend: str
+    video_backend: str
+
+    def backend_for(self, modality: CloudModelModality) -> str:
+        if modality == "video":
+            return self.video_backend
+        if modality == "image":
+            return self.image_backend
+        return self.text_backend
+
+
+CLOUD_MODEL_PROVIDERS: dict[CloudProviderId, CloudModelProvider] = {
+    CLOUD_PROVIDER_ALIYUN_BAILIAN: CloudModelProvider(
+        provider_id=CLOUD_PROVIDER_ALIYUN_BAILIAN,
+        label_key="model.cloud.provider.aliyunBailian",
+        model_list_kind="openai_compatible",
+        text_backend="openai_compatible",
+        image_backend="openai_compatible",
+        video_backend="dashscope",
+    ),
+    CLOUD_PROVIDER_OPENAI_COMPATIBLE: CloudModelProvider(
+        provider_id=CLOUD_PROVIDER_OPENAI_COMPATIBLE,
+        label_key="model.cloud.provider.openaiCompatible",
+        model_list_kind="openai_compatible",
+        text_backend="openai_compatible",
+        image_backend="openai_compatible",
+        video_backend="openai_compatible",
+    ),
+    CLOUD_PROVIDER_CUSTOM: CloudModelProvider(
+        provider_id=CLOUD_PROVIDER_CUSTOM,
+        label_key="model.cloud.provider.custom",
+        model_list_kind="openai_compatible",
+        text_backend="openai_compatible",
+        image_backend="openai_compatible",
+        video_backend="openai_compatible",
+    ),
+}
+
+
+def normalize_cloud_provider(provider: str) -> CloudProviderId:
+    normalized = provider.strip()
+    aliases = {
+        "dashscope": CLOUD_PROVIDER_ALIYUN_BAILIAN,
+        "aliyun": CLOUD_PROVIDER_ALIYUN_BAILIAN,
+        "aliyun_bailian": CLOUD_PROVIDER_ALIYUN_BAILIAN,
+        "aliBailian": CLOUD_PROVIDER_ALIYUN_BAILIAN,
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized in CLOUD_MODEL_PROVIDERS:
+        return normalized  # type: ignore[return-value]
+    if normalized == CLOUD_PROVIDER_CUSTOM:
+        return CLOUD_PROVIDER_CUSTOM
+    if normalized == CLOUD_PROVIDER_OPENAI_COMPATIBLE:
+        return CLOUD_PROVIDER_OPENAI_COMPATIBLE
+    return CLOUD_PROVIDER_ALIYUN_BAILIAN
+
+
+def cloud_model_provider(provider: str) -> CloudModelProvider:
+    return CLOUD_MODEL_PROVIDERS[normalize_cloud_provider(provider)]
 
 
 def load_cloud_model_presets() -> list[CloudModelPreset]:
@@ -43,7 +123,7 @@ def load_cloud_model_presets() -> list[CloudModelPreset]:
         presets.append(
             CloudModelPreset(
                 name=name,
-                provider=str(item.get("provider", "")),
+                provider=normalize_cloud_provider(str(item.get("provider", ""))),
                 base_url=str(item.get("base_url", "")),
                 api_key=str(item.get("api_key", "")),
                 model_name=str(item.get("model_name", "")),

@@ -175,6 +175,7 @@
   "model.local.test.all.placeholderResult": "三项全测（本地占位）\n模型：{model_path}\n后端：{runner}\n缓存：{cache}\n文本探活：使用当前语言回复，并输出两行：MODEL: <模型名>；SUMMARY: <一句话简述>\n图片素材：{image_asset}\n视频素材：{video_asset}\n状态：本地多模态测试通道尚未接入。",
   "model.cloud.provider": "服务类型",
   "model.cloud.provider.openaiCompatible": "OpenAI Compatible",
+  "model.cloud.provider.aliyunBailian": "阿里百炼",
   "model.cloud.provider.custom": "自定义服务",
   "model.cloud.preset": "配置预设",
   "model.cloud.preset.none": "未选择预设",

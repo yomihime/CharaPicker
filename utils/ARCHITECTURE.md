@@ -23,8 +23,8 @@
 - `chunker.py`：预留文本或素材分块工具。
 - `env_manager.py`：提供 conda 命令前缀、llama.cpp 二进制发现和可用性检测。
 - `ffmpeg_tool.py`：封装 ffmpeg 工具探测、可用性校验与素材转码/分段执行（一个工具一个文件）。
-- `cloud_model_presets.py`：保存和读取云端模型配置预设。
-- `cloud_models.py`：拉取 OpenAI-compatible 云端模型列表。
+- `cloud_model_presets.py`：保存和读取云端模型配置预设，并维护云端服务类型到模型调用后端的映射。
+- `cloud_models.py`：按云端服务类型路由并拉取模型列表，当前底层复用 OpenAI-compatible 模型列表接口。
 - `llamacpp_downloader.py`：下载并安装 llama.cpp 运行时到 `bin/`。
 - `ffmpeg_downloader.py`：下载并安装 ffmpeg 运行时到 `bin/`。
 - `source_importer.py`：把外部原始素材按项目目录规则复制到 `projects/{project_id}/raw`，计算外部路径对应的 raw 目标，准备 `materials`，并支持 raw 清理和素材移除。
