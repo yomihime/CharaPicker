@@ -11,6 +11,8 @@ CLOUD_MODEL_PRESETS_KEY = "model/cloudPresets"
 LOGGER = logging.getLogger(__name__)
 CloudProviderId = Literal["aliyunBailian", "openaiCompatible", "custom"]
 CloudModelModality = Literal["text", "image", "video"]
+VideoFpsMode = Literal["direct", "frame_sampling", "none"]
+DEFAULT_CLOUD_VIDEO_FPS = 2.0
 
 CLOUD_PROVIDER_ALIYUN_BAILIAN = "aliyunBailian"
 CLOUD_PROVIDER_OPENAI_COMPATIBLE = "openaiCompatible"
@@ -30,6 +32,7 @@ class CloudModelPreset:
     base_url: str
     api_key: str
     model_name: str
+    video_fps: float = DEFAULT_CLOUD_VIDEO_FPS
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +43,7 @@ class CloudModelProvider:
     text_backend: str
     image_backend: str
     video_backend: str
+    video_fps_mode: VideoFpsMode
 
     def backend_for(self, modality: CloudModelModality) -> str:
         if modality == "video":
@@ -47,6 +51,10 @@ class CloudModelProvider:
         if modality == "image":
             return self.image_backend
         return self.text_backend
+
+    @property
+    def supports_video_fps(self) -> bool:
+        return self.video_fps_mode != "none"
 
 
 CLOUD_MODEL_PROVIDERS: dict[CloudProviderId, CloudModelProvider] = {
@@ -57,6 +65,7 @@ CLOUD_MODEL_PROVIDERS: dict[CloudProviderId, CloudModelProvider] = {
         text_backend="openai_compatible",
         image_backend="openai_compatible",
         video_backend="dashscope",
+        video_fps_mode="direct",
     ),
     CLOUD_PROVIDER_OPENAI_COMPATIBLE: CloudModelProvider(
         provider_id=CLOUD_PROVIDER_OPENAI_COMPATIBLE,
@@ -65,6 +74,7 @@ CLOUD_MODEL_PROVIDERS: dict[CloudProviderId, CloudModelProvider] = {
         text_backend="openai_compatible",
         image_backend="openai_compatible",
         video_backend="openai_compatible",
+        video_fps_mode="frame_sampling",
     ),
     CLOUD_PROVIDER_CUSTOM: CloudModelProvider(
         provider_id=CLOUD_PROVIDER_CUSTOM,
@@ -73,6 +83,7 @@ CLOUD_MODEL_PROVIDERS: dict[CloudProviderId, CloudModelProvider] = {
         text_backend="openai_compatible",
         image_backend="openai_compatible",
         video_backend="openai_compatible",
+        video_fps_mode="frame_sampling",
     ),
 }
 
@@ -127,6 +138,7 @@ def load_cloud_model_presets() -> list[CloudModelPreset]:
                 base_url=str(item.get("base_url", "")),
                 api_key=str(item.get("api_key", "")),
                 model_name=str(item.get("model_name", "")),
+                video_fps=_coerce_video_fps(item.get("video_fps")),
             )
         )
     LOGGER.info("Cloud model presets loaded; count=%s", len(presets))
@@ -149,3 +161,13 @@ def delete_cloud_model_preset(name: str) -> list[CloudModelPreset]:
     presets = [item for item in load_cloud_model_presets() if item.name != name]
     save_cloud_model_presets(presets)
     return presets
+
+
+def _coerce_video_fps(value: object) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return DEFAULT_CLOUD_VIDEO_FPS
+    if parsed <= 0:
+        return DEFAULT_CLOUD_VIDEO_FPS
+    return min(parsed, 10.0)

@@ -377,8 +377,8 @@ class Extractor(QObject):
             key=lambda path: path.relative_to(materials_root).as_posix().lower(),
         )[:PREVIEW_MAX_CHUNKS]
 
-    def _build_video_chunk_part(self, video_path: Path) -> dict[str, Any]:
-        return {"video": f"file://{video_path.resolve().as_posix()}", "fps": 1}
+    def _build_video_chunk_part(self, video_path: Path, video_fps: float) -> dict[str, Any]:
+        return {"video": f"file://{video_path.resolve().as_posix()}", "fps": video_fps}
 
     def _preview_chunk_identity(self, project_id: str, video_path: Path, fallback_index: int) -> tuple[str, str, str]:
         materials_root = ensure_project_tree(project_id).materials
@@ -440,6 +440,7 @@ class Extractor(QObject):
         model_name: str,
         base_url: str,
         api_key: str,
+        video_fps: float,
         emit_token_usage: Callable[[dict[str, int]], None] | None = None,
         emit_event: Callable[[dict], None] | None = None,
         emit_progress: Callable[[int], None] | None = None,
@@ -488,7 +489,7 @@ class Extractor(QObject):
                     ModelMessage(
                         role="user",
                         content=[
-                            self._build_video_chunk_part(video_path),
+                            self._build_video_chunk_part(video_path, video_fps),
                             {"type": "text", "text": user_text},
                         ],
                     ),
@@ -724,6 +725,7 @@ class Extractor(QObject):
                 model_name=preset.model_name,
                 base_url=preset.base_url,
                 api_key=preset.api_key,
+                video_fps=preset.video_fps,
                 emit_token_usage=emit_token_usage,
                 emit_event=emit_event,
                 emit_progress=emit_progress,

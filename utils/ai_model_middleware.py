@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
+import mimetypes
+import os
+import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -14,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from utils.paths import APP_ROOT
 from utils.prompt_preferences import prompt_override
+from utils.ffmpeg_tool import find_usable_ffmpeg_binary
 
 
 LOGGER = logging.getLogger(__name__)
@@ -376,6 +382,111 @@ def _extract_dashscope_content(payload: dict[str, Any]) -> str:
     raise ModelCallError("DashScope response message content is not text.")
 
 
+def _to_openai_compatible_message(message: ModelMessage) -> dict[str, Any]:
+    if isinstance(message.content, str):
+        return message.model_dump()
+
+    content: list[dict[str, Any]] = []
+    for item in message.content:
+        if not isinstance(item, dict):
+            continue
+        if _is_video_content_item(item):
+            content.extend(_openai_video_item_to_image_parts(item))
+            continue
+        content.append(item)
+    return {"role": message.role, "content": content}
+
+
+def _is_video_content_item(item: dict[str, Any]) -> bool:
+    return "video" in item or item.get("type") == "video_url"
+
+
+def _openai_video_item_to_image_parts(item: dict[str, Any]) -> list[dict[str, Any]]:
+    fps = _coerce_video_fps(item.get("fps"))
+    video_reference = item.get("video")
+    if not isinstance(video_reference, str):
+        video_url = item.get("video_url")
+        if isinstance(video_url, dict) and isinstance(video_url.get("url"), str):
+            video_reference = video_url["url"]
+    if not isinstance(video_reference, str):
+        raise ModelCallError("OpenAI-compatible video input requires a local video path.")
+
+    video_path = _local_path_from_reference(video_reference)
+    if video_path is None or not video_path.is_file():
+        raise ModelCallError("OpenAI-compatible video input currently requires a local video file.")
+    data_urls = _extract_video_frame_data_urls(video_path, fps)
+    return [{"type": "image_url", "image_url": {"url": data_url}} for data_url in data_urls]
+
+
+def _coerce_video_fps(value: Any) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = 2.0
+    return min(max(parsed, 0.1), 10.0)
+
+
+def _local_path_from_reference(value: str) -> Path | None:
+    stripped = value.strip()
+    if not stripped:
+        return None
+    lower_value = stripped.lower()
+    if lower_value.startswith("file://"):
+        path_text = stripped[7:]
+        if os.name == "nt" and len(path_text) >= 3 and path_text[0] == "/" and path_text[2] == ":":
+            path_text = path_text[1:]
+        return Path(path_text).expanduser()
+    if lower_value.startswith(("http://", "https://", "data:")):
+        return None
+    return Path(stripped).expanduser()
+
+
+def _extract_video_frame_data_urls(video_path: Path, fps: float, max_frames: int = 24) -> list[str]:
+    ffmpeg_binary = find_usable_ffmpeg_binary()
+    if ffmpeg_binary is None:
+        raise ModelCallError("FFmpeg is required to sample video frames for OpenAI-compatible video input.")
+
+    with tempfile.TemporaryDirectory(prefix="charapicker_video_frames_") as temp_dir:
+        frame_pattern = Path(temp_dir) / "frame_%03d.jpg"
+        command = [
+            str(ffmpeg_binary),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(video_path),
+            "-vf",
+            f"fps={fps}",
+            "-frames:v",
+            str(max_frames),
+            "-q:v",
+            "3",
+            str(frame_pattern),
+        ]
+        try:
+            completed = subprocess.run(command, capture_output=True, check=False, timeout=120)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ModelCallError(f"Video frame sampling failed: {exc}") from exc
+        if completed.returncode != 0:
+            error_text = completed.stderr.decode("utf-8", errors="replace").strip()
+            raise ModelCallError(f"Video frame sampling failed: {error_text or completed.returncode}")
+
+        data_urls: list[str] = []
+        for frame_path in sorted(Path(temp_dir).glob("frame_*.jpg")):
+            mime_type, _ = mimetypes.guess_type(frame_path.name)
+            encoded = base64.b64encode(frame_path.read_bytes()).decode("ascii")
+            data_urls.append(f"data:{mime_type or 'image/jpeg'};base64,{encoded}")
+        if not data_urls:
+            raise ModelCallError("Video frame sampling produced no frames.")
+        LOGGER.info(
+            "Sampled video frames for OpenAI-compatible request; video=%s fps=%s frames=%s",
+            video_path.name,
+            fps,
+            len(data_urls),
+        )
+        return data_urls
+
+
 def _call_openai_compatible(
     request: ModelCallRequest,
     *,
@@ -387,7 +498,7 @@ def _call_openai_compatible(
 
     payload: dict[str, Any] = {
         "model": request.model_name,
-        "messages": [message.model_dump() for message in request.messages],
+        "messages": [_to_openai_compatible_message(message) for message in request.messages],
         "temperature": request.temperature,
     }
     if request.max_tokens is not None:

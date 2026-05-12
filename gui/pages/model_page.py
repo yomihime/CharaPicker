@@ -5,7 +5,7 @@ import logging
 import mimetypes
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, QThread, pyqtSignal
+from PyQt6.QtCore import QObject, QSignalBlocker, Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
@@ -25,6 +25,7 @@ from qfluentwidgets import (
     ProgressBar,
     PushButton,
     SearchLineEdit,
+    Slider,
     SubtitleLabel,
     SwitchButton,
 )
@@ -34,6 +35,7 @@ from gui.widgets.streaming_text_session import StreamingTextSession
 from utils.cloud_models import CloudModelListError, fetch_cloud_models
 from utils.cloud_model_presets import (
     CLOUD_PROVIDER_IDS,
+    DEFAULT_CLOUD_VIDEO_FPS,
     CloudModelPreset,
     cloud_model_provider,
     delete_cloud_model_preset,
@@ -344,13 +346,24 @@ class CloudVideoTestWorker(QObject):
     failed = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, *, provider: str, base_url: str, api_key: str, model_name: str, video_path: Path, locale: str) -> None:
+    def __init__(
+        self,
+        *,
+        provider: str,
+        base_url: str,
+        api_key: str,
+        model_name: str,
+        video_path: Path,
+        video_fps: float,
+        locale: str,
+    ) -> None:
         super().__init__()
         self.provider = provider
         self.base_url = base_url
         self.api_key = api_key
         self.model_name = model_name
         self.video_path = video_path
+        self.video_fps = video_fps
         self.locale = locale
 
     def run(self) -> None:
@@ -383,7 +396,7 @@ class CloudVideoTestWorker(QObject):
                                     "Start with CHARA_VIDEO_OK: "
                                 ),
                             },
-                            {"type": "video", "video": str(self.video_path.resolve()), "fps": 2},
+                            {"type": "video", "video": str(self.video_path.resolve()), "fps": self.video_fps},
                         ],
                     ),
                 ],
@@ -426,6 +439,7 @@ class CloudAllTestWorker(QObject):
         model_name: str,
         image_path: Path,
         video_path: Path,
+        video_fps: float,
         locale: str,
         text_prompt_override: str | None = None,
     ) -> None:
@@ -436,6 +450,7 @@ class CloudAllTestWorker(QObject):
         self.model_name = model_name
         self.image_path = image_path
         self.video_path = video_path
+        self.video_fps = video_fps
         self.locale = locale
         self.text_prompt_override = text_prompt_override
 
@@ -574,7 +589,7 @@ class CloudAllTestWorker(QObject):
                                 "Start with CHARA_VIDEO_OK: "
                             ),
                         },
-                        {"type": "video", "video": str(self.video_path.resolve()), "fps": 2},
+                        {"type": "video", "video": str(self.video_path.resolve()), "fps": self.video_fps},
                     ],
                 ),
             ],
@@ -723,6 +738,7 @@ class ModelPage(QWidget):
         self._cloud_all_token_usage: dict[str, dict[str, int]] = {"text": {}, "image": {}, "video": {}}
         self._cloud_all_section_status: dict[str, str] = {"text": "queued", "image": "queued", "video": "queued"}
         self._cloud_all_final_summary = ""
+        self._last_valid_cloud_video_fps = DEFAULT_CLOUD_VIDEO_FPS
         self._cloud_stream_session: StreamingTextSession | None = None
         self._cloud_stream_kind = ""
         self._cloud_presets: list[CloudModelPreset] = []
@@ -828,6 +844,19 @@ class ModelPage(QWidget):
         self.fetch_cloud_models_button = PushButton(t("model.cloud.models.fetch"), self.cloud_card)
         model_name_row.addWidget(self.fetch_cloud_models_button)
 
+        video_fps_row = QHBoxLayout()
+        video_fps_row.setSpacing(8)
+        self.cloud_video_fps_slider = Slider(Qt.Orientation.Horizontal, self.cloud_card)
+        self.cloud_video_fps_slider.setRange(1, 100)
+        self.cloud_video_fps_slider.setValue(int(DEFAULT_CLOUD_VIDEO_FPS * 10))
+        self.cloud_video_fps_slider.setMaximumWidth(220)
+        self.cloud_video_fps = LineEdit(self.cloud_card)
+        self.cloud_video_fps.setPlaceholderText(f"{DEFAULT_CLOUD_VIDEO_FPS:.1f}")
+        self.cloud_video_fps.setText(f"{DEFAULT_CLOUD_VIDEO_FPS:.1f}")
+        self.cloud_video_fps.setMaximumWidth(72)
+        video_fps_row.addWidget(self.cloud_video_fps_slider, 1)
+        video_fps_row.addWidget(self.cloud_video_fps)
+
         self.test_cloud_model_button = PushButton(t("model.cloud.test"), self.cloud_card)
         self.cloud_test_action_label = SecretTapLabel(t("model.cloud.test.action"), self.cloud_card)
         self.cloud_test_type_combo = ComboBox(self.cloud_card)
@@ -846,6 +875,7 @@ class ModelPage(QWidget):
         cloud_form.addRow(t("model.cloud.baseUrl"), self.cloud_base_url)
         cloud_form.addRow(t("model.cloud.apiKey"), self.cloud_api_key)
         cloud_form.addRow(t("model.cloud.modelName"), model_name_row)
+        cloud_form.addRow(t("model.cloud.videoFps"), video_fps_row)
         cloud_form.addRow(t("model.test.type"), self.cloud_test_type_combo)
         cloud_form.addRow(self.cloud_test_action_label, self.test_cloud_model_button)
         cloud_form.addRow(t("model.cloud.test.result"), self.cloud_test_result)
@@ -860,11 +890,15 @@ class ModelPage(QWidget):
         self.fetch_cloud_models_button.clicked.connect(self._fetch_cloud_models)
         self.test_cloud_model_button.clicked.connect(self._test_cloud_model)
         self.cloud_test_action_label.clicked.connect(self._record_cloud_easter_tap)
+        self.cloud_video_fps_slider.valueChanged.connect(self._sync_cloud_video_fps_from_slider)
+        self.cloud_video_fps.editingFinished.connect(self._commit_cloud_video_fps_text)
+        self.cloud_provider_combo.currentIndexChanged.connect(self._sync_cloud_video_fps_availability)
         self.cloud_preset_combo.currentIndexChanged.connect(self._load_selected_cloud_preset)
         self.save_cloud_preset_button.clicked.connect(self._save_current_cloud_preset)
         self.delete_cloud_preset_button.clicked.connect(self._delete_selected_cloud_preset)
         self._refresh_local_models()
         self._refresh_cloud_presets(preloaded_presets=initial_cloud_presets)
+        self._sync_cloud_video_fps_availability()
         self._set_cloud_mode(False)
 
     def _set_cloud_mode(self, enabled: bool) -> None:
@@ -1148,6 +1182,40 @@ class ModelPage(QWidget):
     def _current_cloud_provider_id(self) -> str:
         return normalize_cloud_provider(str(self.cloud_provider_combo.currentData() or ""))
 
+    def _current_cloud_video_fps(self) -> float:
+        self._commit_cloud_video_fps_text()
+        return self._last_valid_cloud_video_fps
+
+    def _sync_cloud_video_fps_from_slider(self, value: int) -> None:
+        self._set_cloud_video_fps(value / 10.0)
+
+    def _commit_cloud_video_fps_text(self) -> None:
+        try:
+            value = float(self.cloud_video_fps.text().strip())
+        except ValueError:
+            self._set_cloud_video_fps(self._last_valid_cloud_video_fps)
+            return
+        if not 0.1 <= value <= 10.0:
+            self._set_cloud_video_fps(self._last_valid_cloud_video_fps)
+            return
+        self._set_cloud_video_fps(value)
+
+    def _set_cloud_video_fps(self, value: float) -> None:
+        normalized = round(min(max(value, 0.1), 10.0), 1)
+        self._last_valid_cloud_video_fps = normalized
+        slider_value = int(round(normalized * 10))
+        with QSignalBlocker(self.cloud_video_fps_slider):
+            self.cloud_video_fps_slider.setValue(slider_value)
+        with QSignalBlocker(self.cloud_video_fps):
+            self.cloud_video_fps.setText(f"{normalized:.1f}")
+
+    def _sync_cloud_video_fps_availability(self) -> None:
+        provider = cloud_model_provider(self._current_cloud_provider_id())
+        self.cloud_video_fps.setEnabled(provider.supports_video_fps)
+        self.cloud_video_fps_slider.setEnabled(provider.supports_video_fps)
+        self.cloud_video_fps.setToolTip(t(f"model.cloud.videoFps.mode.{provider.video_fps_mode}"))
+        self.cloud_video_fps_slider.setToolTip(t(f"model.cloud.videoFps.mode.{provider.video_fps_mode}"))
+
     def _test_cloud_model(self) -> None:
         test_type = self.cloud_test_type_combo.currentData() or "all"
         if test_type == "all":
@@ -1338,6 +1406,7 @@ class ModelPage(QWidget):
             api_key=self.cloud_api_key.text().strip(),
             model_name=model_name,
             video_path=VIDEO_TEST_ASSET,
+            video_fps=self._current_cloud_video_fps(),
             locale=locale,
         )
         self._cloud_video_stream_buffer = ""
@@ -1389,6 +1458,7 @@ class ModelPage(QWidget):
             model_name=model_name,
             image_path=IMAGE_TEST_ASSET,
             video_path=VIDEO_TEST_ASSET,
+            video_fps=self._current_cloud_video_fps(),
             locale=locale,
             text_prompt_override=text_prompt_override,
         )
@@ -1772,6 +1842,8 @@ class ModelPage(QWidget):
         index = self.cloud_preset_combo.currentIndex() - 1
         if not 0 <= index < len(self._cloud_presets):
             self.cloud_preset_name.clear()
+            self._set_cloud_video_fps(DEFAULT_CLOUD_VIDEO_FPS)
+            self._sync_cloud_video_fps_availability()
             return
 
         preset = self._cloud_presets[index]
@@ -1779,11 +1851,13 @@ class ModelPage(QWidget):
         self.cloud_base_url.setText(preset.base_url)
         self.cloud_api_key.setText(preset.api_key)
         self.cloud_model_name.setText(preset.model_name)
+        self._set_cloud_video_fps(preset.video_fps)
         provider_id = normalize_cloud_provider(preset.provider)
         provider_index = self.cloud_provider_combo.findData(provider_id)
         if provider_index < 0:
             provider_index = 0
         self.cloud_provider_combo.setCurrentIndex(provider_index)
+        self._sync_cloud_video_fps_availability()
 
     def _save_current_cloud_preset(self) -> None:
         name = self.cloud_preset_name.text().strip()
@@ -1804,6 +1878,7 @@ class ModelPage(QWidget):
             base_url=self.cloud_base_url.text().strip(),
             api_key=self.cloud_api_key.text().strip(),
             model_name=self.cloud_model_name.text().strip(),
+            video_fps=self._current_cloud_video_fps(),
         )
         upsert_cloud_model_preset(preset)
         LOGGER.info("Cloud model preset saved from UI; name=%s provider=%s", name, preset.provider)
