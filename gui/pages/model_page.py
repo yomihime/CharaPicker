@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import QObject, QSignalBlocker, Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
-    QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QVBoxLayout,
     QWidget,
@@ -767,11 +767,13 @@ class ModelPage(QWidget):
 
         self.local_card = CardWidget(self)
         self.local_card.setBorderRadius(8)
-        local_form = QFormLayout(self.local_card)
-        local_form.setContentsMargins(20, 18, 20, 20)
-        local_form.setSpacing(12)
+        local_grid = QGridLayout(self.local_card)
+        local_grid.setContentsMargins(24, 20, 24, 22)
+        local_grid.setHorizontalSpacing(18)
+        local_grid.setVerticalSpacing(12)
 
         local_model_row = QHBoxLayout()
+        local_model_row.setSpacing(10)
         self.local_model_combo = ComboBox(self.local_card)
         self.refresh_local_models_button = PushButton(t("model.local.models.refresh"), self.local_card)
         local_model_row.addWidget(self.local_model_combo, 1)
@@ -781,6 +783,7 @@ class ModelPage(QWidget):
         self.local_runner_combo.addItem(t("model.local.runner.llama"))
 
         runner_row = QHBoxLayout()
+        runner_row.setSpacing(10)
         runner_row.addWidget(self.local_runner_combo, 1)
 
         self.download_llamacpp_button = PushButton(t("model.local.downloadLlamacpp"), self.local_card)
@@ -801,30 +804,47 @@ class ModelPage(QWidget):
         self.local_test_result.setReadOnly(True)
         self.local_test_result.setMinimumHeight(96)
 
-        local_form.addRow(t("model.local.select"), local_model_row)
-        local_form.addRow(t("model.local.runner"), runner_row)
-        local_form.addRow(t("model.local.cache"), self.use_cache)
-        local_form.addRow(t("model.test.type"), self.local_test_type_combo)
-        local_form.addRow(t("model.local.test.action"), self.test_local_model_button)
-        local_form.addRow(t("model.local.test.result"), self.local_test_result)
+        local_grid.addWidget(BodyLabel(t("model.local.select"), self.local_card), 0, 0)
+        local_grid.addLayout(local_model_row, 0, 1, 1, 4)
+        local_grid.addWidget(BodyLabel(t("model.local.runner"), self.local_card), 1, 0)
+        local_grid.addLayout(runner_row, 1, 1, 1, 4)
+        local_grid.addWidget(BodyLabel(t("model.local.cache"), self.local_card), 2, 0)
+        local_grid.addWidget(self.use_cache, 2, 1, 1, 4)
+        local_grid.addWidget(BodyLabel(t("model.test.type"), self.local_card), 3, 0)
+        local_grid.addWidget(self.local_test_type_combo, 3, 1, 1, 4)
+        local_grid.addWidget(BodyLabel(t("model.local.test.action"), self.local_card), 4, 0)
+        local_grid.addWidget(self.test_local_model_button, 4, 1, 1, 4)
+        local_grid.addWidget(
+            BodyLabel(t("model.local.test.result"), self.local_card),
+            5,
+            0,
+            1,
+            1,
+            Qt.AlignmentFlag.AlignTop,
+        )
+        local_grid.addWidget(self.local_test_result, 5, 1, 1, 4)
+        local_grid.setColumnStretch(0, 0)
+        local_grid.setColumnStretch(1, 1)
+        local_grid.setColumnStretch(2, 0)
+        local_grid.setColumnStretch(3, 2)
+        local_grid.setColumnStretch(4, 0)
         root.addWidget(self.local_card)
 
         self.cloud_card = CardWidget(self)
         self.cloud_card.setBorderRadius(8)
-        cloud_form = QFormLayout(self.cloud_card)
-        cloud_form.setContentsMargins(20, 18, 20, 20)
-        cloud_form.setSpacing(12)
+        cloud_layout = QVBoxLayout(self.cloud_card)
+        cloud_layout.setContentsMargins(24, 20, 24, 22)
+        cloud_layout.setSpacing(16)
 
-        preset_row = QHBoxLayout()
         self.cloud_preset_combo = ComboBox(self.cloud_card)
         self.cloud_preset_name = LineEdit(self.cloud_card)
         self.cloud_preset_name.setPlaceholderText(t("model.cloud.preset.name.placeholder"))
         self.save_cloud_preset_button = PushButton(t("model.cloud.preset.save"), self.cloud_card)
         self.delete_cloud_preset_button = PushButton(t("model.cloud.preset.delete"), self.cloud_card)
-        preset_row.addWidget(self.cloud_preset_combo, 1)
-        preset_row.addWidget(self.cloud_preset_name, 1)
-        preset_row.addWidget(self.save_cloud_preset_button)
-        preset_row.addWidget(self.delete_cloud_preset_button)
+        preset_actions = QHBoxLayout()
+        preset_actions.setSpacing(10)
+        preset_actions.addWidget(self.save_cloud_preset_button)
+        preset_actions.addWidget(self.delete_cloud_preset_button)
 
         self.cloud_provider_combo = ComboBox(self.cloud_card)
         for provider_id in CLOUD_PROVIDER_IDS:
@@ -840,6 +860,7 @@ class ModelPage(QWidget):
         self.cloud_model_name = LineEdit(self.cloud_card)
         self.cloud_model_name.setPlaceholderText(t("model.cloud.modelName.placeholder"))
         model_name_row = QHBoxLayout()
+        model_name_row.setSpacing(10)
         model_name_row.addWidget(self.cloud_model_name, 1)
         self.fetch_cloud_models_button = PushButton(t("model.cloud.models.fetch"), self.cloud_card)
         model_name_row.addWidget(self.fetch_cloud_models_button)
@@ -870,15 +891,47 @@ class ModelPage(QWidget):
         self.cloud_test_result.setMinimumHeight(96)
         self._cloud_stream_session = StreamingTextSession(self.cloud_test_result)
 
-        cloud_form.addRow(t("model.cloud.preset"), preset_row)
-        cloud_form.addRow(t("model.cloud.provider"), self.cloud_provider_combo)
-        cloud_form.addRow(t("model.cloud.baseUrl"), self.cloud_base_url)
-        cloud_form.addRow(t("model.cloud.apiKey"), self.cloud_api_key)
-        cloud_form.addRow(t("model.cloud.modelName"), model_name_row)
-        cloud_form.addRow(t("model.cloud.videoFps"), video_fps_row)
-        cloud_form.addRow(t("model.test.type"), self.cloud_test_type_combo)
-        cloud_form.addRow(self.cloud_test_action_label, self.test_cloud_model_button)
-        cloud_form.addRow(t("model.cloud.test.result"), self.cloud_test_result)
+        connection_grid = QGridLayout()
+        connection_grid.setHorizontalSpacing(18)
+        connection_grid.setVerticalSpacing(12)
+        connection_grid.addWidget(BodyLabel(t("model.cloud.preset"), self.cloud_card), 0, 0)
+        connection_grid.addWidget(self.cloud_preset_combo, 0, 1)
+        connection_grid.addWidget(BodyLabel(t("model.cloud.preset.name"), self.cloud_card), 0, 2)
+        connection_grid.addWidget(self.cloud_preset_name, 0, 3)
+        connection_grid.addLayout(preset_actions, 0, 4)
+
+        connection_grid.addWidget(BodyLabel(t("model.cloud.provider"), self.cloud_card), 1, 0)
+        connection_grid.addWidget(self.cloud_provider_combo, 1, 1)
+        connection_grid.addWidget(BodyLabel(t("model.cloud.modelName"), self.cloud_card), 1, 2)
+        connection_grid.addLayout(model_name_row, 1, 3, 1, 2)
+
+        connection_grid.addWidget(BodyLabel(t("model.cloud.baseUrl"), self.cloud_card), 2, 0)
+        connection_grid.addWidget(self.cloud_base_url, 2, 1, 1, 4)
+        connection_grid.addWidget(BodyLabel(t("model.cloud.apiKey"), self.cloud_card), 3, 0)
+        connection_grid.addWidget(self.cloud_api_key, 3, 1, 1, 4)
+
+        connection_grid.addWidget(BodyLabel(t("model.cloud.videoFps"), self.cloud_card), 4, 0)
+        connection_grid.addLayout(video_fps_row, 4, 1)
+        connection_grid.addWidget(BodyLabel(t("model.test.type"), self.cloud_card), 4, 2)
+        connection_grid.addWidget(self.cloud_test_type_combo, 4, 3, 1, 2)
+
+        connection_grid.addWidget(self.cloud_test_action_label, 5, 0)
+        connection_grid.addWidget(self.test_cloud_model_button, 5, 1, 1, 4)
+        connection_grid.addWidget(
+            BodyLabel(t("model.cloud.test.result"), self.cloud_card),
+            6,
+            0,
+            1,
+            1,
+            Qt.AlignmentFlag.AlignTop,
+        )
+        connection_grid.addWidget(self.cloud_test_result, 6, 1, 1, 4)
+        connection_grid.setColumnStretch(0, 0)
+        connection_grid.setColumnStretch(1, 1)
+        connection_grid.setColumnStretch(2, 0)
+        connection_grid.setColumnStretch(3, 2)
+        connection_grid.setColumnStretch(4, 0)
+        cloud_layout.addLayout(connection_grid)
         root.addWidget(self.cloud_card)
 
         root.addStretch(1)

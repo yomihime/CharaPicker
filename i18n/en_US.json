@@ -178,6 +178,7 @@
   "model.cloud.provider.aliyunBailian": "Alibaba Bailian",
   "model.cloud.provider.custom": "Custom Service",
   "model.cloud.preset": "Preset",
+  "model.cloud.preset.name": "Preset Name",
   "model.cloud.preset.none": "No preset selected",
   "model.cloud.preset.name.placeholder": "Preset name",
   "model.cloud.preset.save": "Save",

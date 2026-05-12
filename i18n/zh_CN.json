@@ -178,6 +178,7 @@
   "model.cloud.provider.aliyunBailian": "阿里百炼",
   "model.cloud.provider.custom": "自定义服务",
   "model.cloud.preset": "配置预设",
+  "model.cloud.preset.name": "预设名称",
   "model.cloud.preset.none": "未选择预设",
   "model.cloud.preset.name.placeholder": "预设名称",
   "model.cloud.preset.save": "保存",
