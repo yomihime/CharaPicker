@@ -3,11 +3,13 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from core.models import ProjectConfig
 from utils.cloud_model_presets import CloudModelPreset, load_cloud_model_presets
 from utils.env_manager import has_llamacpp_binary
 from utils.ffmpeg_tool import DeviceOption, has_ffmpeg_binary, list_available_device_options
+from utils.local_model_catalog import list_local_model_candidates
 from utils.state_manager import list_project_configs
 
 
@@ -21,6 +23,7 @@ class StartupWarmupSnapshot:
     ffmpeg_ready: bool = False
     encoder_options: list[DeviceOption] = field(default_factory=list)
     llamacpp_ready: bool = False
+    local_models: list[Path] = field(default_factory=list)
     cloud_presets: list[CloudModelPreset] = field(default_factory=list)
 
 
@@ -39,15 +42,17 @@ def warmup_startup_context(progress: StartupProgressCallback | None = None) -> S
 
     _emit_progress(progress, "startup.status.window", 66)
     snapshot.llamacpp_ready = has_llamacpp_binary()
+    snapshot.local_models = list_local_model_candidates()
     snapshot.cloud_presets = load_cloud_model_presets()
 
     _emit_progress(progress, "startup.status.workspace", 88)
     LOGGER.info(
-        "Startup warmup completed; projects=%s ffmpeg_ready=%s encoder_options=%s llamacpp_ready=%s cloud_presets=%s",
+        "Startup warmup completed; projects=%s ffmpeg_ready=%s encoder_options=%s llamacpp_ready=%s local_models=%s cloud_presets=%s",
         len(snapshot.project_configs),
         snapshot.ffmpeg_ready,
         len(snapshot.encoder_options),
         snapshot.llamacpp_ready,
+        len(snapshot.local_models),
         len(snapshot.cloud_presets),
     )
     return snapshot

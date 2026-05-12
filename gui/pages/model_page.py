@@ -50,6 +50,7 @@ from utils.llamacpp_downloader import (
     LlamaCppDownloadError,
     download_and_install_llamacpp,
 )
+from utils.local_model_catalog import list_local_model_candidates
 from utils.model_preferences import (
     last_cloud_preset_name,
     last_local_model_path,
@@ -69,11 +70,9 @@ from utils.ai_model_middleware import (
 )
 
 
-MODELS_ROOT = APP_ROOT / "models"
 TEST_MEDIA_ROOT = APP_ROOT / "res" / "test_media"
 IMAGE_TEST_ASSET = TEST_MEDIA_ROOT / "model_test_input.jpg"
 VIDEO_TEST_ASSET = TEST_MEDIA_ROOT / "model_test_input.mp4"
-LOCAL_MODEL_SUFFIXES = {".bin", ".gguf", ".model", ".onnx", ".pt", ".pth", ".safetensors"}
 LOGGER = logging.getLogger(__name__)
 LOCALE_LANGUAGE_HINTS = {
     "zh_CN": "Simplified Chinese",
@@ -722,6 +721,7 @@ class ModelPage(QWidget):
         parent: QWidget | None = None,
         *,
         initial_llamacpp_ready: bool | None = None,
+        initial_local_models: list[Path] | None = None,
         initial_cloud_presets: list[CloudModelPreset] | None = None,
     ) -> None:
         super().__init__(parent)
@@ -959,7 +959,10 @@ class ModelPage(QWidget):
         self.cloud_preset_combo.currentIndexChanged.connect(self._load_selected_cloud_preset)
         self.save_cloud_preset_button.clicked.connect(self._save_current_cloud_preset)
         self.delete_cloud_preset_button.clicked.connect(self._delete_selected_cloud_preset)
-        self._restore_model_selection(preloaded_presets=initial_cloud_presets)
+        self._restore_model_selection(
+            preloaded_local_models=initial_local_models,
+            preloaded_presets=initial_cloud_presets,
+        )
 
     def _set_cloud_mode(self, enabled: bool) -> None:
         LOGGER.info("Model page mode changed; cloud_enabled=%s", enabled)
@@ -968,17 +971,26 @@ class ModelPage(QWidget):
         if not self._restoring_model_selection:
             set_last_model_page_mode("cloud" if enabled else "local")
 
-    def _restore_model_selection(self, *, preloaded_presets: list[CloudModelPreset] | None = None) -> None:
+    def _restore_model_selection(
+        self,
+        *,
+        preloaded_local_models: list[Path] | None = None,
+        preloaded_presets: list[CloudModelPreset] | None = None,
+    ) -> None:
         self._restoring_model_selection = True
         try:
-            self._refresh_local_models(selected_path=last_local_model_path())
+            self._populate_local_models(preloaded_local_models or [], selected_path=last_local_model_path())
             self._refresh_cloud_presets(
                 selected_name=last_cloud_preset_name(),
                 preloaded_presets=preloaded_presets,
             )
             self._sync_cloud_video_fps_availability()
             cloud_enabled = last_model_page_mode() == "cloud"
-            self.cloud_mode_switch.setChecked(cloud_enabled)
+            blocker = QSignalBlocker(self.cloud_mode_switch)
+            try:
+                self.cloud_mode_switch.setChecked(cloud_enabled)
+            finally:
+                del blocker
             self._set_cloud_mode(cloud_enabled)
         finally:
             self._restoring_model_selection = False
@@ -1129,22 +1141,29 @@ class ModelPage(QWidget):
 
     def _refresh_local_models(self, selected_path: str | None = None) -> None:
         selected_path = selected_path if selected_path is not None else self.local_model_combo.currentData()
-        candidates = self._local_model_candidates()
+        candidates = list_local_model_candidates()
         LOGGER.info("Local model list refreshed; count=%s", len(candidates))
-        self.local_model_combo.clear()
-        if not candidates:
-            self.local_model_combo.addItem(t("model.local.models.empty"), "")
-            self.test_local_model_button.setEnabled(False)
-            return
+        self._populate_local_models(candidates, selected_path=str(selected_path or ""))
 
-        self.test_local_model_button.setEnabled(True)
-        selected_index = 0
-        for index, model_path in enumerate(candidates):
-            display_path = model_path.as_posix()
-            self.local_model_combo.addItem(display_path, display_path)
-            if display_path == selected_path:
-                selected_index = index
-        self.local_model_combo.setCurrentIndex(selected_index)
+    def _populate_local_models(self, candidates: list[Path], selected_path: str | None = None) -> None:
+        blocker = QSignalBlocker(self.local_model_combo)
+        try:
+            self.local_model_combo.clear()
+            if not candidates:
+                self.local_model_combo.addItem(t("model.local.models.empty"), "")
+                self.test_local_model_button.setEnabled(False)
+                return
+
+            self.test_local_model_button.setEnabled(True)
+            selected_index = 0
+            for index, model_path in enumerate(candidates):
+                display_path = model_path.as_posix()
+                self.local_model_combo.addItem(display_path, display_path)
+                if display_path == selected_path:
+                    selected_index = index
+            self.local_model_combo.setCurrentIndex(selected_index)
+        finally:
+            del blocker
 
     def _refresh_local_models_from_button(self) -> None:
         self._refresh_local_models()
@@ -1153,27 +1172,6 @@ class ModelPage(QWidget):
         if self._restoring_model_selection:
             return
         set_last_local_model_path(str(self.local_model_combo.currentData() or ""))
-
-    def _local_model_candidates(self) -> list[Path]:
-        if not MODELS_ROOT.exists():
-            return []
-
-        candidates: list[Path] = []
-        for path in sorted(MODELS_ROOT.iterdir(), key=lambda item: item.name.lower()):
-            if path.name.startswith("."):
-                continue
-            if path.is_file() and self._is_model_file(path):
-                candidates.append(path.relative_to(APP_ROOT))
-                continue
-            if path.is_dir() and self._directory_contains_model(path):
-                candidates.append(path.relative_to(APP_ROOT))
-        return candidates
-
-    def _directory_contains_model(self, path: Path) -> bool:
-        return any(candidate.is_file() and self._is_model_file(candidate) for candidate in path.rglob("*"))
-
-    def _is_model_file(self, path: Path) -> bool:
-        return path.suffix.lower() in LOCAL_MODEL_SUFFIXES
 
     def _test_local_model(self) -> None:
         test_type = self.local_test_type_combo.currentData() or "all"

@@ -85,6 +85,7 @@ class MainWindow(FluentWindow):
         self.model_page = ModelPage(
             self,
             initial_llamacpp_ready=startup_snapshot.llamacpp_ready if startup_snapshot else None,
+            initial_local_models=startup_snapshot.local_models if startup_snapshot else None,
             initial_cloud_presets=startup_snapshot.cloud_presets if startup_snapshot else None,
         )
         self.prompt_page = PromptPage(self)
