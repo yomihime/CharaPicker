@@ -50,6 +50,14 @@ from utils.llamacpp_downloader import (
     LlamaCppDownloadError,
     download_and_install_llamacpp,
 )
+from utils.model_preferences import (
+    last_cloud_preset_name,
+    last_local_model_path,
+    last_model_page_mode,
+    set_last_cloud_preset_name,
+    set_last_local_model_path,
+    set_last_model_page_mode,
+)
 from utils.paths import APP_ROOT
 from utils.ai_model_middleware import (
     ModelMiddlewareError,
@@ -743,6 +751,7 @@ class ModelPage(QWidget):
         self._cloud_stream_kind = ""
         self._cloud_presets: list[CloudModelPreset] = []
         self._loading_cloud_preset = False
+        self._restoring_model_selection = False
         self._llamacpp_ready_cache = initial_llamacpp_ready
         self._cloud_easter_tap_count = 0
 
@@ -938,26 +947,41 @@ class ModelPage(QWidget):
 
         self.cloud_mode_switch.checkedChanged.connect(self._set_cloud_mode)
         self.download_llamacpp_button.clicked.connect(self._download_llamacpp)
-        self.refresh_local_models_button.clicked.connect(self._refresh_local_models)
+        self.refresh_local_models_button.clicked.connect(self._refresh_local_models_from_button)
         self.test_local_model_button.clicked.connect(self._test_local_model)
         self.fetch_cloud_models_button.clicked.connect(self._fetch_cloud_models)
         self.test_cloud_model_button.clicked.connect(self._test_cloud_model)
         self.cloud_test_action_label.clicked.connect(self._record_cloud_easter_tap)
+        self.local_model_combo.currentIndexChanged.connect(self._remember_selected_local_model)
         self.cloud_video_fps_slider.valueChanged.connect(self._sync_cloud_video_fps_from_slider)
         self.cloud_video_fps.editingFinished.connect(self._commit_cloud_video_fps_text)
         self.cloud_provider_combo.currentIndexChanged.connect(self._sync_cloud_video_fps_availability)
         self.cloud_preset_combo.currentIndexChanged.connect(self._load_selected_cloud_preset)
         self.save_cloud_preset_button.clicked.connect(self._save_current_cloud_preset)
         self.delete_cloud_preset_button.clicked.connect(self._delete_selected_cloud_preset)
-        self._refresh_local_models()
-        self._refresh_cloud_presets(preloaded_presets=initial_cloud_presets)
-        self._sync_cloud_video_fps_availability()
-        self._set_cloud_mode(False)
+        self._restore_model_selection(preloaded_presets=initial_cloud_presets)
 
     def _set_cloud_mode(self, enabled: bool) -> None:
         LOGGER.info("Model page mode changed; cloud_enabled=%s", enabled)
         self.local_card.setVisible(not enabled)
         self.cloud_card.setVisible(enabled)
+        if not self._restoring_model_selection:
+            set_last_model_page_mode("cloud" if enabled else "local")
+
+    def _restore_model_selection(self, *, preloaded_presets: list[CloudModelPreset] | None = None) -> None:
+        self._restoring_model_selection = True
+        try:
+            self._refresh_local_models(selected_path=last_local_model_path())
+            self._refresh_cloud_presets(
+                selected_name=last_cloud_preset_name(),
+                preloaded_presets=preloaded_presets,
+            )
+            self._sync_cloud_video_fps_availability()
+            cloud_enabled = last_model_page_mode() == "cloud"
+            self.cloud_mode_switch.setChecked(cloud_enabled)
+            self._set_cloud_mode(cloud_enabled)
+        finally:
+            self._restoring_model_selection = False
 
     def _download_llamacpp(self) -> None:
         if self._download_thread is not None:
@@ -1103,8 +1127,8 @@ class ModelPage(QWidget):
             )
         return ""
 
-    def _refresh_local_models(self) -> None:
-        selected_path = self.local_model_combo.currentData()
+    def _refresh_local_models(self, selected_path: str | None = None) -> None:
+        selected_path = selected_path if selected_path is not None else self.local_model_combo.currentData()
         candidates = self._local_model_candidates()
         LOGGER.info("Local model list refreshed; count=%s", len(candidates))
         self.local_model_combo.clear()
@@ -1121,6 +1145,14 @@ class ModelPage(QWidget):
             if display_path == selected_path:
                 selected_index = index
         self.local_model_combo.setCurrentIndex(selected_index)
+
+    def _refresh_local_models_from_button(self) -> None:
+        self._refresh_local_models()
+
+    def _remember_selected_local_model(self, _index: int | None = None) -> None:
+        if self._restoring_model_selection:
+            return
+        set_last_local_model_path(str(self.local_model_combo.currentData() or ""))
 
     def _local_model_candidates(self) -> list[Path]:
         if not MODELS_ROOT.exists():
@@ -1894,12 +1926,16 @@ class ModelPage(QWidget):
             return
         index = self.cloud_preset_combo.currentIndex() - 1
         if not 0 <= index < len(self._cloud_presets):
+            if not self._restoring_model_selection:
+                set_last_cloud_preset_name("")
             self.cloud_preset_name.clear()
             self._set_cloud_video_fps(DEFAULT_CLOUD_VIDEO_FPS)
             self._sync_cloud_video_fps_availability()
             return
 
         preset = self._cloud_presets[index]
+        if not self._restoring_model_selection:
+            set_last_cloud_preset_name(preset.name)
         self.cloud_preset_name.setText(preset.name)
         self.cloud_base_url.setText(preset.base_url)
         self.cloud_api_key.setText(preset.api_key)
