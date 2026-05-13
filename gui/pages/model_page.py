@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import base64
 import logging
-import mimetypes
 from pathlib import Path
+from typing import Any
 
 from PyQt6.QtCore import QObject, QSignalBlocker, Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -32,6 +31,15 @@ from qfluentwidgets import (
 
 from gui.widgets.dialog_middleware import FluentDialog
 from gui.widgets.streaming_text_session import StreamingTextSession
+from gui.pages.model_test_helpers import (
+    build_data_url as _build_data_url,
+    format_token_usage_line as _format_token_usage_line,
+    join_failed_items as _join_failed_items,
+    response_language_instruction as _response_language_instruction,
+    response_language_name as _response_language_name,
+    token_usage_from_metadata as _token_usage_from_metadata,
+    token_usage_log_fields as _token_usage_log_fields,
+)
 from utils.cloud_models import CloudModelListError, fetch_cloud_models
 from utils.cloud_model_presets import (
     CLOUD_PROVIDER_IDS,
@@ -74,12 +82,6 @@ TEST_MEDIA_ROOT = APP_ROOT / "res" / "test_media"
 IMAGE_TEST_ASSET = TEST_MEDIA_ROOT / "model_test_input.jpg"
 VIDEO_TEST_ASSET = TEST_MEDIA_ROOT / "model_test_input.mp4"
 LOGGER = logging.getLogger(__name__)
-LOCALE_LANGUAGE_HINTS = {
-    "zh_CN": "Simplified Chinese",
-    "zh_TW": "Traditional Chinese",
-    "en_US": "English",
-    "ja_JP": "Japanese",
-}
 EASTER_TAP_TARGET = 9
 EASTER_PROMPT_OVERRIDE = (
     "请使用中文写一段对 yomihime（如月怜） 的赞美文字，整体风格偏向赞颂美少女气质。"
@@ -88,69 +90,6 @@ EASTER_PROMPT_OVERRIDE = (
     "语气请真诚、有画面感，但不要使用低俗、露骨或色情内容。"
     "不要输出列表，不要分点，直接输出完整正文。"
 )
-
-
-def _token_usage_log_fields(metadata: dict) -> tuple[int | None, int | None, int | None]:
-    usage = metadata.get("token_usage")
-    if not isinstance(usage, dict):
-        return (None, None, None)
-    prompt_tokens = usage.get("prompt_tokens") if isinstance(usage.get("prompt_tokens"), int) else None
-    completion_tokens = usage.get("completion_tokens") if isinstance(usage.get("completion_tokens"), int) else None
-    total_tokens = usage.get("total_tokens") if isinstance(usage.get("total_tokens"), int) else None
-    return (prompt_tokens, completion_tokens, total_tokens)
-
-
-def _token_usage_from_metadata(metadata: dict) -> dict[str, int]:
-    usage = metadata.get("token_usage")
-    if not isinstance(usage, dict):
-        return {}
-    normalized: dict[str, int] = {}
-    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-        value = usage.get(key)
-        if isinstance(value, int):
-            normalized[key] = value
-    return normalized
-
-
-def _format_token_usage_line(token_usage: dict[str, int]) -> str:
-    prompt_tokens = token_usage.get("prompt_tokens")
-    completion_tokens = token_usage.get("completion_tokens")
-    total_tokens = token_usage.get("total_tokens")
-    if not any(isinstance(value, int) for value in (prompt_tokens, completion_tokens, total_tokens)):
-        return t("model.cloud.test.tokenUsage.empty")
-    return t(
-        "model.cloud.test.tokenUsage",
-        prompt_tokens=prompt_tokens if isinstance(prompt_tokens, int) else "-",
-        completion_tokens=completion_tokens if isinstance(completion_tokens, int) else "-",
-        total_tokens=total_tokens if isinstance(total_tokens, int) else "-",
-    )
-
-
-def _build_data_url(asset_path: Path, default_mime: str) -> str:
-    if not asset_path.exists():
-        raise ModelMiddlewareError(f"Test asset does not exist: {asset_path}")
-    mime_type, _ = mimetypes.guess_type(asset_path.name)
-    mime_type = mime_type or default_mime
-    encoded = base64.b64encode(asset_path.read_bytes()).decode("ascii")
-    return f"data:{mime_type};base64,{encoded}"
-
-
-def _response_language_name(locale: str) -> str:
-    return LOCALE_LANGUAGE_HINTS.get(locale, LOCALE_LANGUAGE_HINTS["zh_CN"])
-
-
-def _response_language_instruction(locale: str) -> str:
-    return f"Respond in {_response_language_name(locale)}."
-
-
-def _join_failed_items(items: list[str], locale: str) -> str:
-    if not items:
-        return ""
-    if locale.startswith("en"):
-        return ", ".join(items)
-    if locale.startswith("ja"):
-        return "、".join(items)
-    return "、".join(items)
 
 
 class LlamaCppDownloadWorker(QObject):

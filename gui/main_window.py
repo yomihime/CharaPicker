@@ -11,7 +11,7 @@ from qfluentwidgets import (
     NavigationItemPosition,
 )
 
-from core.compiler import compile_character_state
+from core.compiler import compile_character_state, compile_character_state_from_knowledge_base
 from core.extractor import Extractor
 from core.generator import render_profile_markdown
 from core.models import ProjectConfig
@@ -161,7 +161,18 @@ class MainWindow(FluentWindow):
 
     def _on_preview_succeeded(self, config: ProjectConfig) -> None:
         first_character = config.target_characters[0] if config.target_characters else t("app.preview.defaultCharacter")
-        state = compile_character_state(first_character)
+        try:
+            state = compile_character_state_from_knowledge_base(config.project_id, first_character)
+        except Exception:
+            LOGGER.warning(
+                "Knowledge-base-backed preview output failed; project_id=%s character=%s",
+                config.project_id,
+                first_character,
+                exc_info=True,
+            )
+            state = None
+        if state is None:
+            state = compile_character_state(first_character)
         self.output_page.set_markdown(render_profile_markdown(state))
         InfoBar.info(
             title=t("app.preview.done.title"),

@@ -70,14 +70,23 @@ from utils.material_processing_middleware import (
     process_source_request,
     validate_source_processing_tools,
 )
-from utils.paths import project_paths
 from utils.source_importer import (
-    SUPPORTED_SOURCE_SUFFIXES,
     clean_raw_sources,
     remove_project_sources,
     remove_raw_sources,
-    source_raw_target_pairs,
-    source_raw_targets,
+)
+from utils.source_status import (
+    SOURCE_KIND_EXTERNAL,
+    SOURCE_KIND_PROJECT,
+    SOURCE_STATUS_NEW,
+    SOURCE_STATUS_PROCESSED,
+    SOURCE_STATUS_RAW_CLEANED,
+    SOURCE_STATUS_STALE,
+    project_source_paths,
+    selected_raw_sources_for_item,
+    shadowed_raw_paths,
+    source_display_text,
+    source_status,
 )
 from utils.state_manager import create_project_config, delete_project_config, list_project_configs, save_project_config
 
@@ -87,12 +96,6 @@ HH_MM_SS_VALIDATOR = QRegularExpressionValidator(QRegularExpression(r"\d\d:[0-5]
 SOURCE_KIND_ROLE = int(Qt.ItemDataRole.UserRole)
 SOURCE_PATH_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 SOURCE_STATUS_ROLE = int(Qt.ItemDataRole.UserRole) + 2
-SOURCE_KIND_EXTERNAL = "external"
-SOURCE_KIND_PROJECT = "project"
-SOURCE_STATUS_NEW = "new"
-SOURCE_STATUS_PROCESSED = "processed"
-SOURCE_STATUS_STALE = "stale"
-SOURCE_STATUS_RAW_CLEANED = "rawCleaned"
 PROCESSING_PRESETS = [
     SourceProcessingPreset.ORIGINAL,
     SourceProcessingPreset.SEGMENT_TRANSCODE,
@@ -1359,89 +1362,16 @@ class ProjectPage(QWidget):
         self.sources_list.setItemWidget(item, SourceListRow(display_text, status, self.sources_list))
 
     def _source_display_text(self, source_path: str, source_kind: str) -> str:
-        if source_kind == SOURCE_KIND_PROJECT:
-            project = self._selected_project()
-            if project is not None:
-                raw_root = project_paths(project.project_id).raw
-                try:
-                    return Path(source_path).resolve().relative_to(raw_root.resolve()).as_posix()
-                except ValueError:
-                    return source_path
-        return source_path
+        project = self._selected_project()
+        if project is None:
+            return source_path
+        return source_display_text(project.project_id, source_path, source_kind)
 
     def _source_status(self, source_path: str, source_kind: str) -> str:
         project = self._selected_project()
         if project is None:
             return SOURCE_STATUS_NEW
-        paths = project_paths(project.project_id)
-        if source_kind == SOURCE_KIND_PROJECT:
-            raw_source = Path(source_path)
-            material_target = self._material_target_for_raw(paths.raw, paths.materials, raw_source)
-            return SOURCE_STATUS_PROCESSED if material_target.exists() or material_target.is_symlink() else SOURCE_STATUS_STALE
-
-        source = Path(source_path).expanduser()
-        raw_pairs = source_raw_target_pairs(project.project_id, [source_path])
-        raw_targets = [raw_target for _, raw_target in raw_pairs]
-        cleaned_paths = set(project.raw_cleaned_paths)
-        if not raw_targets:
-            return SOURCE_STATUS_NEW
-        if all(self._raw_relative_path(paths.raw, raw_target) in cleaned_paths for raw_target in raw_targets):
-            material_targets = [
-                self._material_target_for_raw(paths.raw, paths.materials, raw_target)
-                for raw_target in raw_targets
-            ]
-            if material_targets and all(material_target.exists() for material_target in material_targets):
-                return SOURCE_STATUS_RAW_CLEANED
-        existing_raw_targets = [raw_target for raw_target in raw_targets if raw_target.exists()]
-        if not existing_raw_targets:
-            return SOURCE_STATUS_NEW
-        if len(existing_raw_targets) != len(raw_targets):
-            return SOURCE_STATUS_STALE
-        if self._external_source_is_newer(source, raw_pairs):
-            return SOURCE_STATUS_STALE
-        material_targets = [
-            self._material_target_for_raw(paths.raw, paths.materials, raw_target)
-            for raw_target in existing_raw_targets
-        ]
-        if material_targets and all(material_target.exists() or material_target.is_symlink() for material_target in material_targets):
-            return SOURCE_STATUS_PROCESSED
-        return SOURCE_STATUS_STALE
-
-    def _material_target_for_raw(self, raw_root: Path, materials_root: Path, raw_source: Path) -> Path:
-        try:
-            relative_path = raw_source.resolve().relative_to(raw_root.resolve())
-        except ValueError:
-            return materials_root / raw_source.name
-        return materials_root / relative_path
-
-    def _raw_relative_path(self, raw_root: Path, raw_source: Path) -> str:
-        try:
-            return raw_source.resolve().relative_to(raw_root.resolve()).as_posix()
-        except ValueError:
-            return raw_source.name
-
-    def _external_source_is_newer(self, source: Path, raw_pairs: list[tuple[Path, Path]]) -> bool:
-        try:
-            if source.is_file():
-                if not raw_pairs:
-                    return False
-                return source.stat().st_mtime > raw_pairs[0][1].stat().st_mtime
-            if source.is_dir():
-                return any(source_path.stat().st_mtime > raw_target.stat().st_mtime for source_path, raw_target in raw_pairs)
-        except OSError:
-            return False
-        return False
-
-    def _project_source_paths(self, project_id: str) -> list[Path]:
-        raw_root = project_paths(project_id).raw
-        if not raw_root.exists():
-            return []
-        paths = [
-            path
-            for path in raw_root.rglob("*")
-            if path.is_file() and (not path.suffix or path.suffix.lower() in SUPPORTED_SOURCE_SUFFIXES)
-        ]
-        return sorted(paths, key=lambda path: path.relative_to(raw_root).as_posix().lower())
+        return source_status(project, source_path, source_kind)
 
     def _refresh_project_sources(self, project_id: str) -> None:
         for row in reversed(range(self.sources_list.count())):
@@ -1454,13 +1384,13 @@ class ProjectPage(QWidget):
             if self.sources_list.item(index).data(SOURCE_KIND_ROLE) == SOURCE_KIND_EXTERNAL
             and self.sources_list.item(index).data(SOURCE_PATH_ROLE)
         ]
-        shadowed_raw_paths = {path.resolve() for path in source_raw_targets(project_id, external_paths)}
+        hidden_raw_paths = shadowed_raw_paths(project_id, external_paths)
         existing = {
             self.sources_list.item(index).data(SOURCE_PATH_ROLE)
             for index in range(self.sources_list.count())
         }
-        for source_path in self._project_source_paths(project_id):
-            if source_path.resolve() in shadowed_raw_paths:
+        for source_path in project_source_paths(project_id):
+            if source_path.resolve() in hidden_raw_paths:
                 continue
             source_text = str(source_path)
             if source_text not in existing:
@@ -1521,12 +1451,7 @@ class ProjectPage(QWidget):
             source_kind = item.data(SOURCE_KIND_ROLE)
             if not source_path:
                 continue
-            if source_kind == SOURCE_KIND_EXTERNAL:
-                raw_sources.extend(path for path in source_raw_targets(project_id, [source_path]) if path.exists())
-            elif source_kind == SOURCE_KIND_PROJECT:
-                raw_source = Path(source_path)
-                if raw_source.exists():
-                    raw_sources.append(raw_source)
+            raw_sources.extend(selected_raw_sources_for_item(project_id, source_path, source_kind))
         return raw_sources
 
     def _remove_selected_sources(self) -> None:
