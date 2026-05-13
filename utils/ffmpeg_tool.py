@@ -113,6 +113,13 @@ def has_ffmpeg_binary(bin_root: Path = BIN_ROOT) -> bool:
     return find_usable_ffmpeg_binary(bin_root) is not None
 
 
+def probe_video_duration_seconds(source: Path, bin_root: Path = BIN_ROOT) -> float:
+    ffmpeg_binary = find_usable_ffmpeg_binary(bin_root)
+    if ffmpeg_binary is None:
+        raise FfmpegProcessError("FFmpeg is required to probe video duration.")
+    return _probe_duration_seconds(ffmpeg_binary, source)
+
+
 def list_available_device_options(bin_root: Path = BIN_ROOT) -> list[DeviceOption]:
     ffmpeg_binary = find_usable_ffmpeg_binary(bin_root)
     if ffmpeg_binary is None:

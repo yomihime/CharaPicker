@@ -18,14 +18,20 @@ from utils.ai_model_middleware import (
     build_model_call_request,
     call_video_model,
 )
-from utils.cloud_model_presets import cloud_model_provider, load_cloud_model_presets
+from utils.cloud_model_presets import (
+    CloudModelPreset,
+    cloud_model_provider,
+    load_cloud_model_presets,
+    scale_cloud_max_output_tokens_for_video_duration,
+)
+from utils.ffmpeg_tool import FfmpegProcessError, probe_video_duration_seconds
 from utils.i18n import t
+from utils.model_preferences import last_cloud_preset_name
 
 
 LOGGER = logging.getLogger(__name__)
 VIDEO_SUFFIXES = source_scanner.VIDEO_SUFFIXES
 PREVIEW_MAX_CHUNKS = 2
-PREVIEW_CHUNK_MAX_TOKENS = 2048
 
 
 class Extractor(QObject):
@@ -266,6 +272,17 @@ class Extractor(QObject):
     def _build_video_chunk_part(self, video_path: Path, video_fps: float) -> dict[str, Any]:
         return {"video": f"file://{video_path.resolve().as_posix()}", "fps": video_fps}
 
+    def _preview_video_duration_seconds(self, video_path: Path) -> float:
+        try:
+            return probe_video_duration_seconds(video_path)
+        except (FfmpegProcessError, OSError):
+            LOGGER.warning(
+                "Preview chunk duration probe failed; chunk=%s",
+                video_path.name,
+                exc_info=True,
+            )
+            return 60.0
+
     def _preview_chunk_identity(self, project_id: str, video_path: Path, fallback_index: int) -> tuple[str, str, str]:
         return source_scanner.preview_chunk_identity(project_id, video_path, fallback_index)
 
@@ -368,6 +385,7 @@ class Extractor(QObject):
         base_url: str,
         api_key: str,
         video_fps: float,
+        max_output_tokens: int,
         emit_token_usage: Callable[[dict[str, int]], None] | None = None,
         emit_event: Callable[[dict], None] | None = None,
         emit_progress: Callable[[int], None] | None = None,
@@ -381,11 +399,21 @@ class Extractor(QObject):
         total_videos = max(1, len(videos))
         for index, video_path in enumerate(videos, start=1):
             try:
+                duration_seconds = self._preview_video_duration_seconds(video_path)
+                request_max_output_tokens = scale_cloud_max_output_tokens_for_video_duration(
+                    max_output_tokens,
+                    duration_seconds,
+                )
                 LOGGER.info(
-                    "Preview chunk video request prepared; project_id=%s chunk=%s size_mb=%.2f",
+                    "Preview chunk video request prepared; "
+                    "project_id=%s chunk=%s size_mb=%.2f duration_seconds=%.2f "
+                    "tokens_per_minute=%s request_max_tokens=%s",
                     config.project_id,
                     video_path.name,
                     video_path.stat().st_size / (1024 * 1024),
+                    duration_seconds,
+                    max_output_tokens,
+                    request_max_output_tokens,
                 )
                 if emit_event is not None:
                     emit_event(
@@ -440,7 +468,7 @@ class Extractor(QObject):
                         ),
                     ],
                     temperature=0.2,
-                    max_tokens=PREVIEW_CHUNK_MAX_TOKENS,
+                    max_tokens=request_max_output_tokens,
                     stream=False,
                     timeout_seconds=240,
                     response_format={"type": "json_object"},
@@ -620,6 +648,7 @@ class Extractor(QObject):
         self,
         config: ProjectConfig,
         *,
+        cloud_preset: CloudModelPreset | None = None,
         emit_event: Callable[[dict], None] | None = None,
         emit_progress: Callable[[int], None] | None = None,
         emit_token_usage: Callable[[dict[str, int]], None] | None = None,
@@ -644,8 +673,20 @@ class Extractor(QObject):
         )
         emit_progress(15)
 
-        presets = load_cloud_model_presets()
-        preset = next((item for item in presets if item.base_url.strip() and item.model_name.strip()), None)
+        preset = cloud_preset
+        if preset is None:
+            presets = load_cloud_model_presets()
+            preferred_name = last_cloud_preset_name()
+            preset = next(
+                (
+                    item
+                    for item in presets
+                    if item.name == preferred_name and item.base_url.strip() and item.model_name.strip()
+                ),
+                None,
+            )
+            if preset is None:
+                preset = next((item for item in presets if item.base_url.strip() and item.model_name.strip()), None)
         if preset is None:
             emit_event(
                 InsightEvent(
@@ -676,6 +717,7 @@ class Extractor(QObject):
                 base_url=preset.base_url,
                 api_key=preset.api_key,
                 video_fps=preset.video_fps,
+                max_output_tokens=preset.max_output_tokens,
                 emit_token_usage=emit_token_usage,
                 emit_event=emit_event,
                 emit_progress=emit_progress,

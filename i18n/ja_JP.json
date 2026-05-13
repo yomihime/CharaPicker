@@ -196,6 +196,7 @@
   "model.cloud.modelName": "モデル名",
   "model.cloud.modelName.placeholder": "例：gpt-4.1-mini",
   "model.cloud.videoFps": "動画 FPS",
+  "model.cloud.maxOutputTokens": "出力 Token / 分",
   "model.cloud.videoFps.mode.direct": "現在のサービスは FPS パラメーターを動画 API に直接渡します。",
   "model.cloud.videoFps.mode.frame_sampling": "現在のサービスはこの FPS で動画からフレームを抽出し、画像セットとして送信します。",
   "model.cloud.videoFps.mode.none": "現在のサービスは動画 FPS 設定に対応していません。",

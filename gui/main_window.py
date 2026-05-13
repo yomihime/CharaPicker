@@ -24,6 +24,7 @@ from gui.pages.settings_page import SettingsPage
 from utils.i18n import t
 from utils.logging_middleware import apply_log_level_preference
 from utils.startup_middleware import StartupWarmupSnapshot
+from utils.cloud_model_presets import CloudModelPreset
 from utils.state_manager import save_project_config
 from utils.theme import apply_theme_preference
 
@@ -39,15 +40,22 @@ class PreviewWorker(QObject):
     failed = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, extractor: Extractor, config: ProjectConfig) -> None:
+    def __init__(
+        self,
+        extractor: Extractor,
+        config: ProjectConfig,
+        cloud_preset: CloudModelPreset | None = None,
+    ) -> None:
         super().__init__()
         self.extractor = extractor
         self.config = config
+        self.cloud_preset = cloud_preset
 
     def run(self) -> None:
         try:
             content = self.extractor.run_preview_streaming(
                 self.config,
+                cloud_preset=self.cloud_preset,
                 emit_event=lambda event: self.insightGenerated.emit(event),
                 emit_progress=lambda value: self.progressChanged.emit(value),
                 emit_token_usage=lambda usage: self.tokenUsageChanged.emit(usage),
@@ -145,8 +153,18 @@ class MainWindow(FluentWindow):
         self.switchTo(self.project_page)
         self.project_page.clear_events()
         self.project_page.set_preview_running(True)
+        cloud_preset = self.model_page.current_cloud_preset_for_preview()
+        if cloud_preset is not None:
+            LOGGER.info(
+                "Preview will use current cloud UI settings; preset=%s provider=%s model=%s "
+                "tokens_per_minute=%s",
+                cloud_preset.name,
+                cloud_preset.provider,
+                cloud_preset.model_name,
+                cloud_preset.max_output_tokens,
+            )
         self._preview_thread = QThread(self)
-        self._preview_worker = PreviewWorker(self.extractor, config)
+        self._preview_worker = PreviewWorker(self.extractor, config, cloud_preset)
         self._preview_worker.moveToThread(self._preview_thread)
         self._preview_thread.started.connect(self._preview_worker.run)
         self._preview_worker.insightGenerated.connect(self.project_page.append_event)

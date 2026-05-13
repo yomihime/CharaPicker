@@ -196,6 +196,7 @@
   "model.cloud.modelName": "Model Name",
   "model.cloud.modelName.placeholder": "Example: gpt-4.1-mini",
   "model.cloud.videoFps": "Video FPS",
+  "model.cloud.maxOutputTokens": "Output Tokens / Min",
   "model.cloud.videoFps.mode.direct": "This service passes FPS directly to the video API.",
   "model.cloud.videoFps.mode.frame_sampling": "This service samples video frames at this FPS and sends them as an image set.",
   "model.cloud.videoFps.mode.none": "This service does not support configurable video FPS.",
