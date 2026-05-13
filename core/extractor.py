@@ -8,6 +8,8 @@ from typing import Any
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
+from core import knowledge_base as kb
+from core import source_scanner
 from core.models import ChunkExtractionResult, InsightEvent, InsightStatus, ProjectConfig
 from utils.ai_model_middleware import (
     ModelBackend,
@@ -18,11 +20,10 @@ from utils.ai_model_middleware import (
 )
 from utils.cloud_model_presets import cloud_model_provider, load_cloud_model_presets
 from utils.i18n import t
-from utils.paths import ensure_project_tree
 
 
 LOGGER = logging.getLogger(__name__)
-VIDEO_SUFFIXES = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".wmv", ".m4v"}
+VIDEO_SUFFIXES = source_scanner.VIDEO_SUFFIXES
 PREVIEW_MAX_CHUNKS = 2
 
 
@@ -31,105 +32,20 @@ class Extractor(QObject):
     progressChanged = pyqtSignal(int)
 
     def scan_source_directory(self, source_root: str) -> dict:
-        root = Path(source_root).expanduser()
-        if not root.exists() or not root.is_dir():
-            raise ValueError(f"source root does not exist or is not a directory: {source_root}")
-
-        season_dirs = sorted(
-            [path for path in root.iterdir() if path.is_dir()],
-            key=lambda path: path.name.lower(),
-        )
-
-        seasons: list[dict] = []
-        for season_index, season_dir in enumerate(season_dirs, start=1):
-            episode_files = sorted(
-                [
-                    file_path
-                    for file_path in season_dir.iterdir()
-                    if file_path.is_file() and file_path.suffix.lower() in VIDEO_SUFFIXES
-                ],
-                key=lambda path: path.name.lower(),
-            )
-            episodes: list[dict] = []
-            for episode_index, episode_file in enumerate(episode_files, start=1):
-                episodes.append(
-                    {
-                        "episode_id": f"episode_{episode_index:03d}",
-                        "source_file": str(episode_file.resolve()),
-                        "display_title": episode_file.name,
-                        "sort_key": episode_file.name.lower(),
-                    }
-                )
-            seasons.append(
-                {
-                    "season_id": f"season_{season_index:03d}",
-                    "source_folder": str(season_dir.resolve()),
-                    "display_title": season_dir.name,
-                    "sort_key": season_dir.name.lower(),
-                    "episodes": episodes,
-                }
-            )
-
-        return {
-            "source_root": str(root.resolve()),
-            "seasons": seasons,
-        }
+        return source_scanner.scan_source_directory(source_root)
 
     def generate_source_manifest(self, project_id: str, source_root: str) -> Path:
         manifest = self.scan_source_directory(source_root)
-        knowledge_base = ensure_project_tree(project_id).knowledge_base
-        manifest_path = knowledge_base / "source_manifest.json"
-        manifest_path.write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        return manifest_path
+        return kb.save_source_manifest(project_id, manifest)
 
     def initialize_knowledge_base_structure(self, project_id: str, manifest: dict | None = None) -> Path:
-        knowledge_base = ensure_project_tree(project_id).knowledge_base
-        manifest_data = manifest
-        if manifest_data is None:
-            manifest_path = knowledge_base / "source_manifest.json"
-            if not manifest_path.exists():
-                raise ValueError("source manifest not found; generate source_manifest.json first")
-            manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
-
-        seasons = manifest_data.get("seasons", [])
-        seasons_root = knowledge_base / "seasons"
-        for season in seasons:
-            season_id = season.get("season_id")
-            if not isinstance(season_id, str) or not season_id.strip():
-                continue
-            episode_root = seasons_root / season_id / "episodes"
-            for episode in season.get("episodes", []):
-                episode_id = episode.get("episode_id")
-                if not isinstance(episode_id, str) or not episode_id.strip():
-                    continue
-                (episode_root / episode_id / "chunks").mkdir(parents=True, exist_ok=True)
-        return seasons_root
+        return kb.initialize_structure(project_id, manifest)
 
     def save_chunk_extraction_result(self, project_id: str, result: ChunkExtractionResult) -> Path:
-        knowledge_base = ensure_project_tree(project_id).knowledge_base
-        chunk_dir = (
-            knowledge_base
-            / "seasons"
-            / result.season_id
-            / "episodes"
-            / result.episode_id
-            / "chunks"
-        )
-        chunk_dir.mkdir(parents=True, exist_ok=True)
-        chunk_path = chunk_dir / f"{result.chunk_id}.json"
-        chunk_path.write_text(
-            json.dumps(result.model_dump(mode="json"), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        return chunk_path
+        return kb.save_chunk_result(project_id, result)
 
     def merge_episode_content(self, project_id: str, season_id: str, episode_id: str) -> Path:
-        knowledge_base = ensure_project_tree(project_id).knowledge_base
-        episode_dir = knowledge_base / "seasons" / season_id / "episodes" / episode_id
-        chunk_dir = episode_dir / "chunks"
+        chunk_dir = kb.chunks_root_path(project_id, season_id, episode_id)
         chunk_paths = sorted(
             [path for path in chunk_dir.glob("*.json") if path.is_file()],
             key=lambda path: path.name.lower(),
@@ -146,8 +62,7 @@ class Extractor(QObject):
         evidence_refs: list[str] = []
 
         for chunk_path in chunk_paths:
-            payload = json.loads(chunk_path.read_text(encoding="utf-8"))
-            chunk = ChunkExtractionResult.model_validate(payload)
+            chunk = kb.load_chunk_result(chunk_path)
             chunk_results.append(chunk.model_dump(mode="json"))
             targets.extend(chunk.targets)
             facts.extend(chunk.facts)
@@ -171,18 +86,14 @@ class Extractor(QObject):
             "character_state_changes": self._deduplicate_preserve_order(character_state_changes),
             "evidence_refs": self._deduplicate_preserve_order(evidence_refs),
         }
-        output_path = episode_dir / "episode_content.json"
-        output_path.write_text(json.dumps(episode_content, ensure_ascii=False, indent=2), encoding="utf-8")
-        return output_path
+        return kb.save_episode_content(project_id, season_id, episode_id, episode_content)
 
     def generate_episode_summary(self, project_id: str, season_id: str, episode_id: str) -> Path:
-        knowledge_base = ensure_project_tree(project_id).knowledge_base
-        episode_dir = knowledge_base / "seasons" / season_id / "episodes" / episode_id
-        episode_content_path = episode_dir / "episode_content.json"
+        episode_content_path = kb.episode_content_path(project_id, season_id, episode_id)
         if not episode_content_path.exists():
             raise ValueError("episode content not found; merge episode content first")
 
-        episode_content = json.loads(episode_content_path.read_text(encoding="utf-8"))
+        episode_content = kb.load_episode_content(project_id, season_id, episode_id)
         chunk_results = episode_content.get("chunk_results", [])
         insight_summaries: list[str] = []
         for chunk in chunk_results:
@@ -202,13 +113,10 @@ class Extractor(QObject):
             "growth_signals": episode_content.get("character_state_changes", []),
             "insight_summary": " | ".join(self._deduplicate_preserve_order(insight_summaries)),
         }
-        summary_path = episode_dir / "episode_summary.json"
-        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-        return summary_path
+        return kb.save_episode_summary(project_id, season_id, episode_id, summary)
 
     def merge_season_content(self, project_id: str, season_id: str) -> Path:
-        knowledge_base = ensure_project_tree(project_id).knowledge_base
-        episodes_root = knowledge_base / "seasons" / season_id / "episodes"
+        episodes_root = kb.episodes_root_path(project_id, season_id)
         if not episodes_root.exists():
             raise ValueError("season episodes not found; initialize knowledge base structure first")
 
@@ -222,12 +130,20 @@ class Extractor(QObject):
         character_state_changes: list[str] = []
         evidence_refs: list[str] = []
 
-        for episode_dir in sorted([path for path in episodes_root.iterdir() if path.is_dir()], key=lambda p: p.name.lower()):
-            episode_content_path = episode_dir / "episode_content.json"
+        for episode_dir in kb.list_episode_dirs(project_id, season_id):
+            episode_content_path = kb.episode_content_path(project_id, season_id, episode_dir.name)
             if not episode_content_path.exists():
                 continue
-            payload = json.loads(episode_content_path.read_text(encoding="utf-8"))
-            if not isinstance(payload, dict):
+            try:
+                payload = kb.load_episode_content(project_id, season_id, episode_dir.name)
+            except (OSError, ValueError):
+                LOGGER.warning(
+                    "Episode content read failed during season merge; project_id=%s season_id=%s episode_id=%s",
+                    project_id,
+                    season_id,
+                    episode_dir.name,
+                    exc_info=True,
+                )
                 continue
             episode_contents.append(payload)
             targets.extend(payload.get("targets", []))
@@ -251,19 +167,14 @@ class Extractor(QObject):
             "character_state_changes": self._deduplicate_preserve_order(character_state_changes),
             "evidence_refs": self._deduplicate_preserve_order(evidence_refs),
         }
-        season_dir = knowledge_base / "seasons" / season_id
-        season_content_path = season_dir / "season_content.json"
-        season_content_path.write_text(json.dumps(season_content, ensure_ascii=False, indent=2), encoding="utf-8")
-        return season_content_path
+        return kb.save_season_content(project_id, season_id, season_content)
 
     def generate_season_summary(self, project_id: str, season_id: str) -> Path:
-        knowledge_base = ensure_project_tree(project_id).knowledge_base
-        season_dir = knowledge_base / "seasons" / season_id
-        season_content_path = season_dir / "season_content.json"
+        season_content_path = kb.season_content_path(project_id, season_id)
         if not season_content_path.exists():
             raise ValueError("season content not found; merge season content first")
 
-        season_content = json.loads(season_content_path.read_text(encoding="utf-8"))
+        season_content = kb.load_season_content(project_id, season_id)
         episode_contents = season_content.get("episode_contents", [])
         background_parts: list[str] = []
         for episode in episode_contents:
@@ -283,9 +194,7 @@ class Extractor(QObject):
             "growth_trajectory": season_content.get("behavior_traits", []),
             "background_summary": " | ".join(background_parts),
         }
-        summary_path = season_dir / "season_summary.json"
-        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-        return summary_path
+        return kb.save_season_summary(project_id, season_id, summary)
 
     def _deduplicate_preserve_order(self, values: list[str]) -> list[str]:
         seen: set[str] = set()
@@ -301,32 +210,14 @@ class Extractor(QObject):
         return [self._format_preview_chunk_input(chunk) for chunk in self._collect_preview_chunk_results(project_id)]
 
     def _collect_preview_chunk_results(self, project_id: str) -> list[ChunkExtractionResult]:
-        knowledge_base = ensure_project_tree(project_id).knowledge_base
-        chunk_paths: list[Path] = []
-        seasons_root = knowledge_base / "seasons"
-        if seasons_root.exists():
-            chunk_paths.extend(
-                [
-                    path
-                    for path in seasons_root.rglob("*.json")
-                    if path.is_file() and "chunks" in path.parts
-                ]
-            )
-        top_level_chunks = knowledge_base / "chunks"
-        if top_level_chunks.exists():
-            chunk_paths.extend([path for path in top_level_chunks.rglob("*.json") if path.is_file()])
-        chunk_paths = sorted(
-            list({path.resolve(): path for path in chunk_paths}.values()),
-            key=lambda path: path.relative_to(knowledge_base).as_posix().lower(),
-        )
+        chunk_paths = kb.list_chunk_result_paths(project_id)
         if not chunk_paths:
             return []
 
         preview_chunks: list[ChunkExtractionResult] = []
         for chunk_path in chunk_paths:
             try:
-                payload = json.loads(chunk_path.read_text(encoding="utf-8"))
-                chunk = ChunkExtractionResult.model_validate(payload)
+                chunk = kb.load_chunk_result(chunk_path)
             except (OSError, json.JSONDecodeError, ValueError):
                 LOGGER.warning("Preview chunk JSON read failed; path=%s", chunk_path, exc_info=True)
                 continue
@@ -369,40 +260,27 @@ class Extractor(QObject):
         return "\n\n".join(sections)
 
     def _collect_preview_video_chunks(self, project_id: str) -> list[Path]:
-        materials_root = ensure_project_tree(project_id).materials
-        if not materials_root.exists():
-            return []
-        return sorted(
-            [path for path in materials_root.rglob("*") if path.is_file() and path.suffix.lower() in VIDEO_SUFFIXES],
-            key=lambda path: path.relative_to(materials_root).as_posix().lower(),
-        )[:PREVIEW_MAX_CHUNKS]
+        return source_scanner.collect_preview_video_chunks(project_id, limit=PREVIEW_MAX_CHUNKS)
 
     def _build_video_chunk_part(self, video_path: Path, video_fps: float) -> dict[str, Any]:
         return {"video": f"file://{video_path.resolve().as_posix()}", "fps": video_fps}
 
     def _preview_chunk_identity(self, project_id: str, video_path: Path, fallback_index: int) -> tuple[str, str, str]:
-        materials_root = ensure_project_tree(project_id).materials
-        season_id = "season_001"
-        episode_id = f"episode_{fallback_index:03d}"
-        try:
-            relative_path = video_path.relative_to(materials_root)
-        except ValueError:
-            return (season_id, episode_id, video_path.stem or f"chunk_{fallback_index:03d}")
+        return source_scanner.preview_chunk_identity(project_id, video_path, fallback_index)
 
-        if len(relative_path.parts) > 1:
-            episode_folders = sorted(
-                [path for path in materials_root.iterdir() if path.is_dir()],
-                key=lambda path: path.name.lower(),
-            )
-            parent = materials_root / relative_path.parts[0]
+    def _merge_preview_episode_contents(self, project_id: str, chunks: list[ChunkExtractionResult]) -> None:
+        episode_keys = sorted({(chunk.season_id, chunk.episode_id) for chunk in chunks})
+        for season_id, episode_id in episode_keys:
             try:
-                episode_index = episode_folders.index(parent) + 1
-            except ValueError:
-                episode_index = fallback_index
-            episode_id = f"episode_{episode_index:03d}"
-
-        chunk_id = video_path.stem or f"chunk_{fallback_index:03d}"
-        return (season_id, episode_id, chunk_id)
+                self.merge_episode_content(project_id, season_id, episode_id)
+            except (OSError, ValueError):
+                LOGGER.warning(
+                    "Preview episode content merge failed; project_id=%s season_id=%s episode_id=%s",
+                    project_id,
+                    season_id,
+                    episode_id,
+                    exc_info=True,
+                )
 
     def _extract_json_object(self, content: str) -> dict[str, Any]:
         text = content.strip()
@@ -621,23 +499,7 @@ class Extractor(QObject):
         season_id: str,
         current_episode_id: str,
     ) -> list[dict[str, Any]]:
-        knowledge_base = ensure_project_tree(project_id).knowledge_base
-        episodes_root = knowledge_base / "seasons" / season_id / "episodes"
-        if not episodes_root.exists():
-            return []
-
-        summaries: list[dict[str, Any]] = []
-        for episode_dir in sorted([path for path in episodes_root.iterdir() if path.is_dir()], key=lambda p: p.name.lower()):
-            episode_id = episode_dir.name
-            if episode_id >= current_episode_id:
-                continue
-            summary_path = episode_dir / "episode_summary.json"
-            if not summary_path.exists():
-                continue
-            payload = json.loads(summary_path.read_text(encoding="utf-8"))
-            if isinstance(payload, dict):
-                summaries.append(payload)
-        return summaries
+        return kb.load_current_season_episode_summaries(project_id, season_id, current_episode_id)
 
     def load_previous_season_background(
         self,
@@ -646,22 +508,7 @@ class Extractor(QObject):
         *,
         enabled: bool = True,
     ) -> dict[str, Any] | None:
-        if not enabled:
-            return None
-        try:
-            season_index = int(season_id.split("_")[-1])
-        except (ValueError, IndexError):
-            return None
-        if season_index <= 1:
-            return None
-
-        previous_season_id = f"season_{season_index - 1:03d}"
-        knowledge_base = ensure_project_tree(project_id).knowledge_base
-        summary_path = knowledge_base / "seasons" / previous_season_id / "season_summary.json"
-        if not summary_path.exists():
-            return None
-        payload = json.loads(summary_path.read_text(encoding="utf-8"))
-        return payload if isinstance(payload, dict) else None
+        return kb.load_previous_season_summary(project_id, season_id, enabled=enabled)
 
     def run_preview(self, config: ProjectConfig) -> None:
         self.run_preview_streaming(config)
@@ -738,6 +585,7 @@ class Extractor(QObject):
         for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
             overall_usage[key] += extraction_usage.get(key, 0)
         if created_count > 0:
+            self._merge_preview_episode_contents(config.project_id, extracted_chunks)
             preview_chunks = extracted_chunks[:PREVIEW_MAX_CHUNKS]
 
         if preview_chunks:
