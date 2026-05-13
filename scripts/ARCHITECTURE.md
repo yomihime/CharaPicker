@@ -24,6 +24,6 @@
 ## 维护注意事项
 
 - 脚本输出应保持机器可读，便于批处理和 CI 解析。
-- 版本规则应与 `.codex/CONTENT.md` 的发布规范保持一致。
+- 版本规则应与 [`../docs/release-packaging.zh_CN.md`](../docs/release-packaging.zh_CN.md) 的发布规范保持一致。
 - 不要在脚本中硬编码敏感信息。
 - 新增脚本时说明调用入口和输出位置。

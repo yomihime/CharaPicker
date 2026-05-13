@@ -21,6 +21,7 @@
 - `pages/project_page.py`：项目配置页。收集目标角色、提取模式、素材路径和素材处理配置；启动异步素材导入；展示素材状态和洞察流。
 - `pages/output_page.py`：角色卡 Markdown 预览页。
 - `pages/model_page.py`：模型设置和连通性测试页。管理本地 llama.cpp 可用性、云模型预设、模型列表拉取，以及文本/图片/视频模型测试。
+- `pages/model_test_helpers.py`：模型连通性测试页使用的纯 helper，负责 token 用量格式化、测试素材 data URL 和响应语言提示等逻辑。
 - `pages/prompt_page.py`：提示词设置页。显示默认提示词，保存或清除用户自定义提示词覆盖。
 - `pages/settings_page.py`：语言、主题和日志等级等应用设置页。
 - `pages/about_page.py`：项目信息和注意事项页面。
@@ -36,6 +37,7 @@
 - 调用 `utils.state_manager` 保存和读取项目配置。
 - 调用 `utils.cloud_model_presets`、`utils.cloud_models`、`utils.llamacpp_downloader` 和 `utils.ai_model_middleware` 支持模型页。
 - 调用 `utils.source_importer` 导入外部素材、准备 `materials/`、清理 raw 和移除项目素材。
+- 调用 `utils.source_status` 计算项目页素材显示名、raw/materials 映射和状态。
 - 调用 `utils.prompt_preferences` 保存和读取用户自定义提示词覆盖。
 - 调用 `utils.i18n.t()` 获取所有 UI 可见文案。
 - 从 `res.colors` 读取界面颜色标识。

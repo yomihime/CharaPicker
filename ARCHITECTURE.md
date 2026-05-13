@@ -22,6 +22,7 @@
 - `main.spec`：PyInstaller 文件夹式打包配置，收集 `i18n/`、`res/` 和 qfluentwidgets 资源。
 - `build.bat`：Windows 打包入口。调用 `scripts/build_meta.py`，执行 PyInstaller，整理 `release/CharaPicker/` 并压缩 zip。
 - `README.md`：GitHub 首页说明，要求使用简体中文。
+- `AGENTS.md`：Codex 默认自动加载的长期项目指导文件，不依赖 `.codex/`。
 
 ## 子目录架构说明
 
@@ -30,7 +31,7 @@
 - [utils 架构](utils/ARCHITECTURE.md)
 - [i18n 架构](i18n/ARCHITECTURE.md)
 - [res 架构](res/ARCHITECTURE.md)
-- [doc 架构](doc/ARCHITECTURE.md)
+- [docs 架构](docs/ARCHITECTURE.md)
 - [projects 架构](projects/ARCHITECTURE.md)
 - [bin 架构](bin/ARCHITECTURE.md)
 - [models 架构](models/ARCHITECTURE.md)
@@ -59,3 +60,5 @@
 - UI 颜色标识先放入 `res/colors.py`，界面代码再引用。
 - 保持 `core`、`gui`、`utils` 的职责边界清楚。
 - 打包元数据逻辑放在 `scripts/`；GitHub Actions 只编排构建，不承载应用运行逻辑。
+- 打包与发布规则以 `docs/release-packaging.zh_CN.md` 为正式说明。
+- 文档与架构说明维护规则以 `docs/documentation-maintenance.zh_CN.md` 为正式说明。

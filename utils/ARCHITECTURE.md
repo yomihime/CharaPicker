@@ -22,12 +22,14 @@
 - `theme.py`：管理主题偏好，并调用 qfluentwidgets 应用亮色、暗色或系统主题。
 - `chunker.py`：预留文本或素材分块工具。
 - `env_manager.py`：提供 conda 命令前缀、llama.cpp 二进制发现和可用性检测。
-- `ffmpeg_tool.py`：封装 ffmpeg 工具探测、可用性校验与素材转码/分段执行（一个工具一个文件）。
+- `ffmpeg_tool.py`：封装 ffmpeg 工具可用性校验与素材转码/分段执行。
+- `ffmpeg_detection.py`：封装 FFmpeg 设备/CPU 探测相关 helper，供 `ffmpeg_tool.py` 复用。
 - `cloud_model_presets.py`：保存和读取云端模型配置预设，并维护云端服务类型到模型调用后端的映射。
 - `cloud_models.py`：按云端服务类型路由并拉取模型列表，当前底层复用 OpenAI-compatible 模型列表接口。
 - `llamacpp_downloader.py`：下载并安装 llama.cpp 运行时到 `bin/`。
 - `ffmpeg_downloader.py`：下载并安装 ffmpeg 运行时到 `bin/`。
 - `source_importer.py`：把外部原始素材按项目目录规则复制到 `projects/{project_id}/raw`，计算外部路径对应的 raw 目标，准备 `materials`，并支持 raw 清理和素材移除。
+- `source_status.py`：计算项目页需要的素材显示名、raw/materials 映射、项目内素材列表和素材状态。
 - `material_processing_middleware.py`：统一接收上层的素材处理请求与工具可用性校验请求，桥接 `source_importer.py` 和 `ffmpeg_tool.py`。
 - `startup_middleware.py`：启动阶段预加载中间件，集中探测 FFmpeg/llama.cpp、预取项目配置和云模型预设，供启动页线程复用。
 - `logging_preferences.py`：管理日志等级偏好。
@@ -47,6 +49,7 @@
 - `state_manager.py` 使用 `core.models.ProjectConfig` 进行结构校验。
 - `paths.py` 统一指向 `projects/` 下的工程目录。
 - `source_importer.py` 由 `gui/pages/project_page.py` 调用；它只处理文件系统操作，不负责弹窗、按钮状态或用户提示。
+- `source_status.py` 由 `gui/pages/project_page.py` 调用；它只计算素材状态，不负责渲染列表行、弹窗或 InfoBar。
 - `gui/pages/project_page.py` 通过 `material_processing_middleware.py` 触发素材处理和工具校验，不直接承担下层处理细节。
 - `gui/splash_screen.py` 通过 `startup_middleware.py` 在子线程预热启动数据，再交给主窗口和页面复用。
 
@@ -56,7 +59,9 @@
 - 启动预热逻辑集中在 `startup_middleware.py`，避免页面构造阶段重复执行同步探测。
 - 路径相关逻辑集中放在 `paths.py`，避免各处拼接项目目录。
 - 素材导入和清理逻辑集中放在 `source_importer.py`，页面层不要直接复制、链接或删除项目素材文件。
+- raw/materials 状态判断集中放在 `source_status.py`，页面层只负责展示和触发操作。
 - 全局用户数据和配置选项统一通过 `global_store.py` 读写。
 - 项目配置读写保持 UTF-8 和结构化 JSON；全局配置读写保持 UTF-8 和结构化 YAML。
 - 模型执行必须通过 `call_text_model()`、`call_image_model()` 或 `call_video_model()` 进入后端。
 - 日志不得输出 API Key、完整密钥、隐私文本或大型原始素材内容。
+- 运行时中间件的详细职责边界见 [`../docs/runtime-middleware.zh_CN.md`](../docs/runtime-middleware.zh_CN.md)。
