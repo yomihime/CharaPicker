@@ -337,6 +337,7 @@
   "extractor.chunk.description": "预览试跑会先读取前 2 个 chunk，用来检查提示词和证据质量。",
   "extractor.chunk.bootstrapFromVideo": "未发现可用 chunk JSON，正在从处理后的视频切片提取结构化信息…",
   "extractor.chunk.extractingVideoChunk": "正在提取视频切片 {current}/{total}：{name}",
+  "extractor.chunk.videoChunkFailed": "视频切片 {current}/{total} 提取失败：{name}。将继续使用其他可用结果。",
   "extractor.chunk.noChunkJson": "knowledge_base 下未检测到可读的 chunk JSON，预览已中止。",
   "extractor.chunk.usingChunkJson": "预览将使用真实 chunk JSON 输入（共 {count} 个 chunk）。",
   "extractor.insight.title": "等待定向洞察",

@@ -58,6 +58,9 @@ class ModelCallRequest(BaseModel):
     temperature: float = 0.2
     max_tokens: int | None = None
     stream: bool = False
+    timeout_seconds: int = 120
+    response_format: dict[str, Any] | None = None
+    extra_body: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -506,6 +509,12 @@ def _call_openai_compatible(
     if request.stream:
         payload["stream"] = True
         payload["stream_options"] = {"include_usage": True}
+    for key, value in request.extra_body.items():
+        if key in {"model", "messages"}:
+            continue
+        payload[key] = value
+    if request.response_format is not None:
+        payload["response_format"] = request.response_format
 
     headers = {
         "Content-Type": "application/json",
@@ -532,7 +541,7 @@ def _call_openai_compatible(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(http_request, timeout=120) as response:
+        with urllib.request.urlopen(http_request, timeout=max(1, request.timeout_seconds)) as response:
             if request.stream:
                 return _read_streamed_response(response, request, on_stream_delta=on_stream_delta)
             raw = json.loads(response.read().decode("utf-8"))
@@ -687,7 +696,7 @@ def _extract_stream_delta_text(payload: dict[str, Any]) -> str:
         for item in content:
             if not isinstance(item, dict):
                 continue
-            if item.get("type") != "text":
+            if item.get("type") not in (None, "text") and "text" not in item:
                 continue
             text = item.get("text")
             if isinstance(text, str):
@@ -714,7 +723,7 @@ def _extract_message_content(payload: dict[str, Any]) -> str:
         for item in content:
             if not isinstance(item, dict):
                 continue
-            if item.get("type") != "text":
+            if item.get("type") not in (None, "text") and "text" not in item:
                 continue
             text = item.get("text")
             if isinstance(text, str):

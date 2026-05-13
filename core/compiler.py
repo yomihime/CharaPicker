@@ -149,13 +149,37 @@ def final_polish_character_state(project_id: str, character: str) -> CharacterSt
 
 
 def _apply_episode_payload_to_state(state: CharacterState, payload: dict) -> CharacterState:
-    facts = [item for item in payload.get("facts", []) if isinstance(item, str) and item.strip()]
-    behavior_traits = [
-        item for item in payload.get("behavior_traits", []) if isinstance(item, str) and item.strip()
-    ]
-    conflicts = [item for item in payload.get("conflicts", []) if isinstance(item, str) and item.strip()]
+    facts = _character_related_items(payload.get("facts", []), state.character)
+    behavior_traits = _character_related_items(payload.get("behavior_traits", []), state.character)
+    dialogue_style = _character_related_items(payload.get("dialogue_style", []), state.character)
+    relationship_interactions = _character_related_items(
+        payload.get("relationship_interactions", []),
+        state.character,
+    )
+    character_state_changes = _character_related_items(
+        payload.get("character_state_changes", []),
+        state.character,
+    )
+    conflicts = _character_related_items(payload.get("conflicts", []), state.character)
+    if not any(
+        [
+            facts,
+            behavior_traits,
+            dialogue_style,
+            relationship_interactions,
+            character_state_changes,
+            conflicts,
+        ]
+    ):
+        return state
 
-    summary_parts = [part for part in [state.summary, "; ".join(behavior_traits)] if part]
+    summary_items = [
+        *behavior_traits,
+        *dialogue_style,
+        *relationship_interactions,
+        *character_state_changes,
+    ] or facts
+    summary_parts = [part for part in [state.summary, "; ".join(summary_items)] if part]
     merged_conflicts = list(dict.fromkeys([*state.conflicts, *conflicts]))
     return CharacterState(
         character=state.character,
@@ -171,6 +195,20 @@ def _episode_targets_character(payload: dict, character: str) -> bool:
         return True
     normalized_character = character.strip()
     return any(isinstance(item, str) and item.strip() == normalized_character for item in targets)
+
+
+def _character_related_items(value: object, character: str) -> list[str]:
+    normalized_character = character.strip().casefold()
+    if not normalized_character or not isinstance(value, list):
+        return []
+    output: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        text = item.strip()
+        if text and normalized_character in text.casefold():
+            output.append(text)
+    return output
 
 
 def _polish_summary(summary: str) -> str:

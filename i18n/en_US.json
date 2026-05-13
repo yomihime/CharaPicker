@@ -337,6 +337,7 @@
   "extractor.chunk.description": "Preview run reads the first 2 chunks to check prompt and evidence quality.",
   "extractor.chunk.bootstrapFromVideo": "No chunk JSON found; extracting structured data from processed video chunks...",
   "extractor.chunk.extractingVideoChunk": "Extracting video chunk {current}/{total}: {name}",
+  "extractor.chunk.videoChunkFailed": "Video chunk {current}/{total} failed: {name}. Other available results will still be used.",
   "extractor.chunk.noChunkJson": "No readable chunk JSON found under knowledge_base; preview has been stopped.",
   "extractor.chunk.usingChunkJson": "Preview is using real chunk JSON inputs ({count} chunks).",
   "extractor.insight.title": "Waiting for targeted insights",
