@@ -24,7 +24,7 @@
 - `env_manager.py`：提供 conda 命令前缀、llama.cpp 二进制发现和可用性检测。
 - `ffmpeg_tool.py`：封装 ffmpeg 工具可用性校验与素材转码/分段执行。
 - `ffmpeg_detection.py`：封装 FFmpeg 设备/CPU 探测相关 helper，供 `ffmpeg_tool.py` 复用。
-- `cloud_model_presets.py`：保存和读取云端模型配置预设，并维护云端服务类型到模型调用后端的映射。
+- `cloud_model_presets.py`：保存和读取云端模型配置预设，维护云端服务类型到模型调用后端的映射，并提供视频输出 Token / 分钟到单次请求上限的换算工具。
 - `cloud_models.py`：按云端服务类型路由并拉取模型列表，当前底层复用 OpenAI-compatible 模型列表接口。
 - `llamacpp_downloader.py`：下载并安装 llama.cpp 运行时到 `bin/`。
 - `ffmpeg_downloader.py`：下载并安装 ffmpeg 运行时到 `bin/`。
@@ -34,7 +34,7 @@
 - `startup_middleware.py`：启动阶段预加载中间件，集中探测 FFmpeg/llama.cpp、预取项目配置和云模型预设，供启动页线程复用。
 - `logging_preferences.py`：管理日志等级偏好。
 - `logging_middleware.py`：安装全局日志中间件，日志只写入文件。
-- `ai_model_middleware.py`：统一模型调用入口，负责加载默认提示词、构造标准消息、屏蔽敏感日志并路由下层模型后端。
+- `ai_model_middleware.py`：统一模型调用入口，负责加载默认提示词、构造标准消息、携带按请求设置的超时/结构化输出/后端专用参数、屏蔽敏感日志并路由下层模型后端。
 - `ai_model_middleware.py` 中的 OpenAI-compatible 视频输入会按请求中的 FPS 抽帧为图片组后发送；支持直接视频 FPS 的后端则由对应 provider 传递原始视频参数。
 - `prompt_preferences.py`：管理用户自定义提示词覆盖，空内容不覆盖默认提示词。
 - `__init__.py`：标记 `utils` 为 Python 包。

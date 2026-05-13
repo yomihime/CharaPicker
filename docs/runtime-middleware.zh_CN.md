@@ -132,4 +132,6 @@
 - `core`、`gui` 和其他上层模块不得绕过中间件直连模型后端。
 - 模型执行必须通过 `call_text_model()`、`call_image_model()` 或 `call_video_model()` 进入后端。
 - OpenAI-compatible 视频输入当前会按请求 FPS 抽帧为图片组后发送；支持直接视频 FPS 的后端由对应 provider 传递原始视频参数。
+- `ModelCallRequest` 支持按请求设置超时时间、结构化输出 `response_format` 和后端专用 `extra_body` 参数；调用方不得把 API Key 或完整模型响应写入普通日志。
+- 云端视频预览的输出上限按“输出 Token / 分钟”配置并结合视频 chunk 时长换算为单次请求 `max_tokens`；调用方应检查后端返回的停止原因，识别 `length` / `max_tokens` 等输出截断情况。
 - 本地模型执行入口存在，但是否可用必须以当前代码为准，不要假定已完整接线。
