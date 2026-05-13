@@ -71,7 +71,7 @@ python main.py
 - [简体中文 README](../README.md)
 - [繁體中文 README](README.zh_TW.md)
 - [日本語 README](README.ja_JP.md)
-- [doc Architecture](ARCHITECTURE.md)
+- [docs Architecture](ARCHITECTURE.md)
 - [Root Architecture](../ARCHITECTURE.md)
 
 ## Development Notes
