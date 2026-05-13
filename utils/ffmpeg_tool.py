@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import platform
 import re
 import shutil
 import subprocess
@@ -14,6 +13,11 @@ from pathlib import Path
 
 from core.models import SourceProcessingConfig, SourceProcessingPreset, SourceSegmentMode
 from utils.env_manager import BIN_ROOT
+from utils.ffmpeg_detection import (
+    detect_cpu_name as _detect_cpu_name,
+    detect_video_device_names as _detect_video_device_names,
+    pick_device as _pick_device,
+)
 from utils.paths import ensure_project_tree
 import logging
 
@@ -968,55 +972,6 @@ def _pick_first_supported_encoder(preferred: tuple[str, ...], *, bin_root: Path 
         if encoder in supported:
             return encoder
     return preferred[-1]
-
-
-def _detect_video_device_names() -> list[str]:
-    if os.name != "nt":
-        return []
-    output = _run_powershell_lines("Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name")
-    return [line for line in output if line]
-
-
-def _detect_cpu_name() -> str:
-    if os.name == "nt":
-        output = _run_powershell_lines("Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name")
-        for line in output:
-            if line:
-                return line
-    for key in ("PROCESSOR_IDENTIFIER", "PROCESSOR_ARCHITECTURE"):
-        value = os.environ.get(key, "").strip()
-        if value:
-            return value
-    detected = platform.processor().strip()
-    if detected:
-        return detected
-    return "CPU"
-
-
-def _run_powershell_lines(command: str) -> list[str]:
-    try:
-        completed = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", command],
-            capture_output=True,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return []
-    text = _decode_process_output(completed.stdout)
-    return [line.strip() for line in text.splitlines() if line.strip()]
-
-
-def _pick_device(candidates: list[str], keywords: list[str]) -> str:
-    lowered = [keyword.lower() for keyword in keywords]
-    for candidate in candidates:
-        source = candidate.lower()
-        if all(keyword in source for keyword in lowered):
-            return candidate
-    for candidate in candidates:
-        source = candidate.lower()
-        if any(keyword in source for keyword in lowered):
-            return candidate
-    return ""
 
 
 def _is_encoder_compatible(codec_format: str, encoder_name: str) -> bool:
