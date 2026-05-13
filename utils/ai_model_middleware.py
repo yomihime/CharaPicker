@@ -25,6 +25,12 @@ from utils.ffmpeg_tool import find_usable_ffmpeg_binary
 LOGGER = logging.getLogger(__name__)
 DEFAULT_PROMPTS_PATH = APP_ROOT / "res" / "default_prompts.json"
 USER_AGENT = "CharaPicker/0.1"
+OUTPUT_TOKEN_GUIDANCE_TEMPLATE = (
+    "Output budget: keep the final response within {max_tokens} output tokens. "
+    "Use enough detail to complete the task, but do not pad the answer. "
+    "If the task may exceed the budget, compress wording and prioritize complete, "
+    "parseable output over extra explanation."
+)
 
 MessageRole = Literal["system", "user", "assistant"]
 ModelBackend = Literal["openai_compatible", "dashscope", "local"]
@@ -58,6 +64,9 @@ class ModelCallRequest(BaseModel):
     temperature: float = 0.2
     max_tokens: int | None = None
     stream: bool = False
+    timeout_seconds: int = 120
+    response_format: dict[str, Any] | None = None
+    extra_body: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -161,6 +170,7 @@ def _call_model(
     *,
     on_stream_delta: Callable[[str], None] | None = None,
 ) -> ModelCallResult:
+    request = _request_with_output_token_guidance(request)
     if request.backend == "openai_compatible":
         return _call_openai_compatible(request, on_stream_delta=on_stream_delta)
     if request.backend == "dashscope":
@@ -171,6 +181,32 @@ def _call_model(
             "use this middleware entrypoint when it is added."
         )
     raise ModelCallError(f"Unsupported model backend: {request.backend}")
+
+
+def _request_with_output_token_guidance(request: ModelCallRequest) -> ModelCallRequest:
+    if request.max_tokens is None or request.max_tokens <= 0:
+        return request
+
+    guidance = OUTPUT_TOKEN_GUIDANCE_TEMPLATE.format(max_tokens=request.max_tokens)
+    messages = list(request.messages)
+    for index, message in enumerate(messages):
+        if message.role != "system":
+            continue
+        if isinstance(message.content, str):
+            if guidance in message.content:
+                return request
+            content = message.content.rstrip()
+            messages[index] = message.model_copy(
+                update={"content": f"{content}\n\n{guidance}" if content else guidance}
+            )
+        else:
+            content_parts = list(message.content)
+            content_parts.append({"type": "text", "text": guidance})
+            messages[index] = message.model_copy(update={"content": content_parts})
+        return request.model_copy(update={"messages": messages})
+
+    messages.insert(0, ModelMessage(role="system", content=guidance))
+    return request.model_copy(update={"messages": messages})
 
 
 def call_text_model(
@@ -259,11 +295,18 @@ def _call_dashscope(request: ModelCallRequest) -> ModelCallResult:
         bool(api_key),
     )
     try:
-        response = MultiModalConversation.call(
-            api_key=api_key or None,
-            model=request.model_name,
-            messages=messages,
-        )
+        call_kwargs: dict[str, Any] = {
+            "api_key": api_key or None,
+            "model": request.model_name,
+            "messages": messages,
+        }
+        if request.max_tokens is not None:
+            call_kwargs["max_tokens"] = request.max_tokens
+        for key, value in request.extra_body.items():
+            if key in {"api_key", "model", "messages"}:
+                continue
+            call_kwargs[key] = value
+        response = MultiModalConversation.call(**call_kwargs)
     except Exception as exc:  # noqa: BLE001
         LOGGER.warning(
             "DashScope model call failed; purpose=%s endpoint=%s",
@@ -506,6 +549,12 @@ def _call_openai_compatible(
     if request.stream:
         payload["stream"] = True
         payload["stream_options"] = {"include_usage": True}
+    for key, value in request.extra_body.items():
+        if key in {"model", "messages"}:
+            continue
+        payload[key] = value
+    if request.response_format is not None:
+        payload["response_format"] = request.response_format
 
     headers = {
         "Content-Type": "application/json",
@@ -532,7 +581,7 @@ def _call_openai_compatible(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(http_request, timeout=120) as response:
+        with urllib.request.urlopen(http_request, timeout=max(1, request.timeout_seconds)) as response:
             if request.stream:
                 return _read_streamed_response(response, request, on_stream_delta=on_stream_delta)
             raw = json.loads(response.read().decode("utf-8"))
@@ -687,7 +736,7 @@ def _extract_stream_delta_text(payload: dict[str, Any]) -> str:
         for item in content:
             if not isinstance(item, dict):
                 continue
-            if item.get("type") != "text":
+            if item.get("type") not in (None, "text") and "text" not in item:
                 continue
             text = item.get("text")
             if isinstance(text, str):
@@ -714,7 +763,7 @@ def _extract_message_content(payload: dict[str, Any]) -> str:
         for item in content:
             if not isinstance(item, dict):
                 continue
-            if item.get("type") != "text":
+            if item.get("type") not in (None, "text") and "text" not in item:
                 continue
             text = item.get("text")
             if isinstance(text, str):

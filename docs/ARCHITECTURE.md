@@ -1,4 +1,4 @@
-# doc 架构说明
+# docs 架构说明
 
 ## 负责什么
 
@@ -15,24 +15,32 @@
 
 ## 关键文件
 
+- `README.md`：`docs/` 的文档索引和导航入口。
 - `extraction-workflow.zh_CN.md`：面向用户和研究者的提取工作流技术说明，简体中文版本。
 - `extraction-workflow.zh_TW.md`：面向用户和研究者的提取工作流技术说明，繁体中文版本。
 - `extraction-workflow.en_US.md`：面向用户和研究者的提取工作流技术说明，英语版本。
 - `extraction-workflow.ja_JP.md`：面向用户和研究者的提取工作流技术说明，日语版本。
 - `extraction-development-roadmap.zh_CN.md`：面向开发者的提取与角色成长编译开发路线。
 - `preview-real-result-ingestion-plan.zh_CN.md`：面向开发者的真实预览结果接入计划。
+- `product-design-guidelines.zh_CN.md`：产品定位、产品语气、UI/i18n/资源规范、InsightStreamPanel 和混合媒体成本控制规范。
+- `runtime-middleware.zh_CN.md`：全局存储、日志、弹窗、启动预热、素材处理和 AI 模型调用中间件的设计边界。
+- `release-packaging.zh_CN.md`：PyInstaller、版本阶段、发布包结构和 CI 发布规范。
+- `documentation-maintenance.zh_CN.md`：README、多语言文档、ARCHITECTURE.md 和计划类文档维护规则。
+- `refactor-plan.md`：代码结构整理的正式执行计划和阶段记录。
 - `README.en_US.md`、`README.ja_JP.md`、`README.zh_TW.md`：README 的多语言补充版本。
 - 后续多语言文档应在文件名中标明语种，例如 `usage.zh_CN.md`。
 
 ## 与其他目录的关系
 
 - 根目录 `README.md` 负责 GitHub 首页说明。
-- `doc/` 负责更细的扩展说明和多语言补充文档。
-- `.codex/CONTENT.md` 是 AI 协作上下文，不应与公开用户文档混放。
+- `docs/` 负责更细的扩展说明和多语言补充文档。
+- 根目录 `AGENTS.md` 负责 Codex 默认自动加载的长期项目指导。
+- `.codex/CONTENT.md` 是历史 AI 协作上下文，不再作为正式文档入口。
 
 ## 维护注意事项
 
 - 文档默认使用 UTF-8。
 - 文档内容应短句清楚，优先说明边界、流程和限制。
 - 多语言文档文件名必须能区分语种。
-- 不要把运行时配置或用户数据写入 `doc/`。
+- 计划类文档可能随代码演进而过期；如发现与当前代码冲突，应在文档中显式标注状态。
+- 不要把运行时配置或用户数据写入 `docs/`。

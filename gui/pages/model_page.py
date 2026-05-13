@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import base64
 import logging
-import mimetypes
 from pathlib import Path
+from typing import Any
 
 from PyQt6.QtCore import QObject, QSignalBlocker, Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -32,15 +31,30 @@ from qfluentwidgets import (
 
 from gui.widgets.dialog_middleware import FluentDialog
 from gui.widgets.streaming_text_session import StreamingTextSession
+from gui.pages.model_test_helpers import (
+    build_data_url as _build_data_url,
+    format_token_usage_line as _format_token_usage_line,
+    join_failed_items as _join_failed_items,
+    response_language_instruction as _response_language_instruction,
+    response_language_name as _response_language_name,
+    token_usage_from_metadata as _token_usage_from_metadata,
+    token_usage_log_fields as _token_usage_log_fields,
+)
 from utils.cloud_models import CloudModelListError, fetch_cloud_models
 from utils.cloud_model_presets import (
+    CLOUD_MAX_OUTPUT_TOKENS_MAX,
+    CLOUD_MAX_OUTPUT_TOKENS_MIN,
+    CLOUD_MAX_OUTPUT_TOKENS_STEP,
+    DEFAULT_CLOUD_MAX_OUTPUT_TOKENS,
     CLOUD_PROVIDER_IDS,
     DEFAULT_CLOUD_VIDEO_FPS,
     CloudModelPreset,
     cloud_model_provider,
+    coerce_cloud_max_output_tokens,
     delete_cloud_model_preset,
     load_cloud_model_presets,
     normalize_cloud_provider,
+    scale_cloud_max_output_tokens_for_video_duration,
     upsert_cloud_model_preset,
 )
 from utils.env_manager import has_llamacpp_binary
@@ -60,6 +74,7 @@ from utils.model_preferences import (
     set_last_model_page_mode,
 )
 from utils.paths import APP_ROOT
+from utils.ffmpeg_tool import FfmpegProcessError, probe_video_duration_seconds
 from utils.ai_model_middleware import (
     ModelMiddlewareError,
     ModelCallRequest,
@@ -74,13 +89,40 @@ TEST_MEDIA_ROOT = APP_ROOT / "res" / "test_media"
 IMAGE_TEST_ASSET = TEST_MEDIA_ROOT / "model_test_input.jpg"
 VIDEO_TEST_ASSET = TEST_MEDIA_ROOT / "model_test_input.mp4"
 LOGGER = logging.getLogger(__name__)
-LOCALE_LANGUAGE_HINTS = {
-    "zh_CN": "Simplified Chinese",
-    "zh_TW": "Traditional Chinese",
-    "en_US": "English",
-    "ja_JP": "Japanese",
-}
 EASTER_TAP_TARGET = 9
+
+
+def _video_max_output_tokens(max_output_tokens_per_minute: int, video_path: Path) -> int:
+    try:
+        duration_seconds = probe_video_duration_seconds(video_path)
+    except (FfmpegProcessError, OSError):
+        LOGGER.warning(
+            "Cloud video test duration probe failed; video=%s",
+            video_path,
+            exc_info=True,
+        )
+        duration_seconds = 60.0
+    max_tokens = scale_cloud_max_output_tokens_for_video_duration(
+        max_output_tokens_per_minute,
+        duration_seconds,
+    )
+    LOGGER.info(
+        "Cloud video token budget calculated; video=%s duration_seconds=%.2f "
+        "tokens_per_minute=%s request_max_tokens=%s",
+        video_path.name,
+        duration_seconds,
+        max_output_tokens_per_minute,
+        max_tokens,
+    )
+    return max_tokens
+
+
+def _cloud_request_extra_body(base_url: str) -> dict[str, Any]:
+    if "dashscope.aliyuncs.com" in base_url.lower():
+        return {"enable_thinking": False}
+    return {}
+
+
 EASTER_PROMPT_OVERRIDE = (
     "请使用中文写一段对 yomihime（如月怜） 的赞美文字，整体风格偏向赞颂美少女气质。"
     "必须为原创连贯长文，长度不少于1000个中文汉字。"
@@ -88,69 +130,6 @@ EASTER_PROMPT_OVERRIDE = (
     "语气请真诚、有画面感，但不要使用低俗、露骨或色情内容。"
     "不要输出列表，不要分点，直接输出完整正文。"
 )
-
-
-def _token_usage_log_fields(metadata: dict) -> tuple[int | None, int | None, int | None]:
-    usage = metadata.get("token_usage")
-    if not isinstance(usage, dict):
-        return (None, None, None)
-    prompt_tokens = usage.get("prompt_tokens") if isinstance(usage.get("prompt_tokens"), int) else None
-    completion_tokens = usage.get("completion_tokens") if isinstance(usage.get("completion_tokens"), int) else None
-    total_tokens = usage.get("total_tokens") if isinstance(usage.get("total_tokens"), int) else None
-    return (prompt_tokens, completion_tokens, total_tokens)
-
-
-def _token_usage_from_metadata(metadata: dict) -> dict[str, int]:
-    usage = metadata.get("token_usage")
-    if not isinstance(usage, dict):
-        return {}
-    normalized: dict[str, int] = {}
-    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-        value = usage.get(key)
-        if isinstance(value, int):
-            normalized[key] = value
-    return normalized
-
-
-def _format_token_usage_line(token_usage: dict[str, int]) -> str:
-    prompt_tokens = token_usage.get("prompt_tokens")
-    completion_tokens = token_usage.get("completion_tokens")
-    total_tokens = token_usage.get("total_tokens")
-    if not any(isinstance(value, int) for value in (prompt_tokens, completion_tokens, total_tokens)):
-        return t("model.cloud.test.tokenUsage.empty")
-    return t(
-        "model.cloud.test.tokenUsage",
-        prompt_tokens=prompt_tokens if isinstance(prompt_tokens, int) else "-",
-        completion_tokens=completion_tokens if isinstance(completion_tokens, int) else "-",
-        total_tokens=total_tokens if isinstance(total_tokens, int) else "-",
-    )
-
-
-def _build_data_url(asset_path: Path, default_mime: str) -> str:
-    if not asset_path.exists():
-        raise ModelMiddlewareError(f"Test asset does not exist: {asset_path}")
-    mime_type, _ = mimetypes.guess_type(asset_path.name)
-    mime_type = mime_type or default_mime
-    encoded = base64.b64encode(asset_path.read_bytes()).decode("ascii")
-    return f"data:{mime_type};base64,{encoded}"
-
-
-def _response_language_name(locale: str) -> str:
-    return LOCALE_LANGUAGE_HINTS.get(locale, LOCALE_LANGUAGE_HINTS["zh_CN"])
-
-
-def _response_language_instruction(locale: str) -> str:
-    return f"Respond in {_response_language_name(locale)}."
-
-
-def _join_failed_items(items: list[str], locale: str) -> str:
-    if not items:
-        return ""
-    if locale.startswith("en"):
-        return ", ".join(items)
-    if locale.startswith("ja"):
-        return "、".join(items)
-    return "、".join(items)
 
 
 class LlamaCppDownloadWorker(QObject):
@@ -218,12 +197,22 @@ class CloudTextTestWorker(QObject):
     failed = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, *, provider: str, base_url: str, api_key: str, model_name: str, locale: str) -> None:
+    def __init__(
+        self,
+        *,
+        provider: str,
+        base_url: str,
+        api_key: str,
+        model_name: str,
+        max_output_tokens: int,
+        locale: str,
+    ) -> None:
         super().__init__()
         self.provider = provider
         self.base_url = base_url
         self.api_key = api_key
         self.model_name = model_name
+        self.max_output_tokens = max_output_tokens
         self.locale = locale
 
     def run(self) -> None:
@@ -240,8 +229,9 @@ class CloudTextTestWorker(QObject):
                 base_url=self.base_url,
                 api_key=self.api_key,
                 temperature=0,
-                max_tokens=64,
+                max_tokens=self.max_output_tokens,
                 stream=True,
+                extra_body=_cloud_request_extra_body(self.base_url),
                 messages=[
                     ModelMessage(role="system", content="You are a model connectivity test assistant."),
                     ModelMessage(
@@ -282,13 +272,24 @@ class CloudImageTestWorker(QObject):
     failed = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, *, provider: str, base_url: str, api_key: str, model_name: str, image_path: Path, locale: str) -> None:
+    def __init__(
+        self,
+        *,
+        provider: str,
+        base_url: str,
+        api_key: str,
+        model_name: str,
+        image_path: Path,
+        max_output_tokens: int,
+        locale: str,
+    ) -> None:
         super().__init__()
         self.provider = provider
         self.base_url = base_url
         self.api_key = api_key
         self.model_name = model_name
         self.image_path = image_path
+        self.max_output_tokens = max_output_tokens
         self.locale = locale
 
     def run(self) -> None:
@@ -307,8 +308,9 @@ class CloudImageTestWorker(QObject):
                 base_url=self.base_url,
                 api_key=self.api_key,
                 temperature=0,
-                max_tokens=96,
+                max_tokens=self.max_output_tokens,
                 stream=True,
+                extra_body=_cloud_request_extra_body(self.base_url),
                 messages=[
                     ModelMessage(role="system", content="You are a vision connectivity test assistant."),
                     ModelMessage(
@@ -362,6 +364,7 @@ class CloudVideoTestWorker(QObject):
         model_name: str,
         video_path: Path,
         video_fps: float,
+        max_output_tokens: int,
         locale: str,
     ) -> None:
         super().__init__()
@@ -371,6 +374,7 @@ class CloudVideoTestWorker(QObject):
         self.model_name = model_name
         self.video_path = video_path
         self.video_fps = video_fps
+        self.max_output_tokens = max_output_tokens
         self.locale = locale
 
     def run(self) -> None:
@@ -381,6 +385,7 @@ class CloudVideoTestWorker(QObject):
             self.video_path,
         )
         try:
+            max_tokens = _video_max_output_tokens(self.max_output_tokens, self.video_path)
             request = ModelCallRequest(
                 purpose="connectivity_test_video",
                 backend=cloud_model_provider(self.provider).backend_for("video"),
@@ -388,7 +393,8 @@ class CloudVideoTestWorker(QObject):
                 base_url=self.base_url,
                 api_key=self.api_key,
                 temperature=0,
-                max_tokens=96,
+                max_tokens=max_tokens,
+                extra_body=_cloud_request_extra_body(self.base_url),
                 messages=[
                     ModelMessage(role="system", content="You are a video connectivity test assistant."),
                     ModelMessage(
@@ -447,6 +453,7 @@ class CloudAllTestWorker(QObject):
         image_path: Path,
         video_path: Path,
         video_fps: float,
+        max_output_tokens: int,
         locale: str,
         text_prompt_override: str | None = None,
     ) -> None:
@@ -458,6 +465,7 @@ class CloudAllTestWorker(QObject):
         self.image_path = image_path
         self.video_path = video_path
         self.video_fps = video_fps
+        self.max_output_tokens = max_output_tokens
         self.locale = locale
         self.text_prompt_override = text_prompt_override
 
@@ -516,7 +524,6 @@ class CloudAllTestWorker(QObject):
     def _run_text_test(self) -> dict[str, str]:
         if self.text_prompt_override:
             user_prompt = self.text_prompt_override
-            max_tokens = 2200
         else:
             user_prompt = (
                 f"{_response_language_instruction(self.locale)} "
@@ -524,7 +531,6 @@ class CloudAllTestWorker(QObject):
                 "MODEL: <the model id you are running as>; "
                 "SUMMARY: <one-sentence self-introduction>."
             )
-            max_tokens = 64
         request = ModelCallRequest(
             purpose="connectivity_test",
             backend=cloud_model_provider(self.provider).backend_for("text"),
@@ -532,8 +538,9 @@ class CloudAllTestWorker(QObject):
             base_url=self.base_url,
             api_key=self.api_key,
             temperature=0,
-            max_tokens=max_tokens,
+            max_tokens=self.max_output_tokens,
             stream=True,
+            extra_body=_cloud_request_extra_body(self.base_url),
             messages=[
                 ModelMessage(role="system", content="You are a model connectivity test assistant."),
                 ModelMessage(role="user", content=user_prompt),
@@ -551,8 +558,9 @@ class CloudAllTestWorker(QObject):
             base_url=self.base_url,
             api_key=self.api_key,
             temperature=0,
-            max_tokens=96,
+            max_tokens=self.max_output_tokens,
             stream=True,
+            extra_body=_cloud_request_extra_body(self.base_url),
             messages=[
                 ModelMessage(role="system", content="You are a vision connectivity test assistant."),
                 ModelMessage(
@@ -574,6 +582,7 @@ class CloudAllTestWorker(QObject):
         return self._safe_call(request, "image")
 
     def _run_video_test(self) -> dict[str, str]:
+        max_tokens = _video_max_output_tokens(self.max_output_tokens, self.video_path)
         request = ModelCallRequest(
             purpose="connectivity_test_video",
             backend=cloud_model_provider(self.provider).backend_for("video"),
@@ -581,7 +590,8 @@ class CloudAllTestWorker(QObject):
             base_url=self.base_url,
             api_key=self.api_key,
             temperature=0,
-            max_tokens=96,
+            max_tokens=max_tokens,
+            extra_body=_cloud_request_extra_body(self.base_url),
             messages=[
                 ModelMessage(role="system", content="You are a video connectivity test assistant."),
                 ModelMessage(
@@ -747,6 +757,7 @@ class ModelPage(QWidget):
         self._cloud_all_section_status: dict[str, str] = {"text": "queued", "image": "queued", "video": "queued"}
         self._cloud_all_final_summary = ""
         self._last_valid_cloud_video_fps = DEFAULT_CLOUD_VIDEO_FPS
+        self._last_valid_cloud_max_output_tokens = DEFAULT_CLOUD_MAX_OUTPUT_TOKENS
         self._cloud_stream_session: StreamingTextSession | None = None
         self._cloud_stream_kind = ""
         self._cloud_presets: list[CloudModelPreset] = []
@@ -887,6 +898,24 @@ class ModelPage(QWidget):
         video_fps_row.addWidget(self.cloud_video_fps_slider, 1)
         video_fps_row.addWidget(self.cloud_video_fps)
 
+        max_output_tokens_row = QHBoxLayout()
+        max_output_tokens_row.setSpacing(8)
+        self.cloud_max_output_tokens_slider = Slider(Qt.Orientation.Horizontal, self.cloud_card)
+        self.cloud_max_output_tokens_slider.setRange(
+            CLOUD_MAX_OUTPUT_TOKENS_MIN // CLOUD_MAX_OUTPUT_TOKENS_STEP,
+            CLOUD_MAX_OUTPUT_TOKENS_MAX // CLOUD_MAX_OUTPUT_TOKENS_STEP,
+        )
+        self.cloud_max_output_tokens_slider.setValue(
+            DEFAULT_CLOUD_MAX_OUTPUT_TOKENS // CLOUD_MAX_OUTPUT_TOKENS_STEP
+        )
+        self.cloud_max_output_tokens_slider.setMaximumWidth(220)
+        self.cloud_max_output_tokens = LineEdit(self.cloud_card)
+        self.cloud_max_output_tokens.setPlaceholderText(str(DEFAULT_CLOUD_MAX_OUTPUT_TOKENS))
+        self.cloud_max_output_tokens.setText(str(DEFAULT_CLOUD_MAX_OUTPUT_TOKENS))
+        self.cloud_max_output_tokens.setMaximumWidth(82)
+        max_output_tokens_row.addWidget(self.cloud_max_output_tokens_slider, 1)
+        max_output_tokens_row.addWidget(self.cloud_max_output_tokens)
+
         self.test_cloud_model_button = PushButton(t("model.cloud.test"), self.cloud_card)
         self.cloud_test_action_label = SecretTapLabel(t("model.cloud.test.action"), self.cloud_card)
         self.cloud_test_type_combo = ComboBox(self.cloud_card)
@@ -924,17 +953,20 @@ class ModelPage(QWidget):
         connection_grid.addWidget(BodyLabel(t("model.test.type"), self.cloud_card), 4, 2)
         connection_grid.addWidget(self.cloud_test_type_combo, 4, 3, 1, 2)
 
-        connection_grid.addWidget(self.cloud_test_action_label, 5, 0)
-        connection_grid.addWidget(self.test_cloud_model_button, 5, 1, 1, 4)
+        connection_grid.addWidget(BodyLabel(t("model.cloud.maxOutputTokens"), self.cloud_card), 5, 0)
+        connection_grid.addLayout(max_output_tokens_row, 5, 1)
+
+        connection_grid.addWidget(self.cloud_test_action_label, 6, 0)
+        connection_grid.addWidget(self.test_cloud_model_button, 6, 1, 1, 4)
         connection_grid.addWidget(
             BodyLabel(t("model.cloud.test.result"), self.cloud_card),
-            6,
+            7,
             0,
             1,
             1,
             Qt.AlignmentFlag.AlignTop,
         )
-        connection_grid.addWidget(self.cloud_test_result, 6, 1, 1, 4)
+        connection_grid.addWidget(self.cloud_test_result, 7, 1, 1, 4)
         connection_grid.setColumnStretch(0, 0)
         connection_grid.setColumnStretch(1, 1)
         connection_grid.setColumnStretch(2, 0)
@@ -955,6 +987,10 @@ class ModelPage(QWidget):
         self.local_model_combo.currentIndexChanged.connect(self._remember_selected_local_model)
         self.cloud_video_fps_slider.valueChanged.connect(self._sync_cloud_video_fps_from_slider)
         self.cloud_video_fps.editingFinished.connect(self._commit_cloud_video_fps_text)
+        self.cloud_max_output_tokens_slider.valueChanged.connect(
+            self._sync_cloud_max_output_tokens_from_slider
+        )
+        self.cloud_max_output_tokens.editingFinished.connect(self._commit_cloud_max_output_tokens_text)
         self.cloud_provider_combo.currentIndexChanged.connect(self._sync_cloud_video_fps_availability)
         self.cloud_preset_combo.currentIndexChanged.connect(self._load_selected_cloud_preset)
         self.save_cloud_preset_button.clicked.connect(self._save_current_cloud_preset)
@@ -1269,8 +1305,30 @@ class ModelPage(QWidget):
         self._commit_cloud_video_fps_text()
         return self._last_valid_cloud_video_fps
 
+    def _current_cloud_max_output_tokens(self) -> int:
+        self._commit_cloud_max_output_tokens_text()
+        return self._last_valid_cloud_max_output_tokens
+
+    def current_cloud_preset_for_preview(self) -> CloudModelPreset | None:
+        base_url = self.cloud_base_url.text().strip()
+        model_name = self.cloud_model_name.text().strip()
+        if not base_url or not model_name:
+            return None
+        return CloudModelPreset(
+            name=self.cloud_preset_name.text().strip() or self.cloud_preset_combo.currentText().strip(),
+            provider=self._current_cloud_provider_id(),
+            base_url=base_url,
+            api_key=self.cloud_api_key.text().strip(),
+            model_name=model_name,
+            video_fps=self._current_cloud_video_fps(),
+            max_output_tokens=self._current_cloud_max_output_tokens(),
+        )
+
     def _sync_cloud_video_fps_from_slider(self, value: int) -> None:
         self._set_cloud_video_fps(value / 10.0)
+
+    def _sync_cloud_max_output_tokens_from_slider(self, value: int) -> None:
+        self._set_cloud_max_output_tokens(value * CLOUD_MAX_OUTPUT_TOKENS_STEP)
 
     def _commit_cloud_video_fps_text(self) -> None:
         try:
@@ -1291,6 +1349,23 @@ class ModelPage(QWidget):
             self.cloud_video_fps_slider.setValue(slider_value)
         with QSignalBlocker(self.cloud_video_fps):
             self.cloud_video_fps.setText(f"{normalized:.1f}")
+
+    def _commit_cloud_max_output_tokens_text(self) -> None:
+        try:
+            value = int(self.cloud_max_output_tokens.text().strip())
+        except ValueError:
+            self._set_cloud_max_output_tokens(self._last_valid_cloud_max_output_tokens)
+            return
+        self._set_cloud_max_output_tokens(value)
+
+    def _set_cloud_max_output_tokens(self, value: int) -> None:
+        normalized = coerce_cloud_max_output_tokens(value)
+        self._last_valid_cloud_max_output_tokens = normalized
+        slider_value = normalized // CLOUD_MAX_OUTPUT_TOKENS_STEP
+        with QSignalBlocker(self.cloud_max_output_tokens_slider):
+            self.cloud_max_output_tokens_slider.setValue(slider_value)
+        with QSignalBlocker(self.cloud_max_output_tokens):
+            self.cloud_max_output_tokens.setText(str(normalized))
 
     def _sync_cloud_video_fps_availability(self) -> None:
         provider = cloud_model_provider(self._current_cloud_provider_id())
@@ -1347,6 +1422,7 @@ class ModelPage(QWidget):
             base_url=base_url,
             api_key=self.cloud_api_key.text().strip(),
             model_name=model_name,
+            max_output_tokens=self._current_cloud_max_output_tokens(),
             locale=locale,
         )
         self._cloud_text_stream_buffer = ""
@@ -1418,6 +1494,7 @@ class ModelPage(QWidget):
             api_key=self.cloud_api_key.text().strip(),
             model_name=model_name,
             image_path=IMAGE_TEST_ASSET,
+            max_output_tokens=self._current_cloud_max_output_tokens(),
             locale=locale,
         )
         self._cloud_image_stream_buffer = ""
@@ -1490,6 +1567,7 @@ class ModelPage(QWidget):
             model_name=model_name,
             video_path=VIDEO_TEST_ASSET,
             video_fps=self._current_cloud_video_fps(),
+            max_output_tokens=self._current_cloud_max_output_tokens(),
             locale=locale,
         )
         self._cloud_video_stream_buffer = ""
@@ -1542,6 +1620,7 @@ class ModelPage(QWidget):
             image_path=IMAGE_TEST_ASSET,
             video_path=VIDEO_TEST_ASSET,
             video_fps=self._current_cloud_video_fps(),
+            max_output_tokens=self._current_cloud_max_output_tokens(),
             locale=locale,
             text_prompt_override=text_prompt_override,
         )
@@ -1928,6 +2007,7 @@ class ModelPage(QWidget):
                 set_last_cloud_preset_name("")
             self.cloud_preset_name.clear()
             self._set_cloud_video_fps(DEFAULT_CLOUD_VIDEO_FPS)
+            self._set_cloud_max_output_tokens(DEFAULT_CLOUD_MAX_OUTPUT_TOKENS)
             self._sync_cloud_video_fps_availability()
             return
 
@@ -1939,6 +2019,7 @@ class ModelPage(QWidget):
         self.cloud_api_key.setText(preset.api_key)
         self.cloud_model_name.setText(preset.model_name)
         self._set_cloud_video_fps(preset.video_fps)
+        self._set_cloud_max_output_tokens(preset.max_output_tokens)
         provider_id = normalize_cloud_provider(preset.provider)
         provider_index = self.cloud_provider_combo.findData(provider_id)
         if provider_index < 0:
@@ -1966,6 +2047,7 @@ class ModelPage(QWidget):
             api_key=self.cloud_api_key.text().strip(),
             model_name=self.cloud_model_name.text().strip(),
             video_fps=self._current_cloud_video_fps(),
+            max_output_tokens=self._current_cloud_max_output_tokens(),
         )
         upsert_cloud_model_preset(preset)
         LOGGER.info("Cloud model preset saved from UI; name=%s provider=%s", name, preset.provider)

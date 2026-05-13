@@ -17,7 +17,9 @@
 ## 关键文件
 
 - `models.py`：定义 `ProjectConfig`、`SourceProcessingConfig`、`InsightEvent`、`CharacterState`、`ChunkExtractionResult`、`ProjectPaths` 等 Pydantic 模型。
-- `extractor.py`：定义 `Extractor`，负责素材目录扫描、`source_manifest.json` 生成、知识库分层初始化、chunk/episode/season 内容合并，以及流式预览提取。
+- `knowledge_base.py`：集中管理 `projects/{project_id}/knowledge_base/` 下常用产物的路径、JSON 读写和结构校验。
+- `source_scanner.py`：提供素材目录扫描、预览视频 chunk 收集和预览 chunk 标识生成。
+- `extractor.py`：定义 `Extractor`，作为 UI-facing 提取入口，负责知识库分层初始化、chunk/episode/season 内容合并和流式预览提取，并委托知识库读写与素材扫描 helper。
 - `compiler.py`：定义 `build_character_compile_request()`、`compile_character_state()`、`compile_character_state_by_season_episode()`、`write_character_stage_states()` 和 `final_polish_character_state()`，负责从知识库聚合角色阶段状态。
 - `generator.py`：定义 `render_profile_markdown()`，当前将角色状态渲染为 Markdown。
 - `__init__.py`：标记 `core` 为 Python 包。

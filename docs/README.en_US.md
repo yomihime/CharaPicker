@@ -15,7 +15,7 @@ CharaPicker is a desktop tool that extracts character-focused information from a
 ## Current Status
 
 - Version: `v0.1.0` (in development)
-- Document updated: `2026-04-30`
+- Document updated: `2026-05-13`
 
 ## Implemented
 
@@ -35,7 +35,7 @@ CharaPicker is a desktop tool that extracts character-focused information from a
 
 ## Not Yet Implemented
 
-- Extraction still relies mainly on preview placeholder text, not full real-material chunk insight ingestion.
+- Real-material preview has started using video chunks from `materials/` and cloud models, while text, subtitles, manga/image, and other complete real-material consumption paths are still being improved.
 - Compilation is still placeholder-level, without full iterative compile and conflict resolution.
 - Stable automatic write-back loop to `facts.json` and `targeted_insights.json` is not complete.
 
@@ -71,7 +71,7 @@ python main.py
 - [简体中文 README](../README.md)
 - [繁體中文 README](README.zh_TW.md)
 - [日本語 README](README.ja_JP.md)
-- [doc Architecture](ARCHITECTURE.md)
+- [docs Architecture](ARCHITECTURE.md)
 - [Root Architecture](../ARCHITECTURE.md)
 
 ## Development Notes

@@ -13,6 +13,10 @@ CloudProviderId = Literal["aliyunBailian", "openaiCompatible", "custom"]
 CloudModelModality = Literal["text", "image", "video"]
 VideoFpsMode = Literal["direct", "frame_sampling", "none"]
 DEFAULT_CLOUD_VIDEO_FPS = 2.0
+DEFAULT_CLOUD_MAX_OUTPUT_TOKENS = 2048
+CLOUD_MAX_OUTPUT_TOKENS_MIN = 128
+CLOUD_MAX_OUTPUT_TOKENS_MAX = 8192
+CLOUD_MAX_OUTPUT_TOKENS_STEP = 128
 
 CLOUD_PROVIDER_ALIYUN_BAILIAN = "aliyunBailian"
 CLOUD_PROVIDER_OPENAI_COMPATIBLE = "openaiCompatible"
@@ -33,6 +37,7 @@ class CloudModelPreset:
     api_key: str
     model_name: str
     video_fps: float = DEFAULT_CLOUD_VIDEO_FPS
+    max_output_tokens: int = DEFAULT_CLOUD_MAX_OUTPUT_TOKENS
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,6 +144,7 @@ def load_cloud_model_presets() -> list[CloudModelPreset]:
                 api_key=str(item.get("api_key", "")),
                 model_name=str(item.get("model_name", "")),
                 video_fps=_coerce_video_fps(item.get("video_fps")),
+                max_output_tokens=coerce_cloud_max_output_tokens(item.get("max_output_tokens")),
             )
         )
     LOGGER.info("Cloud model presets loaded; count=%s", len(presets))
@@ -171,3 +177,28 @@ def _coerce_video_fps(value: object) -> float:
     if parsed <= 0:
         return DEFAULT_CLOUD_VIDEO_FPS
     return min(parsed, 10.0)
+
+
+def coerce_cloud_max_output_tokens(value: object) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_CLOUD_MAX_OUTPUT_TOKENS
+    if parsed <= 0:
+        return DEFAULT_CLOUD_MAX_OUTPUT_TOKENS
+    rounded = int(round(parsed / CLOUD_MAX_OUTPUT_TOKENS_STEP) * CLOUD_MAX_OUTPUT_TOKENS_STEP)
+    return min(max(rounded, CLOUD_MAX_OUTPUT_TOKENS_MIN), CLOUD_MAX_OUTPUT_TOKENS_MAX)
+
+
+def scale_cloud_max_output_tokens_for_video_duration(
+    max_output_tokens_per_minute: object,
+    duration_seconds: object,
+) -> int:
+    tokens_per_minute = coerce_cloud_max_output_tokens(max_output_tokens_per_minute)
+    try:
+        duration = float(duration_seconds)
+    except (TypeError, ValueError):
+        duration = 60.0
+    if duration <= 0:
+        duration = 60.0
+    return max(1, int(tokens_per_minute * duration / 60.0 + 0.5))

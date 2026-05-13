@@ -15,7 +15,7 @@ CharaPicker（拾卡姬）是一個桌面工具，從番劇、漫畫、影片、
 ## 目前狀態
 
 - 版本：`v0.1.0`（開發中）
-- 文件更新時間：`2026-04-30`
+- 文件更新時間：`2026-05-13`
 
 ## 已實現內容
 
@@ -35,7 +35,7 @@ CharaPicker（拾卡姬）是一個桌面工具，從番劇、漫畫、影片、
 
 ## 未完成項
 
-- 提取階段仍以預覽占位文本為主，尚未完整消費真實素材內容進行 chunk 洞察。
+- 真實素材預覽已開始接入 `materials/` 中的影片 chunk 和雲端模型，但文字、字幕、漫畫／圖片等完整真實素材消費鏈路仍在完善。
 - 編譯階段仍為占位實作，尚未完成完整的迭代編譯與衝突消解。
 - 知識庫檔案（如 `facts.json`、`targeted_insights.json`）尚未形成穩定自動寫入閉環。
 
@@ -71,7 +71,7 @@ python main.py
 - [简体中文 README](../README.md)
 - [日本語 README](README.ja_JP.md)
 - [English README](README.en_US.md)
-- [doc 架構說明](ARCHITECTURE.md)
+- [docs 架構說明](ARCHITECTURE.md)
 - [根目錄架構說明](../ARCHITECTURE.md)
 
 ## 開發說明

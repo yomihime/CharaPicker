@@ -8,11 +8,12 @@ from qfluentwidgets import (
     FluentWindow,
     InfoBar,
     InfoBarPosition,
+    MessageBox,
     NavigationItemPosition,
 )
 
-from core.compiler import compile_character_state
-from core.extractor import Extractor
+from core.compiler import compile_character_state, compile_character_state_from_knowledge_base
+from core.extractor import Extractor, PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE
 from core.generator import render_profile_markdown
 from core.models import ProjectConfig
 from gui.pages.about_page import AboutPage
@@ -24,6 +25,7 @@ from gui.pages.settings_page import SettingsPage
 from utils.i18n import t
 from utils.logging_middleware import apply_log_level_preference
 from utils.startup_middleware import StartupWarmupSnapshot
+from utils.cloud_model_presets import CloudModelPreset
 from utils.state_manager import save_project_config
 from utils.theme import apply_theme_preference
 
@@ -39,15 +41,22 @@ class PreviewWorker(QObject):
     failed = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, extractor: Extractor, config: ProjectConfig) -> None:
+    def __init__(
+        self,
+        extractor: Extractor,
+        config: ProjectConfig,
+        cloud_preset: CloudModelPreset | None = None,
+    ) -> None:
         super().__init__()
         self.extractor = extractor
         self.config = config
+        self.cloud_preset = cloud_preset
 
     def run(self) -> None:
         try:
             content = self.extractor.run_preview_streaming(
                 self.config,
+                cloud_preset=self.cloud_preset,
                 emit_event=lambda event: self.insightGenerated.emit(event),
                 emit_progress=lambda value: self.progressChanged.emit(value),
                 emit_token_usage=lambda usage: self.tokenUsageChanged.emit(usage),
@@ -133,6 +142,30 @@ class MainWindow(FluentWindow):
             duration=3000,
         )
 
+    def _confirm_low_preview_token_budget(self, preset: CloudModelPreset) -> bool:
+        if preset.max_output_tokens >= PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE:
+            return True
+        dialog = MessageBox(
+            t("app.preview.lowTokenBudget.dialog.title"),
+            t(
+                "app.preview.lowTokenBudget.dialog.content",
+                tokens_per_minute=preset.max_output_tokens,
+                minimum=PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE,
+            ),
+            self,
+        )
+        dialog.yesButton.setText(t("app.preview.lowTokenBudget.dialog.continue"))
+        dialog.cancelButton.setText(t("app.preview.lowTokenBudget.dialog.cancel"))
+        confirmed = bool(dialog.exec())
+        LOGGER.info(
+            "Low preview output token budget confirmation resolved; "
+            "tokens_per_minute=%s minimum=%s confirmed=%s",
+            preset.max_output_tokens,
+            PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE,
+            confirmed,
+        )
+        return confirmed
+
     def run_preview(self, config: ProjectConfig) -> None:
         if self._preview_thread is not None:
             return
@@ -142,11 +175,23 @@ class MainWindow(FluentWindow):
             len(config.target_characters),
             len(config.source_paths),
         )
+        cloud_preset = self.model_page.current_cloud_preset_for_preview()
+        if cloud_preset is not None and not self._confirm_low_preview_token_budget(cloud_preset):
+            return
         self.switchTo(self.project_page)
         self.project_page.clear_events()
         self.project_page.set_preview_running(True)
+        if cloud_preset is not None:
+            LOGGER.info(
+                "Preview will use current cloud UI settings; preset=%s provider=%s model=%s "
+                "tokens_per_minute=%s",
+                cloud_preset.name,
+                cloud_preset.provider,
+                cloud_preset.model_name,
+                cloud_preset.max_output_tokens,
+            )
         self._preview_thread = QThread(self)
-        self._preview_worker = PreviewWorker(self.extractor, config)
+        self._preview_worker = PreviewWorker(self.extractor, config, cloud_preset)
         self._preview_worker.moveToThread(self._preview_thread)
         self._preview_thread.started.connect(self._preview_worker.run)
         self._preview_worker.insightGenerated.connect(self.project_page.append_event)
@@ -161,7 +206,18 @@ class MainWindow(FluentWindow):
 
     def _on_preview_succeeded(self, config: ProjectConfig) -> None:
         first_character = config.target_characters[0] if config.target_characters else t("app.preview.defaultCharacter")
-        state = compile_character_state(first_character)
+        try:
+            state = compile_character_state_from_knowledge_base(config.project_id, first_character)
+        except Exception:
+            LOGGER.warning(
+                "Knowledge-base-backed preview output failed; project_id=%s character=%s",
+                config.project_id,
+                first_character,
+                exc_info=True,
+            )
+            state = None
+        if state is None:
+            state = compile_character_state(first_character)
         self.output_page.set_markdown(render_profile_markdown(state))
         InfoBar.info(
             title=t("app.preview.done.title"),

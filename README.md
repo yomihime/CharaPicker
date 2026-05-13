@@ -1,6 +1,6 @@
-﻿# CharaPicker / 拾卡姬
+# CharaPicker / 拾卡姬
 
-[繁體中文](doc/README.zh_TW.md) | [日本語](doc/README.ja_JP.md) | [English](doc/README.en_US.md)
+[繁體中文](docs/README.zh_TW.md) | [日本語](docs/README.ja_JP.md) | [English](docs/README.en_US.md)
 
 ## 项目简介
 
@@ -15,7 +15,7 @@ CharaPicker（拾卡姬）是一个面向二次元素材分析的桌面工具，
 ## 当前状态
 
 - 当前版本：`v0.1.0`（开发中）
-- 文档更新时间：`2026-04-30`
+- 文档更新时间：`2026-05-13`
 
 ## 已实现内容
 
@@ -35,7 +35,7 @@ CharaPicker（拾卡姬）是一个面向二次元素材分析的桌面工具，
 
 ## 未完成项
 
-- 提取阶段仍以预览占位文本为主，尚未完整消费真实素材内容进行 chunk 洞察。
+- 真实素材预览已开始接入 `materials/` 中的视频 chunk 和云端模型，但文本、字幕、漫画/图片等完整真实素材消费链路仍在完善。
 - 编译阶段仍为占位实现，尚未完成完整的迭代编译与冲突消解。
 - 知识库文件（如 `facts.json`、`targeted_insights.json`）尚未形成稳定自动写入闭环。
 
@@ -84,11 +84,19 @@ build.bat
 
 ## 文档导航
 
-- [繁體中文 README](doc/README.zh_TW.md)
-- [日本語 README](doc/README.ja_JP.md)
-- [English README](doc/README.en_US.md)
+- [繁體中文 README](docs/README.zh_TW.md)
+- [日本語 README](docs/README.ja_JP.md)
+- [English README](docs/README.en_US.md)
+- [Codex 长期项目指导](AGENTS.md)
 - [根目录架构说明](ARCHITECTURE.md)
-- [doc 架构说明](doc/ARCHITECTURE.md)
+- [项目文档索引](docs/README.md)
+- [docs 架构说明](docs/ARCHITECTURE.md)
+- [提取工作流说明](docs/extraction-workflow.zh_CN.md)
+- [提取与角色成长编译路线](docs/extraction-development-roadmap.zh_CN.md)
+- [产品与设计规范](docs/product-design-guidelines.zh_CN.md)
+- [运行时中间件设计说明](docs/runtime-middleware.zh_CN.md)
+- [打包与发布规范](docs/release-packaging.zh_CN.md)
+- [文档维护规范](docs/documentation-maintenance.zh_CN.md)
 
 ## 开发说明
 
