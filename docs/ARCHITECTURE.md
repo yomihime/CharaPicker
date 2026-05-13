@@ -26,7 +26,7 @@
 - `runtime-middleware.zh_CN.md`：全局存储、日志、弹窗、启动预热、素材处理和 AI 模型调用中间件的设计边界。
 - `release-packaging.zh_CN.md`：PyInstaller、版本阶段、发布包结构和 CI 发布规范。
 - `documentation-maintenance.zh_CN.md`：README、多语言文档、ARCHITECTURE.md 和计划类文档维护规则。
-- `refactor-plan.md`：代码结构整理的正式执行计划和阶段记录。
+- `archive/`：已执行完成、已被替代或仅保留历史查阅价值的计划类文档。
 - `README.en_US.md`、`README.ja_JP.md`、`README.zh_TW.md`：README 的多语言补充版本。
 - 后续多语言文档应在文件名中标明语种，例如 `usage.zh_CN.md`。
 
@@ -42,5 +42,5 @@
 - 文档默认使用 UTF-8。
 - 文档内容应短句清楚，优先说明边界、流程和限制。
 - 多语言文档文件名必须能区分语种。
-- 计划类文档可能随代码演进而过期；如发现与当前代码冲突，应在文档中显式标注状态。
+- 计划类文档可能随代码演进而过期；如发现与当前代码冲突，应在文档中显式标注状态，已完成或已替代的一次性计划应移入 `archive/`。
 - 不要把运行时配置或用户数据写入 `docs/`。
