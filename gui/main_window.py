@@ -8,11 +8,12 @@ from qfluentwidgets import (
     FluentWindow,
     InfoBar,
     InfoBarPosition,
+    MessageBox,
     NavigationItemPosition,
 )
 
 from core.compiler import compile_character_state, compile_character_state_from_knowledge_base
-from core.extractor import Extractor
+from core.extractor import Extractor, PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE
 from core.generator import render_profile_markdown
 from core.models import ProjectConfig
 from gui.pages.about_page import AboutPage
@@ -141,6 +142,30 @@ class MainWindow(FluentWindow):
             duration=3000,
         )
 
+    def _confirm_low_preview_token_budget(self, preset: CloudModelPreset) -> bool:
+        if preset.max_output_tokens >= PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE:
+            return True
+        dialog = MessageBox(
+            t("app.preview.lowTokenBudget.dialog.title"),
+            t(
+                "app.preview.lowTokenBudget.dialog.content",
+                tokens_per_minute=preset.max_output_tokens,
+                minimum=PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE,
+            ),
+            self,
+        )
+        dialog.yesButton.setText(t("app.preview.lowTokenBudget.dialog.continue"))
+        dialog.cancelButton.setText(t("app.preview.lowTokenBudget.dialog.cancel"))
+        confirmed = bool(dialog.exec())
+        LOGGER.info(
+            "Low preview output token budget confirmation resolved; "
+            "tokens_per_minute=%s minimum=%s confirmed=%s",
+            preset.max_output_tokens,
+            PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE,
+            confirmed,
+        )
+        return confirmed
+
     def run_preview(self, config: ProjectConfig) -> None:
         if self._preview_thread is not None:
             return
@@ -150,10 +175,12 @@ class MainWindow(FluentWindow):
             len(config.target_characters),
             len(config.source_paths),
         )
+        cloud_preset = self.model_page.current_cloud_preset_for_preview()
+        if cloud_preset is not None and not self._confirm_low_preview_token_budget(cloud_preset):
+            return
         self.switchTo(self.project_page)
         self.project_page.clear_events()
         self.project_page.set_preview_running(True)
-        cloud_preset = self.model_page.current_cloud_preset_for_preview()
         if cloud_preset is not None:
             LOGGER.info(
                 "Preview will use current cloud UI settings; preset=%s provider=%s model=%s "

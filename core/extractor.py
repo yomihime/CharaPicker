@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import json
+import math
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -15,10 +16,13 @@ from utils.ai_model_middleware import (
     ModelBackend,
     ModelCallRequest,
     ModelMessage,
+    ModelCallError,
     build_model_call_request,
     call_video_model,
 )
 from utils.cloud_model_presets import (
+    CLOUD_MAX_OUTPUT_TOKENS_MAX,
+    CLOUD_MAX_OUTPUT_TOKENS_STEP,
     CloudModelPreset,
     cloud_model_provider,
     load_cloud_model_presets,
@@ -32,6 +36,8 @@ from utils.model_preferences import last_cloud_preset_name
 LOGGER = logging.getLogger(__name__)
 VIDEO_SUFFIXES = source_scanner.VIDEO_SUFFIXES
 PREVIEW_MAX_CHUNKS = 2
+PREVIEW_CHUNK_MIN_OUTPUT_TOKENS = 1024
+PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE = 512
 
 
 class Extractor(QObject):
@@ -334,6 +340,92 @@ class Extractor(QObject):
             return {"enable_thinking": False}
         return {}
 
+    def _preview_recommended_tokens_per_minute(
+        self,
+        duration_seconds: float,
+        *,
+        required_output_tokens: int = PREVIEW_CHUNK_MIN_OUTPUT_TOKENS,
+    ) -> int:
+        duration = duration_seconds if duration_seconds > 0 else 60.0
+        raw_value = max(required_output_tokens, PREVIEW_CHUNK_MIN_OUTPUT_TOKENS) * 60.0 / duration
+        rounded = math.ceil(raw_value / CLOUD_MAX_OUTPUT_TOKENS_STEP) * CLOUD_MAX_OUTPUT_TOKENS_STEP
+        return min(max(rounded, CLOUD_MAX_OUTPUT_TOKENS_STEP), CLOUD_MAX_OUTPUT_TOKENS_MAX)
+
+    def _preview_output_token_limit_message(
+        self,
+        *,
+        video_name: str,
+        request_max_output_tokens: int,
+        duration_seconds: float,
+    ) -> str:
+        return t(
+            "extractor.chunk.outputTokenLimitReached",
+            name=video_name,
+            request_max_tokens=request_max_output_tokens,
+            recommended_per_minute=self._preview_recommended_tokens_per_minute(
+                duration_seconds,
+                required_output_tokens=request_max_output_tokens * 2,
+            ),
+        )
+
+    def _emit_preview_warning(self, emit_event: Callable[[dict], None] | None, description: str) -> None:
+        if emit_event is None:
+            return
+        emit_event(
+            InsightEvent(
+                title=t("extractor.chunk.title"),
+                description=description,
+                status=InsightStatus.WARNING,
+            ).model_dump(mode="json")
+        )
+
+    def _preview_first_choice(self, result: Any) -> dict[str, Any]:
+        raw = result.raw if isinstance(getattr(result, "raw", None), dict) else {}
+        choices = raw.get("choices")
+        if not isinstance(choices, list):
+            output = raw.get("output")
+            if isinstance(output, dict):
+                choices = output.get("choices")
+        first_choice = choices[0] if isinstance(choices, list) and choices else {}
+        if not isinstance(first_choice, dict):
+            return {}
+        return first_choice
+
+    def _preview_finish_reason(self, result: Any) -> str:
+        first_choice = self._preview_first_choice(result)
+        return str(first_choice.get("finish_reason") or "").strip().lower()
+
+    def _preview_stopped_by_output_limit(self, result: Any) -> bool:
+        return self._preview_finish_reason(result) in {"length", "max_tokens"}
+
+    def _preview_provider_rejected_video(self, exc: Exception) -> bool:
+        if not isinstance(exc, ModelCallError):
+            return False
+        text = str(exc)
+        return "DataInspectionFailed" in text or "inappropriate content" in text
+
+    def _preview_video_chunk_failed_description(
+        self,
+        *,
+        exc: Exception,
+        index: int,
+        total: int,
+        video_name: str,
+    ) -> str:
+        if self._preview_provider_rejected_video(exc):
+            return t(
+                "extractor.chunk.videoRejectedByProvider",
+                current=index,
+                total=total,
+                name=video_name,
+            )
+        return t(
+            "extractor.chunk.videoChunkFailed",
+            current=index,
+            total=total,
+            name=video_name,
+        )
+
     def _log_preview_model_response_shape(
         self,
         *,
@@ -341,11 +433,7 @@ class Extractor(QObject):
         video_name: str,
         result: Any,
     ) -> None:
-        raw = result.raw if isinstance(getattr(result, "raw", None), dict) else {}
-        choices = raw.get("choices")
-        first_choice = choices[0] if isinstance(choices, list) and choices else {}
-        if not isinstance(first_choice, dict):
-            first_choice = {}
+        first_choice = self._preview_first_choice(result)
         message = first_choice.get("message")
         if not isinstance(message, dict):
             message = {}
@@ -404,6 +492,18 @@ class Extractor(QObject):
                     max_output_tokens,
                     duration_seconds,
                 )
+                if max_output_tokens < PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE:
+                    LOGGER.warning(
+                        "Preview chunk output token budget is too small; "
+                        "project_id=%s chunk=%s duration_seconds=%.2f request_max_tokens=%s "
+                        "minimum_tokens_per_minute=%s tokens_per_minute=%s; continuing with low budget",
+                        config.project_id,
+                        video_path.name,
+                        duration_seconds,
+                        request_max_output_tokens,
+                        PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE,
+                        max_output_tokens,
+                    )
                 LOGGER.info(
                     "Preview chunk video request prepared; "
                     "project_id=%s chunk=%s size_mb=%.2f duration_seconds=%.2f "
@@ -492,6 +592,14 @@ class Extractor(QObject):
                         video_name=video_path.name,
                         result=result,
                     )
+                    if self._preview_stopped_by_output_limit(result):
+                        message = self._preview_output_token_limit_message(
+                            video_name=video_path.name,
+                            request_max_output_tokens=request_max_output_tokens,
+                            duration_seconds=duration_seconds,
+                        )
+                        self._emit_preview_warning(emit_event, message)
+                        continue
                     raise
                 season_id, episode_id, chunk_id = self._preview_chunk_identity(
                     config.project_id,
@@ -517,7 +625,7 @@ class Extractor(QObject):
                 created += 1
                 if emit_progress is not None:
                     emit_progress(15 + int(created * 75 / total_videos))
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 LOGGER.warning(
                     "Preview chunk extraction from video failed; project_id=%s chunk=%s",
                     config.project_id,
@@ -528,11 +636,11 @@ class Extractor(QObject):
                     emit_event(
                         InsightEvent(
                             title=t("extractor.chunk.title"),
-                            description=t(
-                                "extractor.chunk.videoChunkFailed",
-                                current=index,
+                            description=self._preview_video_chunk_failed_description(
+                                exc=exc,
+                                index=index,
                                 total=total_videos,
-                                name=video_path.name,
+                                video_name=video_path.name,
                             ),
                             status=InsightStatus.WARNING,
                         ).model_dump(mode="json")
