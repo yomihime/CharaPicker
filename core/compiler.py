@@ -54,6 +54,7 @@ def compile_character_state_by_season_episode(project_id: str, character: str) -
         content_path=kb.episode_content_path,
         load_content=kb.load_episode_content,
         log_label="Episode content",
+        required_stage=kb.FULL_EXTRACTION_STAGE,
     )
 
 
@@ -78,6 +79,7 @@ def _compile_character_state_by_season_episode(
     content_path: Callable[[str, str, str], Path],
     load_content: Callable[[str, str, str], dict],
     log_label: str,
+    required_stage: str | None = None,
 ) -> dict:
     state = CharacterState(character=character, summary="", evidence_count=0, conflicts=[])
     timeline: list[dict] = []
@@ -97,6 +99,17 @@ def _compile_character_state_by_season_episode(
                     season_dir.name,
                     episode_dir.name,
                     exc_info=True,
+                )
+                continue
+            if required_stage is not None and kb.artifact_stage_from_payload(payload) != required_stage:
+                LOGGER.warning(
+                    "%s skipped because it is not a %s artifact; project_id=%s season_id=%s episode_id=%s stage=%s",
+                    log_label,
+                    required_stage,
+                    project_id,
+                    season_dir.name,
+                    episode_dir.name,
+                    kb.artifact_stage_from_payload(payload),
                 )
                 continue
             if not _episode_targets_character(payload, character):

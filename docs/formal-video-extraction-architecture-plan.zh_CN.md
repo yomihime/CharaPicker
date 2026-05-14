@@ -568,16 +568,16 @@ knowledge_base/
 
 里程碑：
 
-- [ ] S5.1 `merge_episode_content` 只读取正式 chunk。
-- [ ] S5.2 `episode_content.json` 写入 `extraction_stage = "full"`。
-- [ ] S5.3 `generate_episode_summary` 只读取正式 episode content。
-- [ ] S5.4 `episode_summary.json` 写入 `extraction_stage = "full"`。
-- [ ] S5.5 `merge_season_content` 只读取正式 episode content。
-- [ ] S5.6 `season_content.json` 写入 `extraction_stage = "full"`。
-- [ ] S5.7 `generate_season_summary` 只读取正式 season content。
-- [ ] S5.8 `season_summary.json` 写入 `extraction_stage = "full"`。
-- [ ] S5.9 同目录存在 preview 产物时，正式聚合结果不包含 preview 内容。
-- [ ] S5.10 缺失或损坏 episode 时，聚合发出 warning，不静默伪装完整。
+- [x] S5.1 `merge_episode_content` 只读取正式 chunk。
+- [x] S5.2 `episode_content.json` 写入 `extraction_stage = "full"`。
+- [x] S5.3 `generate_episode_summary` 只读取正式 episode content。
+- [x] S5.4 `episode_summary.json` 写入 `extraction_stage = "full"`。
+- [x] S5.5 `merge_season_content` 只读取正式 episode content。
+- [x] S5.6 `season_content.json` 写入 `extraction_stage = "full"`。
+- [x] S5.7 `generate_season_summary` 只读取正式 season content。
+- [x] S5.8 `season_summary.json` 写入 `extraction_stage = "full"`。
+- [x] S5.9 同目录存在 preview 产物时，正式聚合结果不包含 preview 内容。
+- [x] S5.10 缺失或损坏 episode 时，聚合发出 warning，不静默伪装完整。
 
 验收：
 
@@ -592,13 +592,13 @@ knowledge_base/
 
 完成记录：
 
-- 完成日期：
-- 开发分支/提交：
-- 改动文件：
-- 可检查状态：
-- 验证命令：
-- 已知风险：
-- 用户确认：
+- 完成日期：2026-05-14
+- 开发分支/提交：`formal-video-extraction-plan` / `feat: aggregate formal extraction outputs`
+- 改动文件：`core/extractor.py`、`core/compiler.py`、`docs/formal-video-extraction-architecture-plan.zh_CN.md`
+- 可检查状态：正式 episode 聚合只消费 `extraction_stage = "full"` 且无 `preview__` 前缀的 chunk；正式 episode/season content 与 summary 均写入 `extraction_stage = "full"`、`run_type = "formal_extraction"`、`source_counts` 和 `aggregation_warnings`；`run_full_extraction_streaming(...)` 在正式 chunk 提取后会按 manifest 自动生成 episode/season 聚合产物；正式编译路径会跳过非 full episode content。
+- 验证命令：`python -X pycache_prefix=$env:TEMP\charapicker-s5-pycache -m compileall core`；轻量 Python 脚本 monkeypatch 临时项目、Qt 依赖和模型调用，验证 full/preview/legacy/损坏产物混合时正式聚合隔离、summary full 标记、正式编译过滤和正式提取后自动聚合；`python -m ruff check core/extractor.py core/knowledge_base.py core/compiler.py`；`git diff --check`。
+- 已知风险：S5 不接 GUI，用户点击“开始提取”仍会等到 S6 才进入正式 worker；聚合 warning 先进入日志和 JSON 产物，不做 GUI 提示。
+- 用户确认：待用户审核。
 
 ## 17. 步进 S6：GUI 正式提取入口
 

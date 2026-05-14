@@ -94,9 +94,46 @@ class Extractor(QObject):
         conflicts: list[str] = []
         character_state_changes: list[str] = []
         evidence_refs: list[str] = []
+        aggregation_warnings: list[str] = []
+        skipped_chunks = 0
 
         for chunk_path in chunk_paths:
-            chunk = kb.load_chunk_result(chunk_path)
+            if kb.is_preview_artifact_path(chunk_path):
+                skipped_chunks += 1
+                continue
+            try:
+                payload = kb.read_json_object(chunk_path)
+            except (OSError, ValueError, json.JSONDecodeError):
+                skipped_chunks += 1
+                warning = f"chunk_read_failed:{chunk_path.name}"
+                aggregation_warnings.append(warning)
+                LOGGER.warning(
+                    "Chunk JSON read failed during episode merge; project_id=%s season_id=%s episode_id=%s path=%s",
+                    project_id,
+                    season_id,
+                    episode_id,
+                    chunk_path,
+                    exc_info=True,
+                )
+                continue
+            if not kb.is_full_artifact_payload(payload):
+                skipped_chunks += 1
+                continue
+            try:
+                chunk = ChunkExtractionResult.model_validate(payload)
+            except ValueError:
+                skipped_chunks += 1
+                warning = f"chunk_validation_failed:{chunk_path.name}"
+                aggregation_warnings.append(warning)
+                LOGGER.warning(
+                    "Full chunk validation failed during episode merge; project_id=%s season_id=%s episode_id=%s path=%s",
+                    project_id,
+                    season_id,
+                    episode_id,
+                    chunk_path,
+                    exc_info=True,
+                )
+                continue
             chunk_results.append(chunk.model_dump(mode="json"))
             targets.extend(chunk.targets)
             facts.extend(chunk.facts)
@@ -107,9 +144,38 @@ class Extractor(QObject):
             character_state_changes.extend(chunk.character_state_changes)
             evidence_refs.extend(chunk.evidence_refs)
 
+        if not chunk_paths:
+            warning = f"no_chunk_files:{season_id}/{episode_id}"
+            aggregation_warnings.append(warning)
+            LOGGER.warning(
+                "No chunk JSON files found during episode merge; project_id=%s season_id=%s episode_id=%s",
+                project_id,
+                season_id,
+                episode_id,
+            )
+        if not chunk_results:
+            warning = f"no_full_chunks:{season_id}/{episode_id}"
+            aggregation_warnings.append(warning)
+            LOGGER.warning(
+                "No full chunk JSON files found during episode merge; project_id=%s season_id=%s episode_id=%s",
+                project_id,
+                season_id,
+                episode_id,
+            )
+
         episode_content = {
             "season_id": season_id,
             "episode_id": episode_id,
+            "extraction_stage": kb.FULL_EXTRACTION_STAGE,
+            "run_type": FULL_EXTRACTION_RUN_TYPE,
+            "source_kind": "video",
+            "schema_version": 1,
+            "source_counts": {
+                "total_chunk_files": len(chunk_paths),
+                "full_chunks": len(chunk_results),
+                "skipped_chunks": skipped_chunks,
+            },
+            "aggregation_warnings": aggregation_warnings,
             "targets": self._deduplicate_preserve_order(targets),
             "chunk_results": chunk_results,
             "facts": self._deduplicate_preserve_order(facts),
@@ -180,6 +246,16 @@ class Extractor(QObject):
             raise ValueError("episode content not found; merge episode content first")
 
         episode_content = kb.load_episode_content(project_id, season_id, episode_id)
+        if not kb.is_full_artifact_payload(episode_content):
+            LOGGER.warning(
+                "Non-full episode content rejected during episode summary generation; "
+                "project_id=%s season_id=%s episode_id=%s stage=%s",
+                project_id,
+                season_id,
+                episode_id,
+                kb.artifact_stage_from_payload(episode_content),
+            )
+            raise ValueError("episode content is not a full extraction artifact")
         chunk_results = episode_content.get("chunk_results", [])
         insight_summaries: list[str] = []
         for chunk in chunk_results:
@@ -192,6 +268,12 @@ class Extractor(QObject):
         summary = {
             "season_id": season_id,
             "episode_id": episode_id,
+            "extraction_stage": kb.FULL_EXTRACTION_STAGE,
+            "run_type": FULL_EXTRACTION_RUN_TYPE,
+            "source_kind": "video",
+            "schema_version": 1,
+            "source_counts": episode_content.get("source_counts", {}),
+            "aggregation_warnings": episode_content.get("aggregation_warnings", []),
             "character_summaries": episode_content.get("behavior_traits", []),
             "relationship_changes": episode_content.get("relationship_interactions", []),
             "major_events": episode_content.get("facts", []),
@@ -206,6 +288,7 @@ class Extractor(QObject):
         if not episodes_root.exists():
             raise ValueError("season episodes not found; initialize knowledge base structure first")
 
+        episode_dirs = kb.list_episode_dirs(project_id, season_id)
         episode_contents: list[dict[str, Any]] = []
         targets: list[str] = []
         facts: list[str] = []
@@ -215,20 +298,47 @@ class Extractor(QObject):
         conflicts: list[str] = []
         character_state_changes: list[str] = []
         evidence_refs: list[str] = []
+        aggregation_warnings: list[str] = []
+        skipped_episodes = 0
 
-        for episode_dir in kb.list_episode_dirs(project_id, season_id):
+        for episode_dir in episode_dirs:
             episode_content_path = kb.episode_content_path(project_id, season_id, episode_dir.name)
             if not episode_content_path.exists():
+                skipped_episodes += 1
+                warning = f"episode_content_missing:{episode_dir.name}"
+                aggregation_warnings.append(warning)
+                LOGGER.warning(
+                    "Episode content missing during season merge; project_id=%s season_id=%s episode_id=%s",
+                    project_id,
+                    season_id,
+                    episode_dir.name,
+                )
                 continue
             try:
                 payload = kb.load_episode_content(project_id, season_id, episode_dir.name)
-            except (OSError, ValueError):
+            except (OSError, ValueError, json.JSONDecodeError):
+                skipped_episodes += 1
+                warning = f"episode_content_read_failed:{episode_dir.name}"
+                aggregation_warnings.append(warning)
                 LOGGER.warning(
                     "Episode content read failed during season merge; project_id=%s season_id=%s episode_id=%s",
                     project_id,
                     season_id,
                     episode_dir.name,
                     exc_info=True,
+                )
+                continue
+            if not kb.is_full_artifact_payload(payload):
+                skipped_episodes += 1
+                warning = f"episode_content_not_full:{episode_dir.name}"
+                aggregation_warnings.append(warning)
+                LOGGER.warning(
+                    "Non-full episode content skipped during season merge; "
+                    "project_id=%s season_id=%s episode_id=%s stage=%s",
+                    project_id,
+                    season_id,
+                    episode_dir.name,
+                    kb.artifact_stage_from_payload(payload),
                 )
                 continue
             episode_contents.append(payload)
@@ -241,8 +351,27 @@ class Extractor(QObject):
             character_state_changes.extend(payload.get("character_state_changes", []))
             evidence_refs.extend(payload.get("evidence_refs", []))
 
+        if not episode_contents:
+            warning = f"no_full_episode_contents:{season_id}"
+            aggregation_warnings.append(warning)
+            LOGGER.warning(
+                "No full episode content found during season merge; project_id=%s season_id=%s",
+                project_id,
+                season_id,
+            )
+
         season_content = {
             "season_id": season_id,
+            "extraction_stage": kb.FULL_EXTRACTION_STAGE,
+            "run_type": FULL_EXTRACTION_RUN_TYPE,
+            "source_kind": "video",
+            "schema_version": 1,
+            "source_counts": {
+                "total_episode_dirs": len(episode_dirs),
+                "full_episodes": len(episode_contents),
+                "skipped_episodes": skipped_episodes,
+            },
+            "aggregation_warnings": aggregation_warnings,
             "episode_contents": episode_contents,
             "targets": self._deduplicate_preserve_order(targets),
             "facts": self._deduplicate_preserve_order(facts),
@@ -261,6 +390,14 @@ class Extractor(QObject):
             raise ValueError("season content not found; merge season content first")
 
         season_content = kb.load_season_content(project_id, season_id)
+        if not kb.is_full_artifact_payload(season_content):
+            LOGGER.warning(
+                "Non-full season content rejected during season summary generation; project_id=%s season_id=%s stage=%s",
+                project_id,
+                season_id,
+                kb.artifact_stage_from_payload(season_content),
+            )
+            raise ValueError("season content is not a full extraction artifact")
         episode_contents = season_content.get("episode_contents", [])
         background_parts: list[str] = []
         for episode in episode_contents:
@@ -273,6 +410,12 @@ class Extractor(QObject):
 
         summary = {
             "season_id": season_id,
+            "extraction_stage": kb.FULL_EXTRACTION_STAGE,
+            "run_type": FULL_EXTRACTION_RUN_TYPE,
+            "source_kind": "video",
+            "schema_version": 1,
+            "source_counts": season_content.get("source_counts", {}),
+            "aggregation_warnings": season_content.get("aggregation_warnings", []),
             "final_character_states": season_content.get("character_state_changes", []),
             "relationship_baseline": season_content.get("relationship_interactions", []),
             "major_conflicts": season_content.get("conflicts", []),
@@ -599,6 +742,67 @@ class Extractor(QObject):
                         }
                     )
         return chunk_inputs
+
+    def _collect_formal_episode_ids_from_manifest(self, manifest: dict[str, Any]) -> list[tuple[str, str]]:
+        episode_ids: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        for season in manifest.get("seasons", []):
+            if not isinstance(season, dict):
+                continue
+            season_id = self._manifest_string(season.get("season_id"))
+            if not season_id:
+                continue
+            for episode in season.get("episodes", []):
+                if not isinstance(episode, dict):
+                    continue
+                episode_id = self._manifest_string(episode.get("episode_id"))
+                key = (season_id, episode_id)
+                if episode_id and key not in seen:
+                    seen.add(key)
+                    episode_ids.append(key)
+        return episode_ids
+
+    def _collect_formal_season_ids_from_manifest(self, manifest: dict[str, Any]) -> list[str]:
+        season_ids: list[str] = []
+        seen: set[str] = set()
+        for season in manifest.get("seasons", []):
+            if not isinstance(season, dict):
+                continue
+            season_id = self._manifest_string(season.get("season_id"))
+            if season_id and season_id not in seen:
+                seen.add(season_id)
+                season_ids.append(season_id)
+        return season_ids
+
+    def _aggregate_full_outputs_from_manifest(self, project_id: str, manifest: dict[str, Any]) -> list[Path]:
+        written_paths: list[Path] = []
+        for season_id, episode_id in self._collect_formal_episode_ids_from_manifest(manifest):
+            try:
+                written_paths.append(self.merge_episode_content(project_id, season_id, episode_id))
+                written_paths.append(self.generate_episode_summary(project_id, season_id, episode_id))
+            except Exception:  # noqa: BLE001
+                LOGGER.warning(
+                    "Full episode aggregation failed; project_id=%s season_id=%s episode_id=%s",
+                    project_id,
+                    season_id,
+                    episode_id,
+                    exc_info=True,
+                )
+                continue
+
+        for season_id in self._collect_formal_season_ids_from_manifest(manifest):
+            try:
+                written_paths.append(self.merge_season_content(project_id, season_id))
+                written_paths.append(self.generate_season_summary(project_id, season_id))
+            except Exception:  # noqa: BLE001
+                LOGGER.warning(
+                    "Full season aggregation failed; project_id=%s season_id=%s",
+                    project_id,
+                    season_id,
+                    exc_info=True,
+                )
+                continue
+        return written_paths
 
     def _formal_material_video_path(self, project_id: str, source_path: str) -> Path:
         path = Path(source_path)
@@ -1272,6 +1476,13 @@ class Extractor(QObject):
             emit_token_usage=emit_token_usage,
             emit_event=emit_event,
             emit_progress=emit_progress,
+        )
+        emit_progress(96)
+        aggregated_paths = self._aggregate_full_outputs_from_manifest(config.project_id, manifest)
+        LOGGER.info(
+            "Full extraction aggregation finished; project_id=%s written_artifacts=%s",
+            config.project_id,
+            len(aggregated_paths),
         )
         if extracted_chunks:
             emit_event(
