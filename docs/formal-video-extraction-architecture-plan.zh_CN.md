@@ -413,12 +413,12 @@ knowledge_base/
 完成记录：
 
 - 完成日期：2026-05-14
-- 开发分支/提交：`formal-video-extraction-plan` / 待提交
+- 开发分支/提交：`formal-video-extraction-plan` / `1fcdf7b feat: add knowledge base artifact isolation helpers`
 - 改动文件：`core/models.py`、`core/knowledge_base.py`、`docs/formal-video-extraction-architecture-plan.zh_CN.md`
 - 可检查状态：新增 `ExtractionArtifactStage` 与 chunk 来源字段；新增 `preview_artifact_name()`、`is_preview_artifact_path()`、`artifact_stage_from_payload()`、`is_full_artifact_payload()`、`list_full_chunk_result_paths()`、`list_preview_chunk_result_paths()`；正式 chunk 列表只接受 `extraction_stage == "full"` 且非 `preview__` 路径，预览 chunk 列表只接受可读 JSON，并接受 `preview__` 路径或 `extraction_stage == "preview"`，但会跳过声明为 `full` 的冲突产物。
 - 验证命令：`$env:PYTHONPYCACHEPREFIX = Join-Path $env:TEMP 'charapicker-s1-pycache'; python -m compileall core`；轻量 Python 脚本验证旧 chunk JSON 兼容和 full/preview/legacy 列表过滤；`python -m ruff check core/models.py core/knowledge_base.py`；`git diff --check`。
 - 已知风险：S1 只提供隔离 helper，不迁移或删除历史 knowledge_base 产物；`core.extractor._collect_preview_chunk_results()`、`core.extractor.merge_episode_content()`、`core.compiler.compile_character_state_by_season_episode()` 仍可能通过旧路径读取未标记 legacy 产物，按计划留给 S2/S5 切换。
-- 用户确认：待用户审核。
+- 用户确认：2026-05-14 用户已确认 S1 完成情况。
 
 ## 13. 步进 S2：预览产物改为专用标记
 
@@ -459,12 +459,12 @@ knowledge_base/
 完成记录：
 
 - 完成日期：2026-05-14
-- 开发分支/提交：`formal-video-extraction-plan` / 待提交
+- 开发分支/提交：`formal-video-extraction-plan` / `d092891 feat: isolate preview extraction artifacts`
 - 改动文件：`core/knowledge_base.py`、`core/extractor.py`、`core/compiler.py`、`gui/main_window.py`、`i18n/*.json`、`docs/preview-real-result-ingestion-plan.zh_CN.md`、`docs/formal-video-extraction-architecture-plan.zh_CN.md`
 - 可检查状态：预览 chunk 写入 `preview__*.json` 并带 `extraction_stage = "preview"`、`run_type = "preview_trial"`；预览 episode 聚合写入 `preview__episode_content.json`；输出页预览成功后读取预览专用 episode content；预览文案不再提示正式 chunk JSON 缺失。
 - 验证命令：`$env:PYTHONPYCACHEPREFIX = Join-Path $env:TEMP 'charapicker-s2-pycache'; python -m compileall core gui`；轻量 Python 脚本验证 preview/full/legacy 隔离、预览 episode 聚合和预览编译读取；`python -m ruff check core/knowledge_base.py core/extractor.py core/compiler.py gui/main_window.py`；`python -m json.tool i18n/zh_CN.json`、`python -m json.tool i18n/zh_TW.json`、`python -m json.tool i18n/en_US.json`、`python -m json.tool i18n/ja_JP.json`；`git diff --check`。
 - 已知风险：S2 不迁移历史预览产物；旧的无标记 `chunk_*.json` 和正式 `episode_content.json` 会保留在磁盘上；正式提取入口、正式扫描和正式聚合过滤仍留给 S3/S4/S5。
-- 用户确认：待用户审核。
+- 用户确认：2026-05-14 用户已确认 S2 完成情况。
 
 ## 14. 步进 S3：正式视频素材扫描与 manifest
 
