@@ -522,16 +522,16 @@ knowledge_base/
 
 里程碑：
 
-- [ ] S4.1 新增 `run_full_extraction_streaming(...)`。
-- [ ] S4.2 正式提取使用当前云端视频模型预设。
-- [ ] S4.3 正式提取不限制前 2 个 chunk。
-- [ ] S4.4 正式 chunk prompt 不使用用户目标角色列表过滤素材。
-- [ ] S4.5 正式 chunk 请求包含当前 chunk 视频输入。
-- [ ] S4.6 正式 chunk 写入 `chunks/{chunk_id}.json`。
-- [ ] S4.7 正式 chunk JSON 写入 `extraction_stage = "full"`。
-- [ ] S4.8 正式 chunk JSON 写入 `run_type = "formal_extraction"`。
-- [ ] S4.9 模型输出截断时跳过当前 chunk，发出 warning，并继续后续 chunk。
-- [ ] S4.10 全局配置错误时停止任务，并给出明确错误。
+- [x] S4.1 新增 `run_full_extraction_streaming(...)`。
+- [x] S4.2 正式提取使用当前云端视频模型预设。
+- [x] S4.3 正式提取不限制前 2 个 chunk。
+- [x] S4.4 正式 chunk prompt 不使用用户目标角色列表过滤素材。
+- [x] S4.5 正式 chunk 请求包含当前 chunk 视频输入。
+- [x] S4.6 正式 chunk 写入 `chunks/{chunk_id}.json`。
+- [x] S4.7 正式 chunk JSON 写入 `extraction_stage = "full"`。
+- [x] S4.8 正式 chunk JSON 写入 `run_type = "formal_extraction"`。
+- [x] S4.9 模型输出截断时跳过当前 chunk，发出 warning，并继续后续 chunk。
+- [x] S4.10 全局配置错误时停止任务，并给出明确错误。
 
 验收：
 
@@ -548,13 +548,13 @@ knowledge_base/
 
 完成记录：
 
-- 完成日期：
-- 开发分支/提交：
-- 改动文件：
-- 可检查状态：
-- 验证命令：
-- 已知风险：
-- 用户确认：
+- 完成日期：2026-05-14
+- 开发分支/提交：`formal-video-extraction-plan` / `feat: add formal video chunk extraction`
+- 改动文件：`core/extractor.py`、`i18n/*.json`、`docs/formal-video-extraction-architecture-plan.zh_CN.md`
+- 可检查状态：`run_full_extraction_streaming(...)` 会刷新 S3 manifest、处理全部正式视频 chunk、通过当前云端视频模型预设发起视频请求，并把成功结果写入无 `preview__` 前缀的 `chunks/{chunk_id}.json`；正式 chunk 写入 `extraction_stage = "full"`、`run_type = "formal_extraction"`、`source_kind = "video"` 和 manifest 相对 `source_path`；截断输出与缺失源文件会发出 warning 并继续后续 chunk。
+- 验证命令：`python -m compileall core`；轻量 Python 脚本 monkeypatch 临时项目、云端预设和模型调用，验证全部 chunk 处理、prompt 不含目标角色、正式文件写入、full/preview helper 隔离、截断跳过继续、缺少预设抛出错误；`python -m ruff check core/extractor.py core/models.py`；`python -m json.tool i18n/zh_CN.json`、`python -m json.tool i18n/zh_TW.json`、`python -m json.tool i18n/en_US.json`、`python -m json.tool i18n/ja_JP.json`；`git diff --check`。
+- 已知风险：S4 不接 GUI，不生成 episode/season 聚合产物；正式按钮接线、正式聚合过滤和用户侧完整验收仍留给 S5/S6/S7。
+- 用户确认：待用户审核。
 
 ## 16. 步进 S5：正式 episode 与 season 聚合
 

@@ -45,6 +45,8 @@ VIDEO_SUFFIXES = source_scanner.VIDEO_SUFFIXES
 PREVIEW_MAX_CHUNKS = 2
 PREVIEW_CHUNK_MIN_OUTPUT_TOKENS = 1024
 PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE = 512
+FULL_EXTRACTION_RUN_TYPE = "formal_extraction"
+FULL_EXTRACTION_MIN_OUTPUT_TOKENS_PER_MINUTE = PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE
 
 
 class Extractor(QObject):
@@ -542,6 +544,391 @@ class Extractor(QObject):
                 output.append(item.strip())
         return output
 
+    def _select_cloud_video_preset(self, cloud_preset: CloudModelPreset | None) -> CloudModelPreset | None:
+        if cloud_preset is not None:
+            if cloud_preset.base_url.strip() and cloud_preset.model_name.strip():
+                return cloud_preset
+            return None
+
+        presets = load_cloud_model_presets()
+        preferred_name = last_cloud_preset_name()
+        preset = next(
+            (
+                item
+                for item in presets
+                if item.name == preferred_name and item.base_url.strip() and item.model_name.strip()
+            ),
+            None,
+        )
+        if preset is not None:
+            return preset
+        return next((item for item in presets if item.base_url.strip() and item.model_name.strip()), None)
+
+    def _collect_formal_video_chunk_inputs(
+        self,
+        project_id: str,
+        manifest: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        chunk_inputs: list[dict[str, Any]] = []
+        for season in manifest.get("seasons", []):
+            if not isinstance(season, dict):
+                continue
+            season_id = self._manifest_string(season.get("season_id"))
+            if not season_id:
+                continue
+            for episode in season.get("episodes", []):
+                if not isinstance(episode, dict):
+                    continue
+                episode_id = self._manifest_string(episode.get("episode_id"))
+                if not episode_id:
+                    continue
+                for chunk in episode.get("chunks", []):
+                    if not isinstance(chunk, dict):
+                        continue
+                    chunk_id = self._manifest_string(chunk.get("chunk_id"))
+                    source_path = self._manifest_string(chunk.get("source_path"))
+                    if not chunk_id or not source_path:
+                        continue
+                    chunk_inputs.append(
+                        {
+                            "season_id": season_id,
+                            "episode_id": episode_id,
+                            "chunk_id": chunk_id,
+                            "source_path": source_path,
+                            "video_path": self._formal_material_video_path(project_id, source_path),
+                        }
+                    )
+        return chunk_inputs
+
+    def _formal_material_video_path(self, project_id: str, source_path: str) -> Path:
+        path = Path(source_path)
+        if path.is_absolute():
+            return path
+        return ensure_project_tree(project_id).materials / path
+
+    def _manifest_string(self, value: Any) -> str:
+        return value.strip() if isinstance(value, str) else ""
+
+    def _extract_full_chunk_json_from_manifest(
+        self,
+        config: ProjectConfig,
+        manifest: dict[str, Any],
+        *,
+        backend: ModelBackend,
+        model_name: str,
+        base_url: str,
+        api_key: str,
+        video_fps: float,
+        max_output_tokens: int,
+        emit_token_usage: Callable[[dict[str, int]], None] | None = None,
+        emit_event: Callable[[dict], None] | None = None,
+        emit_progress: Callable[[int], None] | None = None,
+    ) -> tuple[int, dict[str, int], list[ChunkExtractionResult]]:
+        chunk_inputs = self._collect_formal_video_chunk_inputs(config.project_id, manifest)
+        if not chunk_inputs:
+            return (0, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, [])
+
+        created = 0
+        processed = 0
+        usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        extracted_chunks: list[ChunkExtractionResult] = []
+        total_chunks = len(chunk_inputs)
+        for index, chunk_input in enumerate(chunk_inputs, start=1):
+            video_path = chunk_input["video_path"]
+            source_path = chunk_input["source_path"]
+            try:
+                if not video_path.exists() or not video_path.is_file():
+                    self._emit_full_warning(
+                        emit_event,
+                        t("extractor.full.chunkMissing", path=source_path),
+                    )
+                    continue
+
+                duration_seconds = self._preview_video_duration_seconds(video_path)
+                request_max_output_tokens = scale_cloud_max_output_tokens_for_video_duration(
+                    max_output_tokens,
+                    duration_seconds,
+                )
+                if max_output_tokens < FULL_EXTRACTION_MIN_OUTPUT_TOKENS_PER_MINUTE:
+                    LOGGER.warning(
+                        "Full extraction chunk output token budget is too small; "
+                        "project_id=%s chunk=%s duration_seconds=%.2f request_max_tokens=%s "
+                        "minimum_tokens_per_minute=%s tokens_per_minute=%s; continuing with low budget",
+                        config.project_id,
+                        source_path,
+                        duration_seconds,
+                        request_max_output_tokens,
+                        FULL_EXTRACTION_MIN_OUTPUT_TOKENS_PER_MINUTE,
+                        max_output_tokens,
+                    )
+                LOGGER.info(
+                    "Full extraction chunk video request prepared; "
+                    "project_id=%s season_id=%s episode_id=%s chunk_id=%s source_path=%s "
+                    "size_mb=%.2f duration_seconds=%.2f tokens_per_minute=%s request_max_tokens=%s",
+                    config.project_id,
+                    chunk_input["season_id"],
+                    chunk_input["episode_id"],
+                    chunk_input["chunk_id"],
+                    source_path,
+                    video_path.stat().st_size / (1024 * 1024),
+                    duration_seconds,
+                    max_output_tokens,
+                    request_max_output_tokens,
+                )
+                if emit_event is not None:
+                    emit_event(
+                        InsightEvent(
+                            title=t("extractor.full.chunk.title"),
+                            description=t(
+                                "extractor.full.chunk.extractingVideoChunk",
+                                current=index,
+                                total=total_chunks,
+                                name=video_path.name,
+                            ),
+                            status=InsightStatus.RUNNING,
+                        ).model_dump(mode="json")
+                    )
+
+                request = self._build_full_video_chunk_request(
+                    config,
+                    chunk_input=chunk_input,
+                    backend=backend,
+                    model_name=model_name,
+                    base_url=base_url,
+                    api_key=api_key,
+                    video_fps=video_fps,
+                    request_max_output_tokens=request_max_output_tokens,
+                )
+                result = call_video_model(request)
+                token_usage = result.metadata.get("token_usage")
+                if isinstance(token_usage, dict):
+                    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                        value = token_usage.get(key)
+                        if isinstance(value, int):
+                            usage_total[key] += value
+                    if emit_token_usage is not None and any(usage_total.values()):
+                        emit_token_usage(usage_total)
+                try:
+                    payload = self._extract_json_object(result.content)
+                except ValueError:
+                    self._log_full_model_response_shape(
+                        project_id=config.project_id,
+                        source_path=source_path,
+                        result=result,
+                    )
+                    if self._preview_stopped_by_output_limit(result):
+                        self._emit_full_warning(
+                            emit_event,
+                            self._preview_output_token_limit_message(
+                                video_name=video_path.name,
+                                request_max_output_tokens=request_max_output_tokens,
+                                duration_seconds=duration_seconds,
+                            ),
+                        )
+                        continue
+                    raise
+
+                chunk = ChunkExtractionResult(
+                    season_id=chunk_input["season_id"],
+                    episode_id=chunk_input["episode_id"],
+                    chunk_id=chunk_input["chunk_id"],
+                    extraction_stage=ExtractionArtifactStage.FULL,
+                    run_type=FULL_EXTRACTION_RUN_TYPE,
+                    source_path=source_path,
+                    source_kind="video",
+                    targets=[],
+                    facts=self._coerce_string_list(payload.get("facts")),
+                    behavior_traits=self._coerce_string_list(payload.get("behavior_traits")),
+                    dialogue_style=self._coerce_string_list(payload.get("dialogue_style")),
+                    relationship_interactions=self._coerce_string_list(payload.get("relationships")),
+                    conflicts=self._coerce_string_list(payload.get("conflicts")),
+                    character_state_changes=self._coerce_string_list(payload.get("character_state_changes")),
+                    insight_summary=str(payload.get("insight_summary", "")).strip(),
+                    evidence_refs=self._coerce_string_list(payload.get("evidence_refs")),
+                )
+                self.save_chunk_extraction_result(config.project_id, chunk)
+                extracted_chunks.append(chunk)
+                created += 1
+                if emit_event is not None:
+                    emit_event(
+                        InsightEvent(
+                            title=t("extractor.full.chunk.title"),
+                            description=t(
+                                "extractor.full.chunk.saved",
+                                current=index,
+                                total=total_chunks,
+                                name=video_path.name,
+                            ),
+                            status=InsightStatus.DONE,
+                            meta={
+                                "stream_id": f"full_chunk_{index}",
+                                "season_id": chunk.season_id,
+                                "episode_id": chunk.episode_id,
+                                "chunk_id": chunk.chunk_id,
+                            },
+                        ).model_dump(mode="json")
+                    )
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning(
+                    "Full extraction chunk failed; project_id=%s source_path=%s",
+                    config.project_id,
+                    source_path,
+                    exc_info=True,
+                )
+                if emit_event is not None:
+                    emit_event(
+                        InsightEvent(
+                            title=t("extractor.full.chunk.title"),
+                            description=self._full_video_chunk_failed_description(
+                                exc=exc,
+                                index=index,
+                                total=total_chunks,
+                                video_name=video_path.name,
+                            ),
+                            status=InsightStatus.WARNING,
+                        ).model_dump(mode="json")
+                    )
+                continue
+            finally:
+                processed += 1
+                if emit_progress is not None:
+                    emit_progress(5 + int(processed * 90 / total_chunks))
+        return (created, usage_total, extracted_chunks)
+
+    def _build_full_video_chunk_request(
+        self,
+        config: ProjectConfig,
+        *,
+        chunk_input: dict[str, Any],
+        backend: ModelBackend,
+        model_name: str,
+        base_url: str,
+        api_key: str,
+        video_fps: float,
+        request_max_output_tokens: int,
+    ) -> ModelCallRequest:
+        video_path = chunk_input["video_path"]
+        user_text = self._full_video_chunk_user_text(chunk_input)
+        return ModelCallRequest(
+            purpose="formal_chunk_extraction",
+            backend=backend,
+            model_name=model_name,
+            base_url=base_url,
+            api_key=api_key,
+            messages=[
+                ModelMessage(
+                    role="system",
+                    content=(
+                        "你是 CharaPicker 的正式素材全量提取助手。"
+                        "只依据输入 chunk 输出结构化 JSON，不编造。"
+                        "必须覆盖当前片段中实际出现的全部有效角色信息。"
+                        "输出必须是可直接解析的 JSON object。"
+                    ),
+                ),
+                ModelMessage(
+                    role="user",
+                    content=[
+                        {"type": "text", "text": user_text},
+                        self._build_video_chunk_part(video_path, video_fps),
+                    ],
+                ),
+            ],
+            temperature=0.2,
+            max_tokens=request_max_output_tokens,
+            stream=False,
+            timeout_seconds=240,
+            response_format={"type": "json_object"},
+            extra_body=self._preview_model_extra_body(base_url),
+            metadata={
+                "project_id": config.project_id,
+                "stage": "full_chunk_extraction",
+                "season_id": chunk_input["season_id"],
+                "episode_id": chunk_input["episode_id"],
+                "chunk_id": chunk_input["chunk_id"],
+                "source_path": chunk_input["source_path"],
+            },
+        )
+
+    def _full_video_chunk_user_text(self, chunk_input: dict[str, Any]) -> str:
+        return (
+            "以下是一个正式提取流程中的视频 chunk。\n"
+            f"[CHUNK_ID] {chunk_input['season_id']}/{chunk_input['episode_id']}/{chunk_input['chunk_id']}\n"
+            f"[SOURCE_PATH] {chunk_input['source_path']}\n\n"
+            "请完整提取片段中的所有有效角色相关信息，覆盖所有实际出现的人物，"
+            "不要按预设范围筛选，也不要把信息先标记为属于某个指定人物。"
+            "只根据当前 chunk 中实际出现的画面、对白、动作和关系互动提取信息。"
+            "每条涉及角色的列表项必须显式写出素材中可见或可听到的角色姓名/称呼，"
+            "不要只写“他/她/对方”，也不要把一个角色的行为、情绪或台词归给另一个角色。"
+            "请只输出 JSON 对象，字段必须包含："
+            "facts, behavior_traits, dialogue_style, relationships, conflicts, "
+            "character_state_changes, insight_summary, evidence_refs。"
+            "所有列表字段都返回字符串数组；insight_summary 不超过 50 个中文字符。"
+            "只输出一个原始 JSON 对象，不要输出 Markdown、解释、思考过程或代码块；"
+            "第一个字符必须是 {，最后一个字符必须是 }。"
+        )
+
+    def _emit_full_warning(self, emit_event: Callable[[dict], None] | None, description: str) -> None:
+        if emit_event is None:
+            return
+        emit_event(
+            InsightEvent(
+                title=t("extractor.full.chunk.title"),
+                description=description,
+                status=InsightStatus.WARNING,
+            ).model_dump(mode="json")
+        )
+
+    def _full_video_chunk_failed_description(
+        self,
+        *,
+        exc: Exception,
+        index: int,
+        total: int,
+        video_name: str,
+    ) -> str:
+        if self._preview_provider_rejected_video(exc):
+            return t(
+                "extractor.full.chunk.videoRejectedByProvider",
+                current=index,
+                total=total,
+                name=video_name,
+            )
+        return t(
+            "extractor.full.chunk.videoChunkFailed",
+            current=index,
+            total=total,
+            name=video_name,
+        )
+
+    def _log_full_model_response_shape(
+        self,
+        *,
+        project_id: str,
+        source_path: str,
+        result: Any,
+    ) -> None:
+        first_choice = self._preview_first_choice(result)
+        message = first_choice.get("message")
+        if not isinstance(message, dict):
+            message = {}
+        content = result.content if isinstance(getattr(result, "content", None), str) else ""
+        stripped = content.strip()
+        first_char = stripped[:1]
+        LOGGER.warning(
+            "Full extraction chunk model response could not be parsed as JSON; "
+            "project_id=%s source_path=%s finish_reason=%s content_chars=%s stripped_chars=%s "
+            "first_char=%r has_left_brace=%s has_right_brace=%s message_keys=%s",
+            project_id,
+            source_path,
+            first_choice.get("finish_reason"),
+            len(content),
+            len(stripped),
+            first_char,
+            "{" in stripped,
+            "}" in stripped,
+            sorted(str(key) for key in message.keys()),
+        )
+
     def _extract_preview_chunk_json_from_materials(
         self,
         config: ProjectConfig,
@@ -830,6 +1217,87 @@ class Extractor(QObject):
         enabled: bool = True,
     ) -> dict[str, Any] | None:
         return kb.load_previous_season_summary(project_id, season_id, enabled=enabled)
+
+    def run_full_extraction_streaming(
+        self,
+        config: ProjectConfig,
+        *,
+        cloud_preset: CloudModelPreset | None = None,
+        emit_event: Callable[[dict], None] | None = None,
+        emit_progress: Callable[[int], None] | None = None,
+        emit_token_usage: Callable[[dict[str, int]], None] | None = None,
+    ) -> list[ChunkExtractionResult]:
+        emit_event = emit_event or self.insightGenerated.emit
+        emit_progress = emit_progress or self.progressChanged.emit
+
+        LOGGER.info(
+            "Full extraction started; project_id=%s sources=%s mode=%s",
+            config.project_id,
+            len(config.source_paths),
+            config.extraction_mode.value,
+        )
+        emit_event(
+            InsightEvent(
+                title=t("extractor.full.config.title"),
+                description=t("extractor.full.config.description"),
+                status=InsightStatus.DONE,
+            ).model_dump(mode="json")
+        )
+        emit_progress(5)
+
+        preset = self._select_cloud_video_preset(cloud_preset)
+        if preset is None:
+            message = t("extractor.full.noCloudPreset")
+            emit_event(
+                InsightEvent(
+                    title=t("extractor.full.chunk.title"),
+                    description=message,
+                    status=InsightStatus.WARNING,
+                ).model_dump(mode="json")
+            )
+            emit_progress(100)
+            LOGGER.warning("Full extraction stopped because no usable cloud preset was found")
+            raise ValueError(message)
+
+        manifest = self.prepare_formal_video_extraction_plan(config.project_id)
+        created_count, extraction_usage, extracted_chunks = self._extract_full_chunk_json_from_manifest(
+            config,
+            manifest,
+            backend=cloud_model_provider(preset.provider).backend_for("video"),
+            model_name=preset.model_name,
+            base_url=preset.base_url,
+            api_key=preset.api_key,
+            video_fps=preset.video_fps,
+            max_output_tokens=preset.max_output_tokens,
+            emit_token_usage=emit_token_usage,
+            emit_event=emit_event,
+            emit_progress=emit_progress,
+        )
+        if extracted_chunks:
+            emit_event(
+                InsightEvent(
+                    title=t("extractor.full.chunk.title"),
+                    description=t("extractor.full.chunk.complete", count=len(extracted_chunks)),
+                    status=InsightStatus.DONE,
+                ).model_dump(mode="json")
+            )
+        else:
+            emit_event(
+                InsightEvent(
+                    title=t("extractor.full.chunk.title"),
+                    description=t("extractor.full.noChunkJson"),
+                    status=InsightStatus.WARNING,
+                ).model_dump(mode="json")
+            )
+        emit_progress(100)
+        if emit_token_usage is not None and not any(extraction_usage.values()):
+            emit_token_usage({})
+        LOGGER.info(
+            "Full extraction finished; project_id=%s created_chunks=%s",
+            config.project_id,
+            created_count,
+        )
+        return extracted_chunks
 
     def run_preview(self, config: ProjectConfig) -> None:
         self.run_preview_streaming(config)
