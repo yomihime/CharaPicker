@@ -14,6 +14,12 @@ class ExtractionMode(str, Enum):
     FULL = "full"
 
 
+class ExtractionArtifactStage(str, Enum):
+    PREVIEW = "preview"
+    FULL = "full"
+    LEGACY_UNKNOWN = "legacy_unknown"
+
+
 class SourceProcessingPreset(str, Enum):
     ORIGINAL = "original"
     SEGMENT_TRANSCODE = "segment_transcode"
@@ -81,6 +87,11 @@ class ChunkExtractionResult(BaseModel):
     season_id: str
     episode_id: str
     chunk_id: str
+    extraction_stage: ExtractionArtifactStage = ExtractionArtifactStage.LEGACY_UNKNOWN
+    run_type: str = ""
+    source_path: str = ""
+    source_kind: str = ""
+    schema_version: int = 1
     targets: list[str] = Field(default_factory=list)
     facts: list[str] = Field(default_factory=list)
     behavior_traits: list[str] = Field(default_factory=list)

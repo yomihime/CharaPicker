@@ -4,8 +4,14 @@ import json
 from pathlib import Path
 from typing import Any
 
-from core.models import ChunkExtractionResult
+from core.models import ChunkExtractionResult, ExtractionArtifactStage
 from utils.paths import ensure_project_tree
+
+
+PREVIEW_ARTIFACT_PREFIX = "preview__"
+FULL_EXTRACTION_STAGE = ExtractionArtifactStage.FULL.value
+PREVIEW_EXTRACTION_STAGE = ExtractionArtifactStage.PREVIEW.value
+LEGACY_UNKNOWN_EXTRACTION_STAGE = ExtractionArtifactStage.LEGACY_UNKNOWN.value
 
 
 def root_path(project_id: str) -> Path:
@@ -40,6 +46,16 @@ def chunk_result_path(project_id: str, result: ChunkExtractionResult) -> Path:
     return chunks_root_path(project_id, result.season_id, result.episode_id) / f"{result.chunk_id}.json"
 
 
+def preview_artifact_name(name: str) -> str:
+    if name.startswith(PREVIEW_ARTIFACT_PREFIX):
+        return name
+    return f"{PREVIEW_ARTIFACT_PREFIX}{name}"
+
+
+def is_preview_artifact_path(path: Path) -> bool:
+    return path.name.startswith(PREVIEW_ARTIFACT_PREFIX)
+
+
 def episode_content_path(project_id: str, season_id: str, episode_id: str) -> Path:
     return episode_path(project_id, season_id, episode_id) / "episode_content.json"
 
@@ -69,6 +85,25 @@ def read_json_object(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"expected JSON object: {path}")
     return payload
+
+
+def artifact_stage_from_payload(payload: dict[str, Any]) -> str:
+    stage = payload.get("extraction_stage")
+    if isinstance(stage, ExtractionArtifactStage):
+        return stage.value
+    if not isinstance(stage, str):
+        return LEGACY_UNKNOWN_EXTRACTION_STAGE
+
+    normalized_stage = stage.strip().lower()
+    if normalized_stage == FULL_EXTRACTION_STAGE:
+        return FULL_EXTRACTION_STAGE
+    if normalized_stage == PREVIEW_EXTRACTION_STAGE:
+        return PREVIEW_EXTRACTION_STAGE
+    return LEGACY_UNKNOWN_EXTRACTION_STAGE
+
+
+def is_full_artifact_payload(payload: dict[str, Any]) -> bool:
+    return artifact_stage_from_payload(payload) == FULL_EXTRACTION_STAGE
 
 
 def write_json(path: Path, payload: Any) -> Path:
@@ -116,6 +151,7 @@ def load_chunk_result(path: Path) -> ChunkExtractionResult:
 
 
 def list_chunk_result_paths(project_id: str, *, include_legacy_top_level: bool = True) -> list[Path]:
+    """Return raw chunk JSON paths, including legacy, preview, and full artifacts."""
     knowledge_base = root_path(project_id)
     chunk_paths: list[Path] = []
     seasons_root = seasons_root_path(project_id)
@@ -134,6 +170,28 @@ def list_chunk_result_paths(project_id: str, *, include_legacy_top_level: bool =
         list({path.resolve(): path for path in chunk_paths}.values()),
         key=lambda path: path.relative_to(knowledge_base).as_posix().lower(),
     )
+
+
+def list_full_chunk_result_paths(project_id: str, *, include_legacy_top_level: bool = True) -> list[Path]:
+    return [
+        path
+        for path in list_chunk_result_paths(
+            project_id,
+            include_legacy_top_level=include_legacy_top_level,
+        )
+        if _is_full_chunk_artifact_path(path)
+    ]
+
+
+def list_preview_chunk_result_paths(project_id: str, *, include_legacy_top_level: bool = True) -> list[Path]:
+    return [
+        path
+        for path in list_chunk_result_paths(
+            project_id,
+            include_legacy_top_level=include_legacy_top_level,
+        )
+        if _is_preview_chunk_artifact_path(path)
+    ]
 
 
 def list_season_dirs(project_id: str) -> list[Path]:
@@ -254,6 +312,32 @@ def load_character_stage_states(project_id: str, season_id: str) -> dict[str, An
 
 def save_character_stage_states(project_id: str, season_id: str, payload: dict[str, Any]) -> Path:
     return write_json(character_stage_states_path(project_id, season_id), payload)
+
+
+def _is_full_chunk_artifact_path(path: Path) -> bool:
+    if is_preview_artifact_path(path):
+        return False
+    payload = _read_chunk_artifact_payload(path)
+    if payload is None:
+        return False
+    return is_full_artifact_payload(payload)
+
+
+def _is_preview_chunk_artifact_path(path: Path) -> bool:
+    payload = _read_chunk_artifact_payload(path)
+    if payload is None:
+        return False
+    stage = artifact_stage_from_payload(payload)
+    if stage == FULL_EXTRACTION_STAGE:
+        return False
+    return is_preview_artifact_path(path) or stage == PREVIEW_EXTRACTION_STAGE
+
+
+def _read_chunk_artifact_payload(path: Path) -> dict[str, Any] | None:
+    try:
+        return read_json_object(path)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
 
 
 def _sorted_dirs(root: Path) -> list[Path]:

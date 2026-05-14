@@ -389,15 +389,15 @@ knowledge_base/
 
 里程碑：
 
-- [ ] S1.1 定义 `preview__` 前缀常量。
-- [ ] S1.2 定义 preview/full stage 常量或枚举。
-- [ ] S1.3 扩展 `ChunkExtractionResult`，兼容 `extraction_stage`、`run_type`、`source_path`、`source_kind`、`schema_version`。
-- [ ] S1.4 增加 `is_preview_artifact_path(path)`。
-- [ ] S1.5 增加 `artifact_stage_from_payload(payload)`。
-- [ ] S1.6 增加 `is_full_artifact_payload(payload)`。
-- [ ] S1.7 增加只返回正式 chunk 的列表 helper。
-- [ ] S1.8 增加只返回预览 chunk 的列表 helper。
-- [ ] S1.9 检查现有调用点，标记哪些仍在混读 legacy 产物。
+- [x] S1.1 定义 `preview__` 前缀常量。
+- [x] S1.2 定义 preview/full stage 常量或枚举。
+- [x] S1.3 扩展 `ChunkExtractionResult`，兼容 `extraction_stage`、`run_type`、`source_path`、`source_kind`、`schema_version`。
+- [x] S1.4 增加 `is_preview_artifact_path(path)`。
+- [x] S1.5 增加 `artifact_stage_from_payload(payload)`。
+- [x] S1.6 增加 `is_full_artifact_payload(payload)`。
+- [x] S1.7 增加只返回正式 chunk 的列表 helper。
+- [x] S1.8 增加只返回预览 chunk 的列表 helper。
+- [x] S1.9 检查现有调用点，标记哪些仍在混读 legacy 产物。
 
 验收：
 
@@ -412,13 +412,13 @@ knowledge_base/
 
 完成记录：
 
-- 完成日期：
-- 开发分支/提交：
-- 改动文件：
-- 可检查状态：
-- 验证命令：
-- 已知风险：
-- 用户确认：
+- 完成日期：2026-05-14
+- 开发分支/提交：`formal-video-extraction-plan` / 待提交
+- 改动文件：`core/models.py`、`core/knowledge_base.py`、`docs/formal-video-extraction-architecture-plan.zh_CN.md`
+- 可检查状态：新增 `ExtractionArtifactStage` 与 chunk 来源字段；新增 `preview_artifact_name()`、`is_preview_artifact_path()`、`artifact_stage_from_payload()`、`is_full_artifact_payload()`、`list_full_chunk_result_paths()`、`list_preview_chunk_result_paths()`；正式 chunk 列表只接受 `extraction_stage == "full"` 且非 `preview__` 路径，预览 chunk 列表只接受可读 JSON，并接受 `preview__` 路径或 `extraction_stage == "preview"`，但会跳过声明为 `full` 的冲突产物。
+- 验证命令：`$env:PYTHONPYCACHEPREFIX = Join-Path $env:TEMP 'charapicker-s1-pycache'; python -m compileall core`；轻量 Python 脚本验证旧 chunk JSON 兼容和 full/preview/legacy 列表过滤；`python -m ruff check core/models.py core/knowledge_base.py`；`git diff --check`。
+- 已知风险：S1 只提供隔离 helper，不迁移或删除历史 knowledge_base 产物；`core.extractor._collect_preview_chunk_results()`、`core.extractor.merge_episode_content()`、`core.compiler.compile_character_state_by_season_episode()` 仍可能通过旧路径读取未标记 legacy 产物，按计划留给 S2/S5 切换。
+- 用户确认：待用户审核。
 
 ## 13. 步进 S2：预览产物改为专用标记
 
