@@ -840,6 +840,7 @@ class Extractor(QObject):
         config: ProjectConfig,
         manifest: dict[str, Any],
         *,
+        chunk_inputs: list[dict[str, Any]] | None = None,
         backend: ModelBackend,
         model_name: str,
         base_url: str,
@@ -850,7 +851,8 @@ class Extractor(QObject):
         emit_event: Callable[[dict], None] | None = None,
         emit_progress: Callable[[int], None] | None = None,
     ) -> tuple[int, dict[str, int], list[ChunkExtractionResult]]:
-        chunk_inputs = self._collect_formal_video_chunk_inputs(config.project_id, manifest)
+        if chunk_inputs is None:
+            chunk_inputs = self._collect_formal_video_chunk_inputs(config.project_id, manifest)
         if not chunk_inputs:
             return (0, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, [])
 
@@ -1568,6 +1570,24 @@ class Extractor(QObject):
         )
         emit_progress(5)
 
+        manifest = self.prepare_formal_video_extraction_plan(config.project_id)
+        chunk_inputs = self._collect_formal_video_chunk_inputs(config.project_id, manifest)
+        if not chunk_inputs:
+            message = t("extractor.full.noVideoMaterials")
+            emit_event(
+                InsightEvent(
+                    title=t("extractor.full.chunk.title"),
+                    description=message,
+                    status=InsightStatus.WARNING,
+                ).model_dump(mode="json")
+            )
+            emit_progress(100)
+            LOGGER.warning(
+                "Full extraction stopped because no formal video chunks were found; project_id=%s",
+                config.project_id,
+            )
+            raise ValueError(message)
+
         preset = self._select_cloud_video_preset(cloud_preset)
         if preset is None:
             message = t("extractor.full.noCloudPreset")
@@ -1582,10 +1602,10 @@ class Extractor(QObject):
             LOGGER.warning("Full extraction stopped because no usable cloud preset was found")
             raise ValueError(message)
 
-        manifest = self.prepare_formal_video_extraction_plan(config.project_id)
         created_count, extraction_usage, extracted_chunks = self._extract_full_chunk_json_from_manifest(
             config,
             manifest,
+            chunk_inputs=chunk_inputs,
             backend=cloud_model_provider(preset.provider).backend_for("video"),
             model_name=preset.model_name,
             base_url=preset.base_url,

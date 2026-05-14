@@ -681,17 +681,17 @@ knowledge_base/
 
 里程碑：
 
-- [ ] S7.1 空 `materials/` 时给出明确反馈。
-- [ ] S7.2 无云端视频模型预设时给出明确反馈。
-- [ ] S7.3 单个视频文件可生成正式知识库。
-- [ ] S7.4 多 episode 视频可按顺序生成正式知识库。
-- [ ] S7.5 FFmpeg 分段目录可作为 chunks 处理。
-- [ ] S7.6 preview 和 full 产物并存时，正式聚合只消费 full。
-- [ ] S7.7 重跑正式提取时覆盖或跳过策略清晰可见。
-- [ ] S7.8 失败 chunk 不导致已完成正式产物不可读。
-- [ ] S7.9 GUI PREVIEW 和 FULL 两个入口行为不同且清晰。
+- [x] S7.1 空 `materials/` 时给出明确反馈。
+- [x] S7.2 无云端视频模型预设时给出明确反馈。
+- [x] S7.3 单个视频文件可生成正式知识库。
+- [x] S7.4 多 episode 视频可按顺序生成正式知识库。
+- [x] S7.5 FFmpeg 分段目录可作为 chunks 处理。
+- [x] S7.6 preview 和 full 产物并存时，正式聚合只消费 full。
+- [x] S7.7 重跑正式提取时覆盖或跳过策略清晰可见。
+- [x] S7.8 失败 chunk 不导致已完成正式产物不可读。
+- [x] S7.9 GUI PREVIEW 和 FULL 两个入口行为不同且清晰。
 - [x] S7.10 GUI 提供“是否接受跳过单个被模型服务商拒绝的 chunk”的显式选项；默认策略、继续/中止行为、洞察流 warning 和最终产物完整性提示必须清晰。
-- [ ] S7.11 文档 checklist 和完成记录已同步。
+- [x] S7.11 文档 checklist 和完成记录已同步。
 
 验收：
 
@@ -702,13 +702,13 @@ knowledge_base/
 
 完成记录：
 
-- 完成日期：
-- 开发分支/提交：
-- 改动文件：
-- 可检查状态：
-- 验证命令：
-- 已知风险：
-- 用户确认：
+- 完成日期：2026-05-15
+- 开发分支/提交：`formal-video-extraction-plan` / `test: validate formal extraction workflow`
+- 改动文件：`core/extractor.py`、`i18n/*.json`、`docs/formal-video-extraction-architecture-plan.zh_CN.md`
+- 可检查状态：正式提取会先扫描 `materials/` 并在没有可用视频 chunk 时给出明确 warning、停止任务且不调用模型；启动提示中说明重跑会覆盖同 ID 正式产物，不触碰 preview 或 legacy；轻量回归覆盖单视频、多 episode、FFmpeg segment、preview/full 隔离、重跑覆盖、失败 chunk 跳过和 GUI PREVIEW/FULL 分流。
+- 验证命令：`python -m compileall core gui utils`；轻量 Python 脚本 monkeypatch 临时项目、模型调用和 GUI 依赖，验证 S7.1-S7.10 场景；`python -m ruff check core/extractor.py gui/main_window.py gui/pages/project_page.py gui/pages/model_page.py`；`python -m json.tool i18n/zh_CN.json`、`python -m json.tool i18n/zh_TW.json`、`python -m json.tool i18n/en_US.json`、`python -m json.tool i18n/ja_JP.json`；`git diff --check`。
+- 已知风险：S7 不新增断点续跑、运行历史或 schema 迁移；正式提取重跑当前采用覆盖同 ID 正式产物策略；角色状态迭代编译与冲突消解仍留给后续扩展。
+- 用户确认：待用户审核。
 
 ## 20. 后续扩展预留
 
