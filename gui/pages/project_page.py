@@ -494,6 +494,14 @@ class ProjectPage(QWidget):
 
         self.mode_combo = ComboBox(form_card)
         self.mode_combo.addItems([t("project.mode.preview"), t("project.mode.full")])
+        self.skip_provider_rejected_chunk_check = CheckBox(
+            t("project.option.skipProviderRejectedChunk"),
+            form_card,
+        )
+        self.skip_provider_rejected_chunk_check.setToolTip(
+            t("project.option.skipProviderRejectedChunk.tooltip")
+        )
+        self.skip_provider_rejected_chunk_check.setChecked(True)
 
         source_panel = QVBoxLayout()
         source_panel.setSpacing(10)
@@ -657,8 +665,12 @@ class ProjectPage(QWidget):
         form.addLayout(project_row, 0, 1)
         form.addWidget(BodyLabel(t("project.field.characters"), form_card), 1, 0)
         form.addWidget(self.targets_edit, 1, 1)
+        mode_block = QVBoxLayout()
+        mode_block.setSpacing(6)
+        mode_block.addWidget(self.mode_combo)
+        mode_block.addWidget(self.skip_provider_rejected_chunk_check)
         form.addWidget(BodyLabel(t("project.field.mode"), form_card), 2, 0)
-        form.addWidget(self.mode_combo, 2, 1)
+        form.addLayout(mode_block, 2, 1)
         form.addWidget(BodyLabel(t("project.field.sources"), form_card), 3, 0, alignment=Qt.AlignmentFlag.AlignTop)
         form.addLayout(source_panel, 3, 1)
         form.addLayout(processing_block, 4, 0, 1, 2)
@@ -750,6 +762,7 @@ class ProjectPage(QWidget):
             extraction_mode=mode,
             source_paths=sources,
             source_processing=self._current_processing_config(),
+            allow_provider_rejected_chunk_skip=self.skip_provider_rejected_chunk_check.isChecked(),
             raw_cleaned_paths=project.raw_cleaned_paths,
             created_at=project.created_at,
         )
@@ -789,6 +802,7 @@ class ProjectPage(QWidget):
     def set_extraction_running(self, running: bool) -> None:
         self._extraction_running = running
         self.preview_button.setEnabled(self._has_project() and not running)
+        self.skip_provider_rejected_chunk_check.setEnabled(self._has_project() and not running)
 
     def apply_theme_colors(self) -> None:
         if isDarkTheme():
@@ -1246,6 +1260,7 @@ class ProjectPage(QWidget):
         self.delete_project_button.setEnabled(has_project)
         self.targets_edit.setEnabled(has_project)
         self.mode_combo.setEnabled(has_project)
+        self.skip_provider_rejected_chunk_check.setEnabled(has_project)
         self.add_file_button.setEnabled(has_project)
         self.add_folder_button.setEnabled(has_project)
         self.remove_source_button.setEnabled(has_project)
@@ -1271,6 +1286,7 @@ class ProjectPage(QWidget):
             return
         self.targets_edit.setText(", ".join(project.target_characters))
         self.mode_combo.setCurrentIndex(0 if project.extraction_mode == ExtractionMode.PREVIEW else 1)
+        self.skip_provider_rejected_chunk_check.setChecked(project.allow_provider_rejected_chunk_skip)
         self._apply_processing_config(project.source_processing)
         self._sync_extraction_button_text()
         self.sources_list.clear()

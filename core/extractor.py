@@ -50,6 +50,10 @@ FULL_EXTRACTION_RUN_TYPE = "formal_extraction"
 FULL_EXTRACTION_MIN_OUTPUT_TOKENS_PER_MINUTE = PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE
 
 
+class ExtractionStoppedError(RuntimeError):
+    pass
+
+
 class Extractor(QObject):
     insightGenerated = pyqtSignal(dict)
     progressChanged = pyqtSignal(int)
@@ -649,10 +653,13 @@ class Extractor(QObject):
         index: int,
         total: int,
         video_name: str,
+        stop_on_rejection: bool = False,
     ) -> str:
         if self._provider_rejected_video(exc):
             return t(
-                "extractor.chunk.videoRejectedByProvider",
+                "extractor.chunk.videoRejectedByProviderStopped"
+                if stop_on_rejection
+                else "extractor.chunk.videoRejectedByProvider",
                 current=index,
                 total=total,
                 name=video_name,
@@ -1010,6 +1017,26 @@ class Extractor(QObject):
                     if self._provider_rejected_video(exc)
                     else "model_call_failed"
                 )
+                if self._provider_rejected_video(exc) and not config.allow_provider_rejected_chunk_skip:
+                    description = self._full_video_chunk_failed_description(
+                        exc=exc,
+                        index=index,
+                        total=total_chunks,
+                        video_name=video_path.name,
+                        stop_on_rejection=True,
+                    )
+                    LOGGER.warning(
+                        "Full extraction stopped after provider rejected a chunk; "
+                        "project_id=%s season_id=%s episode_id=%s chunk_id=%s source_path=%s error=%s",
+                        config.project_id,
+                        chunk_input["season_id"],
+                        chunk_input["episode_id"],
+                        chunk_input["chunk_id"],
+                        source_path,
+                        self._compact_exception_message(exc),
+                    )
+                    self._emit_full_warning(emit_event, description)
+                    raise ExtractionStoppedError(description) from exc
                 LOGGER.warning(
                     "Full extraction chunk skipped after model service error; "
                     "project_id=%s season_id=%s episode_id=%s chunk_id=%s source_path=%s "
@@ -1139,10 +1166,13 @@ class Extractor(QObject):
         index: int,
         total: int,
         video_name: str,
+        stop_on_rejection: bool = False,
     ) -> str:
         if self._provider_rejected_video(exc):
             return t(
-                "extractor.full.chunk.videoRejectedByProvider",
+                "extractor.full.chunk.videoRejectedByProviderStopped"
+                if stop_on_rejection
+                else "extractor.full.chunk.videoRejectedByProvider",
                 current=index,
                 total=total,
                 name=video_name,
@@ -1348,6 +1378,23 @@ class Extractor(QObject):
                     if self._provider_rejected_video(exc)
                     else "model_call_failed"
                 )
+                if self._provider_rejected_video(exc) and not config.allow_provider_rejected_chunk_skip:
+                    description = self._preview_video_chunk_failed_description(
+                        exc=exc,
+                        index=index,
+                        total=total_videos,
+                        video_name=video_path.name,
+                        stop_on_rejection=True,
+                    )
+                    LOGGER.warning(
+                        "Preview extraction stopped after provider rejected a chunk; "
+                        "project_id=%s chunk=%s error=%s",
+                        config.project_id,
+                        video_path.name,
+                        self._compact_exception_message(exc),
+                    )
+                    self._emit_preview_warning(emit_event, description)
+                    raise ExtractionStoppedError(description) from exc
                 LOGGER.warning(
                     "Preview chunk skipped after model service error; "
                     "project_id=%s chunk=%s error_kind=%s error=%s",
@@ -1663,6 +1710,8 @@ class Extractor(QObject):
                 emit_event=emit_event,
                 emit_progress=emit_progress,
             )
+        except ExtractionStoppedError:
+            raise
         except Exception:  # noqa: BLE001
             LOGGER.warning("Preview chunk extraction from video failed; project_id=%s", config.project_id, exc_info=True)
             created_count = 0

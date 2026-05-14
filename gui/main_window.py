@@ -13,7 +13,7 @@ from qfluentwidgets import (
 )
 
 from core.compiler import compile_character_state, compile_preview_character_state_from_knowledge_base
-from core.extractor import Extractor, PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE
+from core.extractor import ExtractionStoppedError, Extractor, PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE
 from core.generator import render_profile_markdown
 from core.models import ExtractionMode, ProjectConfig
 from gui.pages.about_page import AboutPage
@@ -65,6 +65,9 @@ class PreviewWorker(QObject):
                 self.failed.emit(t("extractor.chunk.noChunkJson"))
                 return
             self.succeeded.emit(content)
+        except ExtractionStoppedError as exc:
+            LOGGER.warning("Preview worker stopped; reason=%s", exc)
+            self.failed.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("Preview worker failed", exc_info=True)
             self.failed.emit(str(exc))
@@ -101,6 +104,9 @@ class FullExtractionWorker(QObject):
                 emit_token_usage=lambda usage: self.tokenUsageChanged.emit(usage),
             )
             self.succeeded.emit(len(chunks))
+        except ExtractionStoppedError as exc:
+            LOGGER.warning("Full extraction worker stopped; reason=%s", exc)
+            self.failed.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
             LOGGER.warning("Full extraction worker failed", exc_info=True)
             self.failed.emit(str(exc))
