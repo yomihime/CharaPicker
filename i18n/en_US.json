@@ -345,8 +345,8 @@
   "extractor.chunk.videoChunkFailed": "Video chunk {current}/{total} failed: {name}. Other available results will still be used.",
   "extractor.chunk.videoRejectedByProvider": "Video chunk {current}/{total} was rejected by the model provider: {name}. The provider reported a content safety or data inspection failure. Adjust the segment or try another model. Other available results will still be used.",
   "extractor.chunk.outputTokenLimitReached": "The model output for video chunk {name} was cut off: all {request_max_tokens} output tokens were used before the structured JSON was complete. This chunk was skipped and other results will continue; consider increasing Output Tokens / Min to at least {recommended_per_minute} before rerunning.",
-  "extractor.chunk.noChunkJson": "No readable chunk JSON found under knowledge_base; preview has been stopped.",
-  "extractor.chunk.usingChunkJson": "Preview is using real chunk JSON inputs ({count} chunks).",
+  "extractor.chunk.noChunkJson": "No usable preview result was generated; preview has been stopped.",
+  "extractor.chunk.usingChunkJson": "Preview generated structured results ({count} chunks).",
   "extractor.insight.title": "Waiting for targeted insights",
   "extractor.insight.description": "After AI integration, CharaPicker will write key findings to knowledge_base/targeted_insights.json.",
   "compiler.placeholder.summary": "Compiler placeholder: later it will aggregate character state through Retrieval -> Chunking -> Rolling Update."

@@ -345,8 +345,8 @@
   "extractor.chunk.videoChunkFailed": "動画 chunk {current}/{total} の抽出に失敗しました：{name}。他の利用可能な結果で続行します。",
   "extractor.chunk.videoRejectedByProvider": "動画チャンク {current}/{total} はモデル提供元に拒否されました: {name}。提供元がコンテンツ安全性またはデータ検査の失敗を返しました。切片を調整するか、別のモデルを試してください。他の利用可能な結果で続行します。",
   "extractor.chunk.outputTokenLimitReached": "動画チャンク {name} のモデル出力が途中で切れました。今回の {request_max_tokens} 出力 Token を使い切りましたが、構造化 JSON はまだ完了していません。このチャンクをスキップして他の結果の処理を続行します。再実行前に出力 Token / 分を少なくとも {recommended_per_minute} に上げることをおすすめします。",
-  "extractor.chunk.noChunkJson": "knowledge_base に読み取れる chunk JSON が見つからないため、プレビューを中止しました。",
-  "extractor.chunk.usingChunkJson": "プレビューは実際の chunk JSON 入力を使用します（{count} チャンク）。",
+  "extractor.chunk.noChunkJson": "今回利用できるプレビュー結果を生成できなかったため、プレビューを中止しました。",
+  "extractor.chunk.usingChunkJson": "プレビューの構造化結果を生成しました（{count} チャンク）。",
   "extractor.insight.title": "定向洞察を待機",
   "extractor.insight.description": "AI 連携後、CharaPicker は重要な発見を knowledge_base/targeted_insights.json に保存します。",
   "compiler.placeholder.summary": "コンパイラーのプレースホルダー：今後 Retrieval -> Chunking -> Rolling Update に沿ってキャラクター状態を集約します。"

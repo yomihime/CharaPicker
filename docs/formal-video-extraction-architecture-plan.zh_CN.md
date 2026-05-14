@@ -435,14 +435,14 @@ knowledge_base/
 
 里程碑：
 
-- [ ] S2.1 预览 chunk 保存为 `chunks/preview__{chunk_id}.json`。
-- [ ] S2.2 预览 chunk JSON 写入 `extraction_stage = "preview"`。
-- [ ] S2.3 预览 chunk JSON 写入 `run_type = "preview_trial"`。
-- [ ] S2.4 预览 episode 聚合写入 `preview__episode_content.json`。
-- [ ] S2.5 预览链路不再覆盖正式 `episode_content.json`。
-- [ ] S2.6 输出页预览成功后读取预览专用产物。
-- [ ] S2.7 无预览产物时显示准确反馈，不再提示“正式 chunk JSON 不存在”。
-- [ ] S2.8 更新预览计划文档，说明最新行为。
+- [x] S2.1 预览 chunk 保存为 `chunks/preview__{chunk_id}.json`。
+- [x] S2.2 预览 chunk JSON 写入 `extraction_stage = "preview"`。
+- [x] S2.3 预览 chunk JSON 写入 `run_type = "preview_trial"`。
+- [x] S2.4 预览 episode 聚合写入 `preview__episode_content.json`。
+- [x] S2.5 预览链路不再覆盖正式 `episode_content.json`。
+- [x] S2.6 输出页预览成功后读取预览专用产物。
+- [x] S2.7 无预览产物时显示准确反馈，不再提示“正式 chunk JSON 不存在”。
+- [x] S2.8 更新预览计划文档，说明最新行为。
 
 验收：
 
@@ -458,13 +458,13 @@ knowledge_base/
 
 完成记录：
 
-- 完成日期：
-- 开发分支/提交：
-- 改动文件：
-- 可检查状态：
-- 验证命令：
-- 已知风险：
-- 用户确认：
+- 完成日期：2026-05-14
+- 开发分支/提交：`formal-video-extraction-plan` / 待提交
+- 改动文件：`core/knowledge_base.py`、`core/extractor.py`、`core/compiler.py`、`gui/main_window.py`、`i18n/*.json`、`docs/preview-real-result-ingestion-plan.zh_CN.md`、`docs/formal-video-extraction-architecture-plan.zh_CN.md`
+- 可检查状态：预览 chunk 写入 `preview__*.json` 并带 `extraction_stage = "preview"`、`run_type = "preview_trial"`；预览 episode 聚合写入 `preview__episode_content.json`；输出页预览成功后读取预览专用 episode content；预览文案不再提示正式 chunk JSON 缺失。
+- 验证命令：`$env:PYTHONPYCACHEPREFIX = Join-Path $env:TEMP 'charapicker-s2-pycache'; python -m compileall core gui`；轻量 Python 脚本验证 preview/full/legacy 隔离、预览 episode 聚合和预览编译读取；`python -m ruff check core/knowledge_base.py core/extractor.py core/compiler.py gui/main_window.py`；`python -m json.tool i18n/zh_CN.json`、`python -m json.tool i18n/zh_TW.json`、`python -m json.tool i18n/en_US.json`、`python -m json.tool i18n/ja_JP.json`；`git diff --check`。
+- 已知风险：S2 不迁移历史预览产物；旧的无标记 `chunk_*.json` 和正式 `episode_content.json` 会保留在磁盘上；正式提取入口、正式扫描和正式聚合过滤仍留给 S3/S4/S5。
+- 用户确认：待用户审核。
 
 ## 14. 步进 S3：正式视频素材扫描与 manifest
 
@@ -650,13 +650,13 @@ knowledge_base/
 
 里程碑：
 
-- [ ] P1 预览 chunk 文件添加 `preview__` 前缀。
-- [ ] P2 预览 JSON 添加 `extraction_stage = "preview"`。
-- [ ] P3 预览 JSON 添加 `run_type = "preview_trial"`。
-- [ ] P4 预览 episode 聚合写入 `preview__episode_content.json`。
-- [ ] P5 输出页能读取预览专用 episode 产物。
-- [ ] P6 预览文档同步更新当前行为。
-- [ ] P7 正式提取文档持续链接预览支线计划。
+- [x] P1 预览 chunk 文件添加 `preview__` 前缀。
+- [x] P2 预览 JSON 添加 `extraction_stage = "preview"`。
+- [x] P3 预览 JSON 添加 `run_type = "preview_trial"`。
+- [x] P4 预览 episode 聚合写入 `preview__episode_content.json`。
+- [x] P5 输出页能读取预览专用 episode 产物。
+- [x] P6 预览文档同步更新当前行为。
+- [x] P7 正式提取文档持续链接预览支线计划。
 
 验收：
 
@@ -666,13 +666,13 @@ knowledge_base/
 
 完成记录：
 
-- 完成日期：
-- 开发分支/提交：
-- 改动文件：
-- 可检查状态：
-- 验证命令：
-- 已知风险：
-- 用户确认：
+- 完成日期：2026-05-14
+- 开发分支/提交：`formal-video-extraction-plan` / 待提交
+- 改动文件：同 S2 完成记录。
+- 可检查状态：预览支线已改为 `preview__` chunk 与 `preview__episode_content.json`，输出页预览读取预览专用 episode 产物，正式 helper 不列入预览 chunk。
+- 验证命令：同 S2 完成记录。
+- 已知风险：同 S2 完成记录；预览 summary 仍未生成。
+- 用户确认：待用户审核。
 
 ## 19. 步进 S7：验证与回归检查
 

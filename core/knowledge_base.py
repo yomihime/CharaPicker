@@ -46,6 +46,13 @@ def chunk_result_path(project_id: str, result: ChunkExtractionResult) -> Path:
     return chunks_root_path(project_id, result.season_id, result.episode_id) / f"{result.chunk_id}.json"
 
 
+def preview_chunk_result_path(project_id: str, result: ChunkExtractionResult) -> Path:
+    return (
+        chunks_root_path(project_id, result.season_id, result.episode_id)
+        / preview_artifact_name(f"{result.chunk_id}.json")
+    )
+
+
 def preview_artifact_name(name: str) -> str:
     if name.startswith(PREVIEW_ARTIFACT_PREFIX):
         return name
@@ -58,6 +65,10 @@ def is_preview_artifact_path(path: Path) -> bool:
 
 def episode_content_path(project_id: str, season_id: str, episode_id: str) -> Path:
     return episode_path(project_id, season_id, episode_id) / "episode_content.json"
+
+
+def preview_episode_content_path(project_id: str, season_id: str, episode_id: str) -> Path:
+    return episode_path(project_id, season_id, episode_id) / preview_artifact_name("episode_content.json")
 
 
 def episode_summary_path(project_id: str, season_id: str, episode_id: str) -> Path:
@@ -146,6 +157,10 @@ def save_chunk_result(project_id: str, result: ChunkExtractionResult) -> Path:
     return write_json(chunk_result_path(project_id, result), result.model_dump(mode="json"))
 
 
+def save_preview_chunk_result(project_id: str, result: ChunkExtractionResult) -> Path:
+    return write_json(preview_chunk_result_path(project_id, result), result.model_dump(mode="json"))
+
+
 def load_chunk_result(path: Path) -> ChunkExtractionResult:
     return ChunkExtractionResult.model_validate(read_json(path))
 
@@ -213,6 +228,19 @@ def save_episode_content(
 
 def load_episode_content(project_id: str, season_id: str, episode_id: str) -> dict[str, Any]:
     return read_json_object(episode_content_path(project_id, season_id, episode_id))
+
+
+def save_preview_episode_content(
+    project_id: str,
+    season_id: str,
+    episode_id: str,
+    payload: dict[str, Any],
+) -> Path:
+    return write_json(preview_episode_content_path(project_id, season_id, episode_id), payload)
+
+
+def load_preview_episode_content(project_id: str, season_id: str, episode_id: str) -> dict[str, Any]:
+    return read_json_object(preview_episode_content_path(project_id, season_id, episode_id))
 
 
 def save_episode_summary(

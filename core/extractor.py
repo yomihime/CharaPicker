@@ -11,7 +11,13 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 from core import knowledge_base as kb
 from core import source_scanner
-from core.models import ChunkExtractionResult, InsightEvent, InsightStatus, ProjectConfig
+from core.models import (
+    ChunkExtractionResult,
+    ExtractionArtifactStage,
+    InsightEvent,
+    InsightStatus,
+    ProjectConfig,
+)
 from utils.ai_model_middleware import (
     ModelBackend,
     ModelCallRequest,
@@ -31,6 +37,7 @@ from utils.cloud_model_presets import (
 from utils.ffmpeg_tool import FfmpegProcessError, probe_video_duration_seconds
 from utils.i18n import t
 from utils.model_preferences import last_cloud_preset_name
+from utils.paths import ensure_project_tree
 
 
 LOGGER = logging.getLogger(__name__)
@@ -56,6 +63,9 @@ class Extractor(QObject):
 
     def save_chunk_extraction_result(self, project_id: str, result: ChunkExtractionResult) -> Path:
         return kb.save_chunk_result(project_id, result)
+
+    def save_preview_chunk_extraction_result(self, project_id: str, result: ChunkExtractionResult) -> Path:
+        return kb.save_preview_chunk_result(project_id, result)
 
     def merge_episode_content(self, project_id: str, season_id: str, episode_id: str) -> Path:
         chunk_dir = kb.chunks_root_path(project_id, season_id, episode_id)
@@ -100,6 +110,58 @@ class Extractor(QObject):
             "evidence_refs": self._deduplicate_preserve_order(evidence_refs),
         }
         return kb.save_episode_content(project_id, season_id, episode_id, episode_content)
+
+    def merge_preview_episode_content(self, project_id: str, season_id: str, episode_id: str) -> Path:
+        episode_chunks_root = kb.chunks_root_path(project_id, season_id, episode_id).resolve()
+        chunk_paths = [
+            path
+            for path in kb.list_preview_chunk_result_paths(
+                project_id,
+                include_legacy_top_level=False,
+            )
+            if path.parent.resolve() == episode_chunks_root
+        ]
+
+        chunk_results: list[dict[str, Any]] = []
+        targets: list[str] = []
+        facts: list[str] = []
+        behavior_traits: list[str] = []
+        dialogue_style: list[str] = []
+        relationship_interactions: list[str] = []
+        conflicts: list[str] = []
+        character_state_changes: list[str] = []
+        evidence_refs: list[str] = []
+
+        for chunk_path in chunk_paths:
+            chunk = kb.load_chunk_result(chunk_path)
+            chunk_results.append(chunk.model_dump(mode="json"))
+            targets.extend(chunk.targets)
+            facts.extend(chunk.facts)
+            behavior_traits.extend(chunk.behavior_traits)
+            dialogue_style.extend(chunk.dialogue_style)
+            relationship_interactions.extend(chunk.relationship_interactions)
+            conflicts.extend(chunk.conflicts)
+            character_state_changes.extend(chunk.character_state_changes)
+            evidence_refs.extend(chunk.evidence_refs)
+
+        episode_content = {
+            "season_id": season_id,
+            "episode_id": episode_id,
+            "extraction_stage": kb.PREVIEW_EXTRACTION_STAGE,
+            "run_type": "preview_trial",
+            "source_kind": "video",
+            "schema_version": 1,
+            "targets": self._deduplicate_preserve_order(targets),
+            "chunk_results": chunk_results,
+            "facts": self._deduplicate_preserve_order(facts),
+            "behavior_traits": self._deduplicate_preserve_order(behavior_traits),
+            "dialogue_style": self._deduplicate_preserve_order(dialogue_style),
+            "relationship_interactions": self._deduplicate_preserve_order(relationship_interactions),
+            "conflicts": self._deduplicate_preserve_order(conflicts),
+            "character_state_changes": self._deduplicate_preserve_order(character_state_changes),
+            "evidence_refs": self._deduplicate_preserve_order(evidence_refs),
+        }
+        return kb.save_preview_episode_content(project_id, season_id, episode_id, episode_content)
 
     def generate_episode_summary(self, project_id: str, season_id: str, episode_id: str) -> Path:
         episode_content_path = kb.episode_content_path(project_id, season_id, episode_id)
@@ -223,7 +285,7 @@ class Extractor(QObject):
         return [self._format_preview_chunk_input(chunk) for chunk in self._collect_preview_chunk_results(project_id)]
 
     def _collect_preview_chunk_results(self, project_id: str) -> list[ChunkExtractionResult]:
-        chunk_paths = kb.list_chunk_result_paths(project_id)
+        chunk_paths = kb.list_preview_chunk_result_paths(project_id, include_legacy_top_level=False)
         if not chunk_paths:
             return []
 
@@ -292,11 +354,18 @@ class Extractor(QObject):
     def _preview_chunk_identity(self, project_id: str, video_path: Path, fallback_index: int) -> tuple[str, str, str]:
         return source_scanner.preview_chunk_identity(project_id, video_path, fallback_index)
 
+    def _preview_material_relative_path(self, project_id: str, video_path: Path) -> str:
+        materials_root = ensure_project_tree(project_id).materials
+        try:
+            return video_path.resolve().relative_to(materials_root.resolve()).as_posix()
+        except ValueError:
+            return video_path.resolve().as_posix()
+
     def _merge_preview_episode_contents(self, project_id: str, chunks: list[ChunkExtractionResult]) -> None:
         episode_keys = sorted({(chunk.season_id, chunk.episode_id) for chunk in chunks})
         for season_id, episode_id in episode_keys:
             try:
-                self.merge_episode_content(project_id, season_id, episode_id)
+                self.merge_preview_episode_content(project_id, season_id, episode_id)
             except (OSError, ValueError):
                 LOGGER.warning(
                     "Preview episode content merge failed; project_id=%s season_id=%s episode_id=%s",
@@ -610,6 +679,10 @@ class Extractor(QObject):
                     season_id=season_id,
                     episode_id=episode_id,
                     chunk_id=chunk_id,
+                    extraction_stage=ExtractionArtifactStage.PREVIEW,
+                    run_type="preview_trial",
+                    source_path=self._preview_material_relative_path(config.project_id, video_path),
+                    source_kind="video",
                     targets=[],
                     facts=self._coerce_string_list(payload.get("facts")),
                     behavior_traits=self._coerce_string_list(payload.get("behavior_traits")),
@@ -620,7 +693,7 @@ class Extractor(QObject):
                     insight_summary=str(payload.get("insight_summary", "")).strip(),
                     evidence_refs=self._coerce_string_list(payload.get("evidence_refs")),
                 )
-                self.save_chunk_extraction_result(config.project_id, chunk)
+                self.save_preview_chunk_extraction_result(config.project_id, chunk)
                 extracted_chunks.append(chunk)
                 created += 1
                 if emit_progress is not None:
