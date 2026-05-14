@@ -51,12 +51,21 @@ class Extractor(QObject):
     insightGenerated = pyqtSignal(dict)
     progressChanged = pyqtSignal(int)
 
-    def scan_source_directory(self, source_root: str) -> dict:
+    def scan_source_directory(self, source_root: str) -> dict[str, Any]:
         return source_scanner.scan_source_directory(source_root)
+
+    def scan_formal_video_materials(self, project_id: str) -> dict[str, Any]:
+        return source_scanner.scan_formal_video_materials(project_id)
 
     def generate_source_manifest(self, project_id: str, source_root: str) -> Path:
         manifest = self.scan_source_directory(source_root)
         return kb.save_source_manifest(project_id, manifest)
+
+    def prepare_formal_video_extraction_plan(self, project_id: str) -> dict[str, Any]:
+        manifest = self.scan_formal_video_materials(project_id)
+        kb.save_source_manifest(project_id, manifest)
+        kb.initialize_structure(project_id, manifest)
+        return manifest
 
     def initialize_knowledge_base_structure(self, project_id: str, manifest: dict | None = None) -> Path:
         return kb.initialize_structure(project_id, manifest)

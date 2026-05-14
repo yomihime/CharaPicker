@@ -479,14 +479,14 @@ knowledge_base/
 
 里程碑：
 
-- [ ] S3.1 新增正式视频扫描入口，不复用预览 limit=2 的扫描函数。
-- [ ] S3.2 支持 `materials/` 根目录单视频列表。
-- [ ] S3.3 支持一级目录内多集视频。
-- [ ] S3.4 支持 FFmpeg 分段目录 `segment_*.mp4` 作为同一 episode 的多个 chunk。
-- [ ] S3.5 为每个 chunk 生成稳定 `season_id`、`episode_id`、`chunk_id`。
-- [ ] S3.6 生成或更新 `source_manifest.json`。
-- [ ] S3.7 manifest 记录原始 `materials/` 相对路径。
-- [ ] S3.8 初始化对应 knowledge_base 目录结构。
+- [x] S3.1 新增正式视频扫描入口，不复用预览 limit=2 的扫描函数。
+- [x] S3.2 支持 `materials/` 根目录单视频列表。
+- [x] S3.3 支持一级目录内多集视频。
+- [x] S3.4 支持 FFmpeg 分段目录 `segment_*.mp4` 作为同一 episode 的多个 chunk。
+- [x] S3.5 为每个 chunk 生成稳定 `season_id`、`episode_id`、`chunk_id`。
+- [x] S3.6 生成或更新 `source_manifest.json`。
+- [x] S3.7 manifest 记录原始 `materials/` 相对路径。
+- [x] S3.8 初始化对应 knowledge_base 目录结构。
 
 验收：
 
@@ -501,13 +501,13 @@ knowledge_base/
 
 完成记录：
 
-- 完成日期：
-- 开发分支/提交：
-- 改动文件：
-- 可检查状态：
-- 验证命令：
-- 已知风险：
-- 用户确认：
+- 完成日期：2026-05-14
+- 开发分支/提交：`formal-video-extraction-plan` / `feat: add formal video source manifest scanning`
+- 改动文件：`core/source_scanner.py`、`core/extractor.py`、`docs/formal-video-extraction-architecture-plan.zh_CN.md`
+- 可检查状态：`scan_formal_video_materials(project_id)` 生成 `schema_version = 1`、`source_kind = "video"`、`scan_type = "formal_video"` 的正式 manifest；根目录视频、一级季目录、FFmpeg `segment_*` 目录和 `transcoded.mp4` 目录都会生成稳定 season / episode / chunk ID；`prepare_formal_video_extraction_plan(project_id)` 会保存 `source_manifest.json` 并初始化对应 knowledge_base 目录。
+- 验证命令：`python -m compileall core`；轻量 Python 脚本验证空 materials、根目录视频、一级目录多集、FFmpeg segment/transcoded、重复扫描稳定性和目录初始化；`python -m ruff check core/source_scanner.py core/extractor.py core/knowledge_base.py`；`git diff --check`。
+- 已知风险：S3 只生成正式视频提取计划，不调用模型、不写 full chunk、不改 GUI；正式 chunk 提取、正式聚合过滤和用户反馈仍留给 S4/S5/S6。
+- 用户确认：待用户审核。
 
 ## 15. 步进 S4：正式视频 chunk 提取
 
