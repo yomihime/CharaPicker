@@ -26,6 +26,8 @@ from utils.prompt_preferences import PromptOverride, clear_prompt_override, prom
 LOGGER = logging.getLogger(__name__)
 PROMPT_VARIABLES = {
     "targeted_insight": ("chunk_text",),
+    "preview_video_chunk_extraction": ("source_path",),
+    "formal_video_chunk_extraction": ("chunk_id", "source_path"),
     "character_compile": ("character", "current_state", "evidence_chunk"),
     "final_polish": ("character", "character_state"),
 }

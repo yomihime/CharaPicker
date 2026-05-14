@@ -25,6 +25,7 @@ from utils.ai_model_middleware import (
     ModelCallError,
     build_model_call_request,
     call_video_model,
+    render_prompt_texts,
 )
 from utils.cloud_model_presets import (
     CLOUD_MAX_OUTPUT_TOKENS_MAX,
@@ -625,7 +626,21 @@ class Extractor(QObject):
         if not isinstance(exc, ModelCallError):
             return False
         text = str(exc)
-        return "DataInspectionFailed" in text or "inappropriate content" in text
+        lower_text = text.lower()
+        return (
+            "DataInspectionFailed" in text
+            or "inappropriate content" in lower_text
+            or "data inspection" in lower_text
+            or "content safety" in lower_text
+        )
+
+    def _compact_exception_message(self, exc: Exception, *, max_length: int = 300) -> str:
+        text = " ".join(str(exc).split())
+        if not text:
+            text = exc.__class__.__name__
+        if len(text) <= max_length:
+            return text
+        return f"{text[: max_length - 3]}..."
 
     def _preview_video_chunk_failed_description(
         self,
@@ -867,17 +882,25 @@ class Extractor(QObject):
                     )
                 LOGGER.info(
                     "Full extraction chunk video request prepared; "
-                    "project_id=%s season_id=%s episode_id=%s chunk_id=%s source_path=%s "
+                    "project_id=%s season_id=%s episode_id=%s chunk_id=%s "
                     "size_mb=%.2f duration_seconds=%.2f tokens_per_minute=%s request_max_tokens=%s",
                     config.project_id,
                     chunk_input["season_id"],
                     chunk_input["episode_id"],
                     chunk_input["chunk_id"],
-                    source_path,
                     video_path.stat().st_size / (1024 * 1024),
                     duration_seconds,
                     max_output_tokens,
                     request_max_output_tokens,
+                )
+                LOGGER.debug(
+                    "Full extraction chunk source selected; "
+                    "project_id=%s season_id=%s episode_id=%s chunk_id=%s source_path=%s",
+                    config.project_id,
+                    chunk_input["season_id"],
+                    chunk_input["episode_id"],
+                    chunk_input["chunk_id"],
+                    source_path,
                 )
                 if emit_event is not None:
                     emit_event(
@@ -981,6 +1004,38 @@ class Extractor(QObject):
                             },
                         ).model_dump(mode="json")
                     )
+            except ModelCallError as exc:
+                error_kind = (
+                    "provider_data_inspection_failed"
+                    if self._provider_rejected_video(exc)
+                    else "model_call_failed"
+                )
+                LOGGER.warning(
+                    "Full extraction chunk skipped after model service error; "
+                    "project_id=%s season_id=%s episode_id=%s chunk_id=%s source_path=%s "
+                    "error_kind=%s error=%s",
+                    config.project_id,
+                    chunk_input["season_id"],
+                    chunk_input["episode_id"],
+                    chunk_input["chunk_id"],
+                    source_path,
+                    error_kind,
+                    self._compact_exception_message(exc),
+                )
+                if emit_event is not None:
+                    emit_event(
+                        InsightEvent(
+                            title=t("extractor.full.chunk.title"),
+                            description=self._full_video_chunk_failed_description(
+                                exc=exc,
+                                index=index,
+                                total=total_chunks,
+                                video_name=video_path.name,
+                            ),
+                            status=InsightStatus.WARNING,
+                        ).model_dump(mode="json")
+                    )
+                continue
             except Exception as exc:  # noqa: BLE001
                 LOGGER.warning(
                     "Full extraction chunk failed; project_id=%s source_path=%s",
@@ -1021,9 +1076,18 @@ class Extractor(QObject):
         request_max_output_tokens: int,
     ) -> ModelCallRequest:
         video_path = chunk_input["video_path"]
-        user_text = self._full_video_chunk_user_text(chunk_input)
+        chunk_ref = (
+            f"{chunk_input['season_id']}/{chunk_input['episode_id']}/{chunk_input['chunk_id']}"
+        )
+        system_prompt, user_text = render_prompt_texts(
+            purpose="formal_video_chunk_extraction",
+            variables={
+                "chunk_id": chunk_ref,
+                "source_path": chunk_input["source_path"],
+            },
+        )
         return ModelCallRequest(
-            purpose="formal_chunk_extraction",
+            purpose="formal_video_chunk_extraction",
             backend=backend,
             model_name=model_name,
             base_url=base_url,
@@ -1031,12 +1095,7 @@ class Extractor(QObject):
             messages=[
                 ModelMessage(
                     role="system",
-                    content=(
-                        "你是 CharaPicker 的正式素材全量提取助手。"
-                        "只依据输入 chunk 输出结构化 JSON，不编造。"
-                        "必须覆盖当前片段中实际出现的全部有效角色信息。"
-                        "输出必须是可直接解析的 JSON object。"
-                    ),
+                    content=system_prompt,
                 ),
                 ModelMessage(
                     role="user",
@@ -1060,24 +1119,6 @@ class Extractor(QObject):
                 "chunk_id": chunk_input["chunk_id"],
                 "source_path": chunk_input["source_path"],
             },
-        )
-
-    def _full_video_chunk_user_text(self, chunk_input: dict[str, Any]) -> str:
-        return (
-            "以下是一个正式提取流程中的视频 chunk。\n"
-            f"[CHUNK_ID] {chunk_input['season_id']}/{chunk_input['episode_id']}/{chunk_input['chunk_id']}\n"
-            f"[SOURCE_PATH] {chunk_input['source_path']}\n\n"
-            "请完整提取片段中的所有有效角色相关信息，覆盖所有实际出现的人物，"
-            "不要按预设范围筛选，也不要把信息先标记为属于某个指定人物。"
-            "只根据当前 chunk 中实际出现的画面、对白、动作和关系互动提取信息。"
-            "每条涉及角色的列表项必须显式写出素材中可见或可听到的角色姓名/称呼，"
-            "不要只写“他/她/对方”，也不要把一个角色的行为、情绪或台词归给另一个角色。"
-            "请只输出 JSON 对象，字段必须包含："
-            "facts, behavior_traits, dialogue_style, relationships, conflicts, "
-            "character_state_changes, insight_summary, evidence_refs。"
-            "所有列表字段都返回字符串数组；insight_summary 不超过 50 个中文字符。"
-            "只输出一个原始 JSON 对象，不要输出 Markdown、解释、思考过程或代码块；"
-            "第一个字符必须是 {，最后一个字符必须是 }。"
         )
 
     def _emit_full_warning(self, emit_event: Callable[[dict], None] | None, description: str) -> None:
@@ -1184,14 +1225,19 @@ class Extractor(QObject):
                     )
                 LOGGER.info(
                     "Preview chunk video request prepared; "
-                    "project_id=%s chunk=%s size_mb=%.2f duration_seconds=%.2f "
+                    "project_id=%s chunk_index=%s size_mb=%.2f duration_seconds=%.2f "
                     "tokens_per_minute=%s request_max_tokens=%s",
                     config.project_id,
-                    video_path.name,
+                    index,
                     video_path.stat().st_size / (1024 * 1024),
                     duration_seconds,
                     max_output_tokens,
                     request_max_output_tokens,
+                )
+                LOGGER.debug(
+                    "Preview chunk source selected; project_id=%s chunk=%s",
+                    config.project_id,
+                    video_path.name,
                 )
                 if emit_event is not None:
                     emit_event(
@@ -1206,22 +1252,13 @@ class Extractor(QObject):
                             status=InsightStatus.RUNNING,
                         ).model_dump(mode="json")
                     )
-                user_text = (
-                    "以下是一个已经切好的视频 chunk。"
-                    "请完整提取片段中的所有有效角色相关信息，不要按任何预设关注对象筛选，"
-                    "不要接收、使用或推断用户在界面中填写的关注对象列表，"
-                    "也不要把信息先标记为属于某个指定关注对象。"
-                    "只根据当前 chunk 中实际出现的画面、对白、动作和关系互动提取信息。"
-                    "每条涉及角色的列表项必须显式写出素材中可见或可听到的角色姓名/称呼，"
-                    "不要只写“他/她/对方”，也不要把一个角色的行为、情绪或台词归给另一个角色。"
-                    "请只输出 JSON 对象，字段必须包含："
-                    "facts, behavior_traits, dialogue_style, relationships, conflicts, character_state_changes, insight_summary, evidence_refs。"
-                    "所有列表字段都返回字符串数组；insight_summary 不超过 50 个中文字符。"
-                    "只输出一个原始 JSON 对象，不要输出 Markdown、解释、思考过程或代码块；"
-                    "第一个字符必须是 {，最后一个字符必须是 }。"
+                source_path = self._preview_material_relative_path(config.project_id, video_path)
+                system_prompt, user_text = render_prompt_texts(
+                    purpose="preview_video_chunk_extraction",
+                    variables={"source_path": source_path},
                 )
                 request = ModelCallRequest(
-                    purpose="targeted_insight",
+                    purpose="preview_video_chunk_extraction",
                     backend=backend,
                     model_name=model_name,
                     base_url=base_url,
@@ -1229,13 +1266,7 @@ class Extractor(QObject):
                     messages=[
                         ModelMessage(
                             role="system",
-                            content=(
-                                "你是 CharaPicker 的素材全量提取助手。"
-                                "只依据输入 chunk 输出结构化 JSON，不编造。"
-                                "提取阶段不得使用用户在界面中填写的关注对象列表，"
-                                "必须保留素材中出现的全部有效角色信息。"
-                                "输出必须是可直接解析的 JSON object。"
-                            ),
+                            content=system_prompt,
                         ),
                         ModelMessage(
                             role="user",
@@ -1251,7 +1282,11 @@ class Extractor(QObject):
                     timeout_seconds=240,
                     response_format={"type": "json_object"},
                     extra_body=self._video_model_extra_body(base_url),
-                    metadata={"project_id": config.project_id, "stage": "preview_chunk_extraction"},
+                    metadata={
+                        "project_id": config.project_id,
+                        "stage": "preview_chunk_extraction",
+                        "source_path": source_path,
+                    },
                 )
                 result = call_video_model(request)
                 token_usage = result.metadata.get("token_usage")
@@ -1290,7 +1325,7 @@ class Extractor(QObject):
                     chunk_id=chunk_id,
                     extraction_stage=ExtractionArtifactStage.PREVIEW,
                     run_type="preview_trial",
-                    source_path=self._preview_material_relative_path(config.project_id, video_path),
+                    source_path=source_path,
                     source_kind="video",
                     targets=[],
                     facts=self._coerce_string_list(payload.get("facts")),
@@ -1307,6 +1342,34 @@ class Extractor(QObject):
                 created += 1
                 if emit_progress is not None:
                     emit_progress(15 + int(created * 75 / total_videos))
+            except ModelCallError as exc:
+                error_kind = (
+                    "provider_data_inspection_failed"
+                    if self._provider_rejected_video(exc)
+                    else "model_call_failed"
+                )
+                LOGGER.warning(
+                    "Preview chunk skipped after model service error; "
+                    "project_id=%s chunk=%s error_kind=%s error=%s",
+                    config.project_id,
+                    video_path.name,
+                    error_kind,
+                    self._compact_exception_message(exc),
+                )
+                if emit_event is not None:
+                    emit_event(
+                        InsightEvent(
+                            title=t("extractor.chunk.title"),
+                            description=self._preview_video_chunk_failed_description(
+                                exc=exc,
+                                index=index,
+                                total=total_videos,
+                                video_name=video_path.name,
+                            ),
+                            status=InsightStatus.WARNING,
+                        ).model_dump(mode="json")
+                    )
+                continue
             except Exception as exc:  # noqa: BLE001
                 LOGGER.warning(
                     "Preview chunk extraction from video failed; project_id=%s chunk=%s",

@@ -28,6 +28,7 @@
 
 - 从 `utils.i18n` 读取本地化文案，用于提取流程、编译流程、摘要和洞察描述。
 - 通过 `utils.ai_model_middleware` 构造和执行模型请求；不直接访问具体模型后端。
+- 模型 prompt 正文不得硬编码在 `core` 业务代码中；新增或修改 prompt 时应维护 `res/default_prompts.json`，并通过 `utils.ai_model_middleware` 按 purpose 与变量渲染。
 - 向 `gui` 通过 Qt Signal 传递可序列化的洞察事件 `dict`。
 - 向 `gui` 通过回调传递预览进度和 token 用量。
 - 被 `utils.state_manager` 引用，用于项目配置的序列化和反序列化。
@@ -43,3 +44,4 @@
 - `generator` 只做编译调度后的格式组织和输出渲染。
 - 不要在 `core` 中引入界面布局逻辑。
 - 写入知识库时保持 UTF-8 和结构化 JSON，路径结构要与 `projects/ARCHITECTURE.md` 保持一致。
+- 允许 `core` 装配模型请求中的业务变量、metadata 和多模态素材 part；不允许复制或拼接大段 prompt 指令文本。

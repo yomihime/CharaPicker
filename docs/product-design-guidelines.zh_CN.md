@@ -103,6 +103,8 @@ CharaPicker（拾卡姬）是一个面向二次元素材分析的桌面工具，
 
 ## 6. Prompt 与结构化输出原则
 
+Prompt 正文是可维护资源，不应硬编码在业务代码中。默认 prompt 应维护在 `res/default_prompts.json`，由 `utils.ai_model_middleware` 统一加载、套用用户覆盖并渲染变量。
+
 提取类 prompt 应长期满足：
 
 - 初步提取只面向素材本身，不接收、使用或推断用户预设目标角色列表，避免角色混淆并保证结果可复用。
