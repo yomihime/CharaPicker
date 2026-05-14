@@ -494,12 +494,12 @@ class Extractor(QObject):
     def _build_video_chunk_part(self, video_path: Path, video_fps: float) -> dict[str, Any]:
         return {"video": f"file://{video_path.resolve().as_posix()}", "fps": video_fps}
 
-    def _preview_video_duration_seconds(self, video_path: Path) -> float:
+    def _video_duration_seconds(self, video_path: Path) -> float:
         try:
             return probe_video_duration_seconds(video_path)
         except (FfmpegProcessError, OSError):
             LOGGER.warning(
-                "Preview chunk duration probe failed; chunk=%s",
+                "Video chunk duration probe failed; chunk=%s",
                 video_path.name,
                 exc_info=True,
             )
@@ -558,12 +558,12 @@ class Extractor(QObject):
                 candidates.append(payload)
         return candidates
 
-    def _preview_model_extra_body(self, base_url: str) -> dict[str, Any]:
+    def _video_model_extra_body(self, base_url: str) -> dict[str, Any]:
         if "dashscope.aliyuncs.com" in base_url.lower():
             return {"enable_thinking": False}
         return {}
 
-    def _preview_recommended_tokens_per_minute(
+    def _recommended_output_tokens_per_minute(
         self,
         duration_seconds: float,
         *,
@@ -574,7 +574,7 @@ class Extractor(QObject):
         rounded = math.ceil(raw_value / CLOUD_MAX_OUTPUT_TOKENS_STEP) * CLOUD_MAX_OUTPUT_TOKENS_STEP
         return min(max(rounded, CLOUD_MAX_OUTPUT_TOKENS_STEP), CLOUD_MAX_OUTPUT_TOKENS_MAX)
 
-    def _preview_output_token_limit_message(
+    def _output_token_limit_message(
         self,
         *,
         video_name: str,
@@ -585,7 +585,7 @@ class Extractor(QObject):
             "extractor.chunk.outputTokenLimitReached",
             name=video_name,
             request_max_tokens=request_max_output_tokens,
-            recommended_per_minute=self._preview_recommended_tokens_per_minute(
+            recommended_per_minute=self._recommended_output_tokens_per_minute(
                 duration_seconds,
                 required_output_tokens=request_max_output_tokens * 2,
             ),
@@ -602,7 +602,7 @@ class Extractor(QObject):
             ).model_dump(mode="json")
         )
 
-    def _preview_first_choice(self, result: Any) -> dict[str, Any]:
+    def _model_first_choice(self, result: Any) -> dict[str, Any]:
         raw = result.raw if isinstance(getattr(result, "raw", None), dict) else {}
         choices = raw.get("choices")
         if not isinstance(choices, list):
@@ -614,14 +614,14 @@ class Extractor(QObject):
             return {}
         return first_choice
 
-    def _preview_finish_reason(self, result: Any) -> str:
-        first_choice = self._preview_first_choice(result)
+    def _model_finish_reason(self, result: Any) -> str:
+        first_choice = self._model_first_choice(result)
         return str(first_choice.get("finish_reason") or "").strip().lower()
 
-    def _preview_stopped_by_output_limit(self, result: Any) -> bool:
-        return self._preview_finish_reason(result) in {"length", "max_tokens"}
+    def _model_stopped_by_output_limit(self, result: Any) -> bool:
+        return self._model_finish_reason(result) in {"length", "max_tokens"}
 
-    def _preview_provider_rejected_video(self, exc: Exception) -> bool:
+    def _provider_rejected_video(self, exc: Exception) -> bool:
         if not isinstance(exc, ModelCallError):
             return False
         text = str(exc)
@@ -635,7 +635,7 @@ class Extractor(QObject):
         total: int,
         video_name: str,
     ) -> str:
-        if self._preview_provider_rejected_video(exc):
+        if self._provider_rejected_video(exc):
             return t(
                 "extractor.chunk.videoRejectedByProvider",
                 current=index,
@@ -656,7 +656,7 @@ class Extractor(QObject):
         video_name: str,
         result: Any,
     ) -> None:
-        first_choice = self._preview_first_choice(result)
+        first_choice = self._model_first_choice(result)
         message = first_choice.get("message")
         if not isinstance(message, dict):
             message = {}
@@ -848,7 +848,7 @@ class Extractor(QObject):
                     )
                     continue
 
-                duration_seconds = self._preview_video_duration_seconds(video_path)
+                duration_seconds = self._video_duration_seconds(video_path)
                 request_max_output_tokens = scale_cloud_max_output_tokens_for_video_duration(
                     max_output_tokens,
                     duration_seconds,
@@ -912,19 +912,19 @@ class Extractor(QObject):
                             usage_total[key] += value
                     if emit_token_usage is not None and any(usage_total.values()):
                         emit_token_usage(usage_total)
-                if self._preview_stopped_by_output_limit(result):
+                if self._model_stopped_by_output_limit(result):
                     LOGGER.warning(
                         "Full chunk model response skipped because output was truncated; "
                         "project_id=%s source_path=%s finish_reason=%s request_max_tokens=%s content_chars=%s",
                         config.project_id,
                         source_path,
-                        self._preview_finish_reason(result),
+                        self._model_finish_reason(result),
                         request_max_output_tokens,
                         len(result.content) if isinstance(result.content, str) else 0,
                     )
                     self._emit_full_warning(
                         emit_event,
-                        self._preview_output_token_limit_message(
+                        self._output_token_limit_message(
                             video_name=video_path.name,
                             request_max_output_tokens=request_max_output_tokens,
                             duration_seconds=duration_seconds,
@@ -1051,7 +1051,7 @@ class Extractor(QObject):
             stream=False,
             timeout_seconds=240,
             response_format={"type": "json_object"},
-            extra_body=self._preview_model_extra_body(base_url),
+            extra_body=self._video_model_extra_body(base_url),
             metadata={
                 "project_id": config.project_id,
                 "stage": "full_chunk_extraction",
@@ -1099,7 +1099,7 @@ class Extractor(QObject):
         total: int,
         video_name: str,
     ) -> str:
-        if self._preview_provider_rejected_video(exc):
+        if self._provider_rejected_video(exc):
             return t(
                 "extractor.full.chunk.videoRejectedByProvider",
                 current=index,
@@ -1120,7 +1120,7 @@ class Extractor(QObject):
         source_path: str,
         result: Any,
     ) -> None:
-        first_choice = self._preview_first_choice(result)
+        first_choice = self._model_first_choice(result)
         message = first_choice.get("message")
         if not isinstance(message, dict):
             message = {}
@@ -1165,7 +1165,7 @@ class Extractor(QObject):
         total_videos = max(1, len(videos))
         for index, video_path in enumerate(videos, start=1):
             try:
-                duration_seconds = self._preview_video_duration_seconds(video_path)
+                duration_seconds = self._video_duration_seconds(video_path)
                 request_max_output_tokens = scale_cloud_max_output_tokens_for_video_duration(
                     max_output_tokens,
                     duration_seconds,
@@ -1250,7 +1250,7 @@ class Extractor(QObject):
                     stream=False,
                     timeout_seconds=240,
                     response_format={"type": "json_object"},
-                    extra_body=self._preview_model_extra_body(base_url),
+                    extra_body=self._video_model_extra_body(base_url),
                     metadata={"project_id": config.project_id, "stage": "preview_chunk_extraction"},
                 )
                 result = call_video_model(request)
@@ -1270,8 +1270,8 @@ class Extractor(QObject):
                         video_name=video_path.name,
                         result=result,
                     )
-                    if self._preview_stopped_by_output_limit(result):
-                        message = self._preview_output_token_limit_message(
+                    if self._model_stopped_by_output_limit(result):
+                        message = self._output_token_limit_message(
                             video_name=video_path.name,
                             request_max_output_tokens=request_max_output_tokens,
                             duration_seconds=duration_seconds,
