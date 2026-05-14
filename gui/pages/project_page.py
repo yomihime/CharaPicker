@@ -434,7 +434,7 @@ class SourceListRow(QWidget):
 
 
 class ProjectPage(QWidget):
-    previewRequested = pyqtSignal(ProjectConfig)
+    extractionRequested = pyqtSignal(ProjectConfig)
     configSaved = pyqtSignal(ProjectConfig)
 
     def __init__(
@@ -458,7 +458,7 @@ class ProjectPage(QWidget):
         self._encoder_options: list[DeviceOption] = list(initial_encoder_options) if initial_encoder_options else []
         self._ffmpeg_ready_cache = initial_ffmpeg_ready
         self._use_preloaded_encoder_options = initial_encoder_options is not None
-        self._preview_running = False
+        self._extraction_running = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(22, 18, 22, 18)
@@ -713,8 +713,8 @@ class ProjectPage(QWidget):
         self.clean_raw_button.clicked.connect(self._clean_selected_raw_sources)
         self.remove_source_button.clicked.connect(self._remove_selected_sources)
         self.save_button.clicked.connect(self._emit_save)
-        self.preview_button.clicked.connect(self._emit_preview)
-        self.mode_combo.currentIndexChanged.connect(self._sync_preview_button_text)
+        self.preview_button.clicked.connect(self._emit_extraction)
+        self.mode_combo.currentIndexChanged.connect(self._sync_extraction_button_text)
         self.download_ffmpeg_button.clicked.connect(self._download_ffmpeg)
         self.process_sources_button.clicked.connect(self._start_source_processing)
         self.processing_preset_combo.currentIndexChanged.connect(self._sync_processing_options)
@@ -722,7 +722,7 @@ class ProjectPage(QWidget):
         self.segment_count_slider.valueChanged.connect(self._sync_segment_count_label)
         self._refresh_encoder_options(force_probe=not self._use_preloaded_encoder_options)
         self._refresh_project_combo()
-        self._sync_preview_button_text()
+        self._sync_extraction_button_text()
         self._refresh_ffmpeg_state(force_probe=self._ffmpeg_ready_cache is None)
         self._sync_processing_options()
         self._sync_segment_mode()
@@ -786,8 +786,8 @@ class ProjectPage(QWidget):
             )
         )
 
-    def set_preview_running(self, running: bool) -> None:
-        self._preview_running = running
+    def set_extraction_running(self, running: bool) -> None:
+        self._extraction_running = running
         self.preview_button.setEnabled(self._has_project() and not running)
 
     def apply_theme_colors(self) -> None:
@@ -846,12 +846,12 @@ class ProjectPage(QWidget):
         self._upsert_project(config)
         self.configSaved.emit(config)
 
-    def _emit_preview(self) -> None:
-        if not self._has_project() or self._preview_running:
+    def _emit_extraction(self) -> None:
+        if not self._has_project() or self._extraction_running:
             return
-        self.previewRequested.emit(self.current_config())
+        self.extractionRequested.emit(self.current_config())
 
-    def _sync_preview_button_text(self) -> None:
+    def _sync_extraction_button_text(self) -> None:
         is_preview_mode = self.mode_combo.currentIndex() == 0
         button_key = "project.preview" if is_preview_mode else "project.fullExtraction"
         empty_key = "insight.empty.preview" if is_preview_mode else "insight.empty.fullExtraction"
@@ -1257,7 +1257,7 @@ class ProjectPage(QWidget):
         self.segment_check.setEnabled(has_project)
         self.process_sources_button.setEnabled(has_project)
         self.save_button.setEnabled(has_project)
-        self.preview_button.setEnabled(has_project and not self._preview_running)
+        self.preview_button.setEnabled(has_project and not self._extraction_running)
         self._sync_processing_options()
 
     def _load_selected_project(self) -> None:
@@ -1272,7 +1272,7 @@ class ProjectPage(QWidget):
         self.targets_edit.setText(", ".join(project.target_characters))
         self.mode_combo.setCurrentIndex(0 if project.extraction_mode == ExtractionMode.PREVIEW else 1)
         self._apply_processing_config(project.source_processing)
-        self._sync_preview_button_text()
+        self._sync_extraction_button_text()
         self.sources_list.clear()
         for source_path in project.source_paths:
             self._add_source_item(source_path, SOURCE_KIND_EXTERNAL)

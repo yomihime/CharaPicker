@@ -430,6 +430,7 @@ knowledge_base/
 - `core/knowledge_base.py`
 - `core/compiler.py`
 - `gui/main_window.py`
+- `gui/pages/model_page.py`
 - `i18n/*.json`
 - `docs/preview-real-result-ingestion-plan.zh_CN.md`
 
@@ -612,14 +613,14 @@ knowledge_base/
 
 里程碑：
 
-- [ ] S6.1 新增 `FullExtractionWorker`。
-- [ ] S6.2 `ProjectConfig.extraction_mode == FULL` 时调用正式 worker。
-- [ ] S6.3 `ProjectConfig.extraction_mode == PREVIEW` 时调用预览 worker。
-- [ ] S6.4 正式提取期间禁用重复启动。
-- [ ] S6.5 正式提取向洞察流发送阶段事件。
-- [ ] S6.6 正式提取完成后 InfoBar 提示可检查知识库结果。
-- [ ] S6.7 正式提取失败时显示清晰错误。
-- [ ] S6.8 四个 i18n JSON 同步新增或调整文案。
+- [x] S6.1 新增 `FullExtractionWorker`。
+- [x] S6.2 `ProjectConfig.extraction_mode == FULL` 时调用正式 worker。
+- [x] S6.3 `ProjectConfig.extraction_mode == PREVIEW` 时调用预览 worker。
+- [x] S6.4 正式提取期间禁用重复启动。
+- [x] S6.5 正式提取向洞察流发送阶段事件。
+- [x] S6.6 正式提取完成后 InfoBar 提示可检查知识库结果。
+- [x] S6.7 正式提取失败时显示清晰错误。
+- [x] S6.8 四个 i18n JSON 同步新增或调整文案。
 
 验收：
 
@@ -634,13 +635,13 @@ knowledge_base/
 
 完成记录：
 
-- 完成日期：
-- 开发分支/提交：
-- 改动文件：
-- 可检查状态：
-- 验证命令：
-- 已知风险：
-- 用户确认：
+- 完成日期：2026-05-14
+- 开发分支/提交：`formal-video-extraction-plan` / `feat: wire full extraction GUI entry`
+- 改动文件：`gui/main_window.py`、`gui/pages/project_page.py`、`gui/pages/model_page.py`、`i18n/*.json`、`docs/formal-video-extraction-architecture-plan.zh_CN.md`
+- 可检查状态：项目页按钮按 `ProjectConfig.extraction_mode` 分流；PREVIEW 模式仍启动 `PreviewWorker`，FULL 模式启动 `FullExtractionWorker` 并调用 `run_full_extraction_streaming(...)`；正式提取运行期间同一按钮会禁用，洞察流继续接收正式提取事件，完成后 InfoBar 提示可检查 `knowledge_base/` 产物。
+- 验证命令：`python -m compileall core gui`；`python -m ruff check gui/main_window.py gui/pages/project_page.py gui/pages/model_page.py`；`python -m json.tool i18n/zh_CN.json`、`python -m json.tool i18n/zh_TW.json`、`python -m json.tool i18n/en_US.json`、`python -m json.tool i18n/ja_JP.json`；轻量 Python 脚本 monkeypatch PyQt/qfluentwidgets 与页面依赖，验证 FULL 分流到 `run_full_extraction_streaming(...)`、PREVIEW 分流到 `run_preview_streaming(...)`、正式 worker 成功/失败信号清晰；`git diff --check`。
+- 已知风险：S6 只接正式 GUI 入口，不做真实素材回归矩阵；preview/full 并存、重跑覆盖策略和用户侧完整验收留给 S7。
+- 用户确认：待用户审核。
 
 ## 18. 支线步进 P：预览提取同步任务
 
