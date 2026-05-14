@@ -912,6 +912,25 @@ class Extractor(QObject):
                             usage_total[key] += value
                     if emit_token_usage is not None and any(usage_total.values()):
                         emit_token_usage(usage_total)
+                if self._preview_stopped_by_output_limit(result):
+                    LOGGER.warning(
+                        "Full chunk model response skipped because output was truncated; "
+                        "project_id=%s source_path=%s finish_reason=%s request_max_tokens=%s content_chars=%s",
+                        config.project_id,
+                        source_path,
+                        self._preview_finish_reason(result),
+                        request_max_output_tokens,
+                        len(result.content) if isinstance(result.content, str) else 0,
+                    )
+                    self._emit_full_warning(
+                        emit_event,
+                        self._preview_output_token_limit_message(
+                            video_name=video_path.name,
+                            request_max_output_tokens=request_max_output_tokens,
+                            duration_seconds=duration_seconds,
+                        ),
+                    )
+                    continue
                 try:
                     payload = self._extract_json_object(result.content)
                 except ValueError:
@@ -920,16 +939,6 @@ class Extractor(QObject):
                         source_path=source_path,
                         result=result,
                     )
-                    if self._preview_stopped_by_output_limit(result):
-                        self._emit_full_warning(
-                            emit_event,
-                            self._preview_output_token_limit_message(
-                                video_name=video_path.name,
-                                request_max_output_tokens=request_max_output_tokens,
-                                duration_seconds=duration_seconds,
-                            ),
-                        )
-                        continue
                     raise
 
                 chunk = ChunkExtractionResult(
