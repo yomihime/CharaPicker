@@ -785,7 +785,7 @@ class ProjectPage(QWidget):
         self.stream_panel.clear_events()
 
     def set_progress(self, value: int) -> None:
-        self.progress.setValue(value)
+        self.progress.setValue(max(0, min(100, int(value))))
 
     def set_token_usage(self, token_usage: dict[str, int] | None) -> None:
         usage = token_usage if isinstance(token_usage, dict) else {}

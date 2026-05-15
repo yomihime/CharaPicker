@@ -1233,6 +1233,7 @@ class Extractor(QObject):
         if not videos:
             return (0, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, [])
         created = 0
+        processed = 0
         usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         extracted_chunks: list[ChunkExtractionResult] = []
         total_videos = max(1, len(videos))
@@ -1372,8 +1373,6 @@ class Extractor(QObject):
                 self.save_preview_chunk_extraction_result(config.project_id, chunk)
                 extracted_chunks.append(chunk)
                 created += 1
-                if emit_progress is not None:
-                    emit_progress(15 + int(created * 75 / total_videos))
             except ModelCallError as exc:
                 error_kind = (
                     "provider_data_inspection_failed"
@@ -1440,6 +1439,10 @@ class Extractor(QObject):
                         ).model_dump(mode="json")
                     )
                 continue
+            finally:
+                processed += 1
+                if emit_progress is not None:
+                    emit_progress(15 + int(processed * 75 / total_videos))
         return (created, usage_total, extracted_chunks)
 
     def _build_chunk_payload(
@@ -1581,7 +1584,6 @@ class Extractor(QObject):
                     status=InsightStatus.WARNING,
                 ).model_dump(mode="json")
             )
-            emit_progress(100)
             LOGGER.warning(
                 "Full extraction stopped because no formal video chunks were found; project_id=%s",
                 config.project_id,
@@ -1598,7 +1600,6 @@ class Extractor(QObject):
                     status=InsightStatus.WARNING,
                 ).model_dump(mode="json")
             )
-            emit_progress(100)
             LOGGER.warning("Full extraction stopped because no usable cloud preset was found")
             raise ValueError(message)
 
@@ -1690,7 +1691,6 @@ class Extractor(QObject):
                     status=InsightStatus.RUNNING,
                 ).model_dump(mode="json")
             )
-            emit_progress(70)
             emit_event(
                 InsightEvent(
                     title=t("extractor.insight.title"),
@@ -1698,7 +1698,6 @@ class Extractor(QObject):
                     status=InsightStatus.QUEUED,
                 ).model_dump(mode="json")
             )
-            emit_progress(100)
             LOGGER.info("Preview extraction finished without cloud preset; project_id=%s", config.project_id)
             return ""
 
@@ -1746,7 +1745,6 @@ class Extractor(QObject):
                     status=InsightStatus.WARNING,
                 ).model_dump(mode="json")
             )
-            emit_progress(100)
             LOGGER.info(
                 "Preview extraction aborted because no readable chunk JSON was found; project_id=%s",
                 config.project_id,
