@@ -129,6 +129,7 @@
 
 - 默认 prompt 资源放在 `res/default_prompts.json`。
 - 用户覆盖 prompt 由 `utils/prompt_preferences.py` 管理，空内容不覆盖默认 prompt。
+- prompt 正文不得硬编码在 `core`、`gui` 或其他业务模块中；新增 prompt purpose 时维护 `res/default_prompts.json`，由 `utils/ai_model_middleware.py` 统一加载、套用用户覆盖并渲染变量。
 - `core`、`gui` 和其他上层模块不得绕过中间件直连模型后端。
 - 模型执行必须通过 `call_text_model()`、`call_image_model()` 或 `call_video_model()` 进入后端。
 - OpenAI-compatible 视频输入当前会按请求 FPS 抽帧为图片组后发送；支持直接视频 FPS 的后端由对应 provider 传递原始视频参数。

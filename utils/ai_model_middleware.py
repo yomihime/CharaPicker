@@ -49,6 +49,15 @@ class ModelCallError(ModelMiddlewareError):
     pass
 
 
+def _compact_error_text(value: object, *, max_length: int = 500) -> str:
+    text = " ".join(str(value).split())
+    if not text:
+        text = value.__class__.__name__
+    if len(text) <= max_length:
+        return text
+    return f"{text[: max_length - 3]}..."
+
+
 class ModelMessage(BaseModel):
     role: MessageRole
     content: ModelMessageContent
@@ -119,6 +128,19 @@ def _resolve_default_prompt_candidates(primary_path: Path) -> list[Path]:
     return candidates
 
 
+def render_prompt_texts(*, purpose: str, variables: dict[str, Any]) -> tuple[str, str]:
+    prompts = load_default_prompts()
+    template = prompts.get(purpose)
+    if template is None:
+        raise PromptNotFoundError(f"Prompt purpose is not defined: {purpose}")
+
+    override = prompt_override(purpose)
+    system_prompt = override.system.strip() or template.system
+    user_template = override.user_template.strip() or template.user_template
+    rendered_user = _render_template(user_template, variables)
+    return system_prompt, rendered_user
+
+
 def build_model_call_request(
     *,
     purpose: str,
@@ -132,15 +154,7 @@ def build_model_call_request(
     stream: bool = False,
     metadata: dict[str, Any] | None = None,
 ) -> ModelCallRequest:
-    prompts = load_default_prompts()
-    template = prompts.get(purpose)
-    if template is None:
-        raise PromptNotFoundError(f"Prompt purpose is not defined: {purpose}")
-
-    override = prompt_override(purpose)
-    system_prompt = override.system.strip() or template.system
-    user_template = override.user_template.strip() or template.user_template
-    rendered_user = _render_template(user_template, variables)
+    system_prompt, rendered_user = render_prompt_texts(purpose=purpose, variables=variables)
     LOGGER.debug(
         "Model call request built; purpose=%s backend=%s model=%s has_api_key=%s",
         purpose,
@@ -309,7 +323,13 @@ def _call_dashscope(request: ModelCallRequest) -> ModelCallResult:
         response = MultiModalConversation.call(**call_kwargs)
     except Exception as exc:  # noqa: BLE001
         LOGGER.warning(
-            "DashScope model call failed; purpose=%s endpoint=%s",
+            "DashScope model call failed; purpose=%s endpoint=%s error=%s",
+            request.purpose,
+            dashscope.base_http_api_url,
+            _compact_error_text(exc),
+        )
+        LOGGER.debug(
+            "DashScope model call traceback; purpose=%s endpoint=%s",
             request.purpose,
             dashscope.base_http_api_url,
             exc_info=True,
@@ -521,7 +541,7 @@ def _extract_video_frame_data_urls(video_path: Path, fps: float, max_frames: int
             data_urls.append(f"data:{mime_type or 'image/jpeg'};base64,{encoded}")
         if not data_urls:
             raise ModelCallError("Video frame sampling produced no frames.")
-        LOGGER.info(
+        LOGGER.debug(
             "Sampled video frames for OpenAI-compatible request; video=%s fps=%s frames=%s",
             video_path.name,
             fps,
@@ -594,11 +614,25 @@ def _call_openai_compatible(
         except OSError:
             error_body = ""
         LOGGER.warning(
-            "Model call failed; purpose=%s endpoint=%s status=%s body=%s",
+            "Model call failed; purpose=%s endpoint=%s status=%s body_chars=%s",
             request.purpose,
             endpoint,
             exc.code,
-            error_body,
+            len(error_body),
+        )
+        if error_body:
+            LOGGER.debug(
+                "Model call HTTP error body; purpose=%s endpoint=%s status=%s body=%s",
+                request.purpose,
+                endpoint,
+                exc.code,
+                _compact_error_text(error_body, max_length=2000),
+            )
+        LOGGER.debug(
+            "Model call HTTP traceback; purpose=%s endpoint=%s status=%s",
+            request.purpose,
+            endpoint,
+            exc.code,
             exc_info=True,
         )
         detail = f"HTTP {exc.code} {exc.reason}"
@@ -607,7 +641,13 @@ def _call_openai_compatible(
         raise ModelCallError(detail) from exc
     except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
         LOGGER.warning(
-            "Model call failed; purpose=%s endpoint=%s",
+            "Model call failed; purpose=%s endpoint=%s error=%s",
+            request.purpose,
+            endpoint,
+            _compact_error_text(exc),
+        )
+        LOGGER.debug(
+            "Model call traceback; purpose=%s endpoint=%s",
             request.purpose,
             endpoint,
             exc_info=True,

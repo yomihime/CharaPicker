@@ -434,7 +434,7 @@ class SourceListRow(QWidget):
 
 
 class ProjectPage(QWidget):
-    previewRequested = pyqtSignal(ProjectConfig)
+    extractionRequested = pyqtSignal(ProjectConfig)
     configSaved = pyqtSignal(ProjectConfig)
 
     def __init__(
@@ -458,7 +458,7 @@ class ProjectPage(QWidget):
         self._encoder_options: list[DeviceOption] = list(initial_encoder_options) if initial_encoder_options else []
         self._ffmpeg_ready_cache = initial_ffmpeg_ready
         self._use_preloaded_encoder_options = initial_encoder_options is not None
-        self._preview_running = False
+        self._extraction_running = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(22, 18, 22, 18)
@@ -494,6 +494,14 @@ class ProjectPage(QWidget):
 
         self.mode_combo = ComboBox(form_card)
         self.mode_combo.addItems([t("project.mode.preview"), t("project.mode.full")])
+        self.skip_provider_rejected_chunk_check = CheckBox(
+            t("project.option.skipProviderRejectedChunk"),
+            form_card,
+        )
+        self.skip_provider_rejected_chunk_check.setToolTip(
+            t("project.option.skipProviderRejectedChunk.tooltip")
+        )
+        self.skip_provider_rejected_chunk_check.setChecked(True)
 
         source_panel = QVBoxLayout()
         source_panel.setSpacing(10)
@@ -657,8 +665,12 @@ class ProjectPage(QWidget):
         form.addLayout(project_row, 0, 1)
         form.addWidget(BodyLabel(t("project.field.characters"), form_card), 1, 0)
         form.addWidget(self.targets_edit, 1, 1)
+        mode_block = QVBoxLayout()
+        mode_block.setSpacing(6)
+        mode_block.addWidget(self.mode_combo)
+        mode_block.addWidget(self.skip_provider_rejected_chunk_check)
         form.addWidget(BodyLabel(t("project.field.mode"), form_card), 2, 0)
-        form.addWidget(self.mode_combo, 2, 1)
+        form.addLayout(mode_block, 2, 1)
         form.addWidget(BodyLabel(t("project.field.sources"), form_card), 3, 0, alignment=Qt.AlignmentFlag.AlignTop)
         form.addLayout(source_panel, 3, 1)
         form.addLayout(processing_block, 4, 0, 1, 2)
@@ -713,8 +725,8 @@ class ProjectPage(QWidget):
         self.clean_raw_button.clicked.connect(self._clean_selected_raw_sources)
         self.remove_source_button.clicked.connect(self._remove_selected_sources)
         self.save_button.clicked.connect(self._emit_save)
-        self.preview_button.clicked.connect(self._emit_preview)
-        self.mode_combo.currentIndexChanged.connect(self._sync_preview_button_text)
+        self.preview_button.clicked.connect(self._emit_extraction)
+        self.mode_combo.currentIndexChanged.connect(self._sync_extraction_button_text)
         self.download_ffmpeg_button.clicked.connect(self._download_ffmpeg)
         self.process_sources_button.clicked.connect(self._start_source_processing)
         self.processing_preset_combo.currentIndexChanged.connect(self._sync_processing_options)
@@ -722,7 +734,7 @@ class ProjectPage(QWidget):
         self.segment_count_slider.valueChanged.connect(self._sync_segment_count_label)
         self._refresh_encoder_options(force_probe=not self._use_preloaded_encoder_options)
         self._refresh_project_combo()
-        self._sync_preview_button_text()
+        self._sync_extraction_button_text()
         self._refresh_ffmpeg_state(force_probe=self._ffmpeg_ready_cache is None)
         self._sync_processing_options()
         self._sync_segment_mode()
@@ -750,6 +762,7 @@ class ProjectPage(QWidget):
             extraction_mode=mode,
             source_paths=sources,
             source_processing=self._current_processing_config(),
+            allow_provider_rejected_chunk_skip=self.skip_provider_rejected_chunk_check.isChecked(),
             raw_cleaned_paths=project.raw_cleaned_paths,
             created_at=project.created_at,
         )
@@ -786,9 +799,10 @@ class ProjectPage(QWidget):
             )
         )
 
-    def set_preview_running(self, running: bool) -> None:
-        self._preview_running = running
+    def set_extraction_running(self, running: bool) -> None:
+        self._extraction_running = running
         self.preview_button.setEnabled(self._has_project() and not running)
+        self.skip_provider_rejected_chunk_check.setEnabled(self._has_project() and not running)
 
     def apply_theme_colors(self) -> None:
         if isDarkTheme():
@@ -846,12 +860,12 @@ class ProjectPage(QWidget):
         self._upsert_project(config)
         self.configSaved.emit(config)
 
-    def _emit_preview(self) -> None:
-        if not self._has_project() or self._preview_running:
+    def _emit_extraction(self) -> None:
+        if not self._has_project() or self._extraction_running:
             return
-        self.previewRequested.emit(self.current_config())
+        self.extractionRequested.emit(self.current_config())
 
-    def _sync_preview_button_text(self) -> None:
+    def _sync_extraction_button_text(self) -> None:
         is_preview_mode = self.mode_combo.currentIndex() == 0
         button_key = "project.preview" if is_preview_mode else "project.fullExtraction"
         empty_key = "insight.empty.preview" if is_preview_mode else "insight.empty.fullExtraction"
@@ -1246,6 +1260,7 @@ class ProjectPage(QWidget):
         self.delete_project_button.setEnabled(has_project)
         self.targets_edit.setEnabled(has_project)
         self.mode_combo.setEnabled(has_project)
+        self.skip_provider_rejected_chunk_check.setEnabled(has_project)
         self.add_file_button.setEnabled(has_project)
         self.add_folder_button.setEnabled(has_project)
         self.remove_source_button.setEnabled(has_project)
@@ -1257,7 +1272,7 @@ class ProjectPage(QWidget):
         self.segment_check.setEnabled(has_project)
         self.process_sources_button.setEnabled(has_project)
         self.save_button.setEnabled(has_project)
-        self.preview_button.setEnabled(has_project and not self._preview_running)
+        self.preview_button.setEnabled(has_project and not self._extraction_running)
         self._sync_processing_options()
 
     def _load_selected_project(self) -> None:
@@ -1271,8 +1286,9 @@ class ProjectPage(QWidget):
             return
         self.targets_edit.setText(", ".join(project.target_characters))
         self.mode_combo.setCurrentIndex(0 if project.extraction_mode == ExtractionMode.PREVIEW else 1)
+        self.skip_provider_rejected_chunk_check.setChecked(project.allow_provider_rejected_chunk_skip)
         self._apply_processing_config(project.source_processing)
-        self._sync_preview_button_text()
+        self._sync_extraction_button_text()
         self.sources_list.clear()
         for source_path in project.source_paths:
             self._add_source_item(source_path, SOURCE_KIND_EXTERNAL)

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from collections import defaultdict
+from collections.abc import Callable
+from pathlib import Path
 
 from core import knowledge_base as kb
 from core.models import CharacterState
@@ -47,23 +48,68 @@ def compile_character_state(character: str) -> CharacterState:
 
 
 def compile_character_state_by_season_episode(project_id: str, character: str) -> dict:
+    return _compile_character_state_by_season_episode(
+        project_id,
+        character,
+        content_path=kb.episode_content_path,
+        load_content=kb.load_episode_content,
+        log_label="Episode content",
+        required_stage=kb.FULL_EXTRACTION_STAGE,
+    )
+
+
+def compile_preview_character_state_from_knowledge_base(
+    project_id: str,
+    character: str,
+) -> CharacterState | None:
+    compiled = _compile_character_state_by_season_episode(
+        project_id,
+        character,
+        content_path=kb.preview_episode_content_path,
+        load_content=kb.load_preview_episode_content,
+        log_label="Preview episode content",
+    )
+    return _character_state_from_compiled(compiled)
+
+
+def _compile_character_state_by_season_episode(
+    project_id: str,
+    character: str,
+    *,
+    content_path: Callable[[str, str, str], Path],
+    load_content: Callable[[str, str, str], dict],
+    log_label: str,
+    required_stage: str | None = None,
+) -> dict:
     state = CharacterState(character=character, summary="", evidence_count=0, conflicts=[])
     timeline: list[dict] = []
 
     for season_dir in kb.list_season_dirs(project_id):
         for episode_dir in kb.list_episode_dirs(project_id, season_dir.name):
-            episode_content_path = kb.episode_content_path(project_id, season_dir.name, episode_dir.name)
+            episode_content_path = content_path(project_id, season_dir.name, episode_dir.name)
             if not episode_content_path.exists():
                 continue
             try:
-                payload = kb.load_episode_content(project_id, season_dir.name, episode_dir.name)
+                payload = load_content(project_id, season_dir.name, episode_dir.name)
             except (OSError, ValueError):
                 LOGGER.warning(
-                    "Episode content read failed; project_id=%s season_id=%s episode_id=%s",
+                    "%s read failed; project_id=%s season_id=%s episode_id=%s",
+                    log_label,
                     project_id,
                     season_dir.name,
                     episode_dir.name,
                     exc_info=True,
+                )
+                continue
+            if required_stage is not None and kb.artifact_stage_from_payload(payload) != required_stage:
+                LOGGER.warning(
+                    "%s skipped because it is not a %s artifact; project_id=%s season_id=%s episode_id=%s stage=%s",
+                    log_label,
+                    required_stage,
+                    project_id,
+                    season_dir.name,
+                    episode_dir.name,
+                    kb.artifact_stage_from_payload(payload),
                 )
                 continue
             if not _episode_targets_character(payload, character):
@@ -90,6 +136,10 @@ def compile_character_state_from_knowledge_base(
     character: str,
 ) -> CharacterState | None:
     compiled = compile_character_state_by_season_episode(project_id, character)
+    return _character_state_from_compiled(compiled)
+
+
+def _character_state_from_compiled(compiled: dict) -> CharacterState | None:
     timeline = compiled.get("timeline", [])
     if not timeline:
         return None

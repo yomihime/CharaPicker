@@ -14,6 +14,12 @@ class ExtractionMode(str, Enum):
     FULL = "full"
 
 
+class ExtractionArtifactStage(str, Enum):
+    PREVIEW = "preview"
+    FULL = "full"
+    LEGACY_UNKNOWN = "legacy_unknown"
+
+
 class SourceProcessingPreset(str, Enum):
     ORIGINAL = "original"
     SEGMENT_TRANSCODE = "segment_transcode"
@@ -56,6 +62,7 @@ class ProjectConfig(BaseModel):
     source_paths: list[str] = Field(default_factory=list)
     source_processing: SourceProcessingConfig = Field(default_factory=SourceProcessingConfig)
     include_previous_season_background: bool = True
+    allow_provider_rejected_chunk_skip: bool = True
     raw_cleaned_paths: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)
@@ -81,6 +88,11 @@ class ChunkExtractionResult(BaseModel):
     season_id: str
     episode_id: str
     chunk_id: str
+    extraction_stage: ExtractionArtifactStage = ExtractionArtifactStage.LEGACY_UNKNOWN
+    run_type: str = ""
+    source_path: str = ""
+    source_kind: str = ""
+    schema_version: int = 1
     targets: list[str] = Field(default_factory=list)
     facts: list[str] = Field(default_factory=list)
     behavior_traits: list[str] = Field(default_factory=list)

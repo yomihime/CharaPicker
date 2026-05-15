@@ -26,7 +26,7 @@ CharaPicker（拾卡姬）是一个面向二次元素材分析的桌面工具，
 
 示例风格：
 
-- 启动：`拾卡姬 (CharaPicker) v0.1.0 已就位`
+- 启动：`拾卡姬 (CharaPicker) v0.2.0-alpha.1 已就位`
 - 引导：`准备好帮您从番剧/漫画里扒角色卡啦！请投喂视频文件或漫画文件夹吧。`
 - 处理中：`拾卡姬正在逐帧观察表情...`
 - 格式不支持：`这个格式暂时读不懂，请换成 MP4 或 PNG 试试。`
@@ -102,6 +102,8 @@ CharaPicker（拾卡姬）是一个面向二次元素材分析的桌面工具，
 这些是产品与流程约束，不代表所有能力都已完整实现。涉及真实素材接入时，应同时查阅 `docs/extraction-workflow.zh_CN.md`、`docs/extraction-development-roadmap.zh_CN.md` 和当前 `core/extractor.py`。
 
 ## 6. Prompt 与结构化输出原则
+
+Prompt 正文是可维护资源，不应硬编码在业务代码中。默认 prompt 应维护在 `res/default_prompts.json`，由 `utils.ai_model_middleware` 统一加载、套用用户覆盖并渲染变量。
 
 提取类 prompt 应长期满足：
 

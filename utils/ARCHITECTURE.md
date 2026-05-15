@@ -45,6 +45,7 @@
 - `core` 可调用 `i18n.py` 获取流程文案，并通过 `ai_model_middleware.py` 访问模型后端。
 - `core` 的 AI 请求必须通过 `ai_model_middleware.py` 构造和执行，不能直接访问下层模型接口。
 - `ai_model_middleware.py` 从 `res/default_prompts.json` 加载默认提示词资源，并通过 `prompt_preferences.py` 读取非空用户覆盖。
+- `ai_model_middleware.py` 是默认 prompt 的唯一加载与渲染入口；上层模块只传 purpose、变量、metadata 和多模态素材 part，不在业务代码中硬编码 prompt 正文。
 - `i18n.py`、`theme.py`、`logging_preferences.py`、`prompt_preferences.py` 和 `cloud_model_presets.py` 通过 `global_store.py` 管理全局用户偏好。
 - `state_manager.py` 使用 `core.models.ProjectConfig` 进行结构校验。
 - `paths.py` 统一指向 `projects/` 下的工程目录。
@@ -63,5 +64,6 @@
 - 全局用户数据和配置选项统一通过 `global_store.py` 读写。
 - 项目配置读写保持 UTF-8 和结构化 JSON；全局配置读写保持 UTF-8 和结构化 YAML。
 - 模型执行必须通过 `call_text_model()`、`call_image_model()` 或 `call_video_model()` 进入后端。
+- 新增模型任务时，默认 prompt 正文放入 `res/default_prompts.json`；业务代码不得为了临时修复而复制、拼接或长期硬编码 prompt 指令文本。
 - 日志不得输出 API Key、完整密钥、隐私文本或大型原始素材内容。
 - 运行时中间件的详细职责边界见 [`../docs/runtime-middleware.zh_CN.md`](../docs/runtime-middleware.zh_CN.md)。

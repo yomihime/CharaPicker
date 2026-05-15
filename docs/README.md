@@ -21,6 +21,7 @@
 
 - [产品与设计规范](product-design-guidelines.zh_CN.md)
 - [运行时中间件设计说明](runtime-middleware.zh_CN.md)
+- [TODO List](TODO.zh_CN.md)
 
 ## 发布与维护
 
@@ -31,6 +32,7 @@
 
 - [归档说明](archive/README.md)
 - [代码结构整理执行计划](archive/refactor-plan.md)
+- [正式视频提取架构指南与任务计划](archive/formal-video-extraction-architecture-plan.zh_CN.md)
 
 ## 目录说明
 

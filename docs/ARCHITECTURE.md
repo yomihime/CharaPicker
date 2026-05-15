@@ -26,6 +26,7 @@
 - `runtime-middleware.zh_CN.md`：全局存储、日志、弹窗、启动预热、素材处理和 AI 模型调用中间件的设计边界。
 - `release-packaging.zh_CN.md`：PyInstaller、版本阶段、发布包结构和 CI 发布规范。
 - `documentation-maintenance.zh_CN.md`：README、多语言文档、ARCHITECTURE.md 和计划类文档维护规则。
+- `TODO.zh_CN.md`：后续体验、工作流、品牌和网络能力的待办清单。
 - `archive/`：已执行完成、已被替代或仅保留历史查阅价值的计划类文档。
 - `README.en_US.md`、`README.ja_JP.md`、`README.zh_TW.md`：README 的多语言补充版本。
 - 后续多语言文档应在文件名中标明语种，例如 `usage.zh_CN.md`。

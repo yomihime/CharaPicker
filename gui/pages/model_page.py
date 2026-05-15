@@ -1309,7 +1309,7 @@ class ModelPage(QWidget):
         self._commit_cloud_max_output_tokens_text()
         return self._last_valid_cloud_max_output_tokens
 
-    def current_cloud_preset_for_preview(self) -> CloudModelPreset | None:
+    def current_cloud_video_preset(self) -> CloudModelPreset | None:
         base_url = self.cloud_base_url.text().strip()
         model_name = self.cloud_model_name.text().strip()
         if not base_url or not model_name:
@@ -1323,6 +1323,9 @@ class ModelPage(QWidget):
             video_fps=self._current_cloud_video_fps(),
             max_output_tokens=self._current_cloud_max_output_tokens(),
         )
+
+    def current_cloud_preset_for_preview(self) -> CloudModelPreset | None:
+        return self.current_cloud_video_preset()
 
     def _sync_cloud_video_fps_from_slider(self, value: int) -> None:
         self._set_cloud_video_fps(value / 10.0)
