@@ -13,8 +13,8 @@ build.bat
 常用参数：
 
 ```powershell
-build.bat --tag=v0.1.0-alpha.1
-build.bat --version=0.1.0 --stage=release
+build.bat --tag=v0.2.0-alpha.1
+build.bat --version=0.2.0 --stage=alpha.1
 build.bat --local
 ```
 
@@ -67,9 +67,9 @@ release/
 
 允许通过 Git tag 指示版本与阶段：
 
-- `v0.1.0-alpha` -> `version=0.1.0`，`stage=alpha`
-- `v0.1.0-alpha.1` -> `version=0.1.0`，`stage=alpha.1`
-- `v0.1.0` -> `version=0.1.0`，`stage=release`
+- `v0.2.0-alpha` -> `version=0.2.0`，`stage=alpha`
+- `v0.2.0-alpha.1` -> `version=0.2.0`，`stage=alpha.1`
+- `v1.0.0` -> `version=1.0.0`，`stage=release`
 
 使用 `--local` 或 `local` 参数时，阶段应写为 `local`。
 
@@ -84,8 +84,8 @@ CharaPicker-v<version>-<stage>-<platform>-<arch>.zip
 示例：
 
 ```text
-CharaPicker-v0.1.0-alpha.1-windows-x64.zip
-CharaPicker-v0.1.0-release-windows-x64.zip
+CharaPicker-v0.2.0-alpha.1-windows-x64.zip
+CharaPicker-v1.0.0-release-windows-x64.zip
 ```
 
 ## 6. 发布内容与排除项
