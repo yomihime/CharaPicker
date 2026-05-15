@@ -492,19 +492,6 @@ class ProjectPage(QWidget):
         self.targets_edit = LineEdit(form_card)
         self.targets_edit.setPlaceholderText(t("project.character.placeholder"))
 
-        self.mode_combo = ComboBox(form_card)
-        self.mode_combo.addItems([t("project.mode.preview"), t("project.mode.full")])
-        self.mode_combo.setMinimumWidth(180)
-        self.mode_combo.setMaximumWidth(240)
-        self.skip_provider_rejected_chunk_check = CheckBox(
-            t("project.option.skipProviderRejectedChunk"),
-            form_card,
-        )
-        self.skip_provider_rejected_chunk_check.setToolTip(
-            t("project.option.skipProviderRejectedChunk.tooltip")
-        )
-        self.skip_provider_rejected_chunk_check.setChecked(True)
-
         source_panel = QVBoxLayout()
         source_panel.setSpacing(10)
         source_area = QHBoxLayout()
@@ -527,18 +514,16 @@ class ProjectPage(QWidget):
 
         self.sources_list = QListWidget(form_card)
         self.sources_list.setObjectName("sourcesList")
-        self.sources_list.setMinimumHeight(120)
-        self.sources_list.setMaximumHeight(156)
-        self.sources_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.sources_list.setMinimumHeight(156)
+        self.sources_list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.sources_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.sources_list.setAlternatingRowColors(True)
         select_all_shortcut = QShortcut(QKeySequence.StandardKey.SelectAll, self.sources_list)
         select_all_shortcut.activated.connect(self.sources_list.selectAll)
         source_area.addWidget(self.sources_list, 1)
-        source_area.setAlignment(self.sources_list, Qt.AlignmentFlag.AlignTop)
         source_area.addLayout(source_actions)
         source_area.setAlignment(source_actions, Qt.AlignmentFlag.AlignTop)
-        source_panel.addLayout(source_area)
+        source_panel.addLayout(source_area, 1)
 
         processing_panel = QWidget(form_card)
         processing_layout = QGridLayout(processing_panel)
@@ -667,28 +652,15 @@ class ProjectPage(QWidget):
         form.addLayout(project_row, 0, 1)
         form.addWidget(BodyLabel(t("project.field.characters"), form_card), 1, 0)
         form.addWidget(self.targets_edit, 1, 1)
-        mode_row = QHBoxLayout()
-        mode_row.setSpacing(12)
-        mode_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        mode_row.addWidget(self.mode_combo)
-        mode_row.addWidget(self.skip_provider_rejected_chunk_check)
-        mode_row.addStretch(1)
-        form.addWidget(
-            BodyLabel(t("project.field.mode"), form_card),
-            2,
-            0,
-            alignment=Qt.AlignmentFlag.AlignVCenter,
-        )
-        form.addLayout(mode_row, 2, 1)
-        form.addWidget(BodyLabel(t("project.field.sources"), form_card), 3, 0, alignment=Qt.AlignmentFlag.AlignTop)
-        form.addLayout(source_panel, 3, 1)
-        form.addLayout(processing_block, 4, 0, 1, 2)
+        form.addWidget(BodyLabel(t("project.field.sources"), form_card), 2, 0, alignment=Qt.AlignmentFlag.AlignTop)
+        form.addLayout(source_panel, 2, 1)
+        form.addLayout(processing_block, 3, 0, 1, 2)
         form_spacer = QWidget(form_card)
         form_spacer.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
-        form.addWidget(form_spacer, 5, 0, 1, 2)
+        form.addWidget(form_spacer, 4, 0, 1, 2)
+        form.setRowStretch(2, 1)
         form.setRowStretch(3, 0)
         form.setRowStretch(4, 0)
-        form.setRowStretch(5, 1)
         form.setColumnStretch(1, 1)
         content.addWidget(form_card, 3)
 
@@ -714,7 +686,42 @@ class ProjectPage(QWidget):
         insight_layout.addWidget(self.progress)
 
         self.stream_panel = InsightStreamPanel(insight_card)
+        self.stream_panel.setMinimumHeight(180)
+        self.stream_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         insight_layout.addWidget(self.stream_panel, 1)
+
+        insight_controls = QHBoxLayout()
+        insight_controls.setContentsMargins(0, 0, 0, 0)
+        insight_controls.setSpacing(8)
+        insight_controls.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        insight_controls.addWidget(
+            BodyLabel(t("project.field.mode"), insight_card),
+            0,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
+        self.mode_combo = ComboBox(insight_card)
+        self.mode_combo.addItems([t("project.mode.preview"), t("project.mode.full")])
+        self.mode_combo.setFixedWidth(150)
+        insight_controls.addWidget(self.mode_combo, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.skip_provider_rejected_chunk_check = CheckBox(
+            t("project.option.skipProviderRejectedChunk"),
+            insight_card,
+        )
+        self.skip_provider_rejected_chunk_check.setToolTip(
+            t("project.option.skipProviderRejectedChunk.tooltip")
+        )
+        self.skip_provider_rejected_chunk_check.setChecked(True)
+        self.skip_provider_rejected_chunk_check.setSizePolicy(
+            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Fixed,
+        )
+        insight_controls.addWidget(
+            self.skip_provider_rejected_chunk_check,
+            0,
+            Qt.AlignmentFlag.AlignVCenter,
+        )
+        insight_controls.addStretch(1)
+        insight_layout.addLayout(insight_controls)
         content.addWidget(insight_card, 2)
         root.addLayout(content, 1)
 
@@ -811,6 +818,7 @@ class ProjectPage(QWidget):
     def set_extraction_running(self, running: bool) -> None:
         self._extraction_running = running
         self.preview_button.setEnabled(self._has_project() and not running)
+        self.mode_combo.setEnabled(self._has_project() and not running)
         self.skip_provider_rejected_chunk_check.setEnabled(self._has_project() and not running)
 
     def apply_theme_colors(self) -> None:
@@ -1268,8 +1276,9 @@ class ProjectPage(QWidget):
         self.project_combo.setEnabled(has_project)
         self.delete_project_button.setEnabled(has_project)
         self.targets_edit.setEnabled(has_project)
-        self.mode_combo.setEnabled(has_project)
-        self.skip_provider_rejected_chunk_check.setEnabled(has_project)
+        extraction_controls_enabled = has_project and not self._extraction_running
+        self.mode_combo.setEnabled(extraction_controls_enabled)
+        self.skip_provider_rejected_chunk_check.setEnabled(extraction_controls_enabled)
         self.add_file_button.setEnabled(has_project)
         self.add_folder_button.setEnabled(has_project)
         self.remove_source_button.setEnabled(has_project)
