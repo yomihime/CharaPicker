@@ -37,7 +37,7 @@
   "project.character.placeholder": "例：星野アイ, アクア",
   "project.mode.preview": "プレビュー実行",
   "project.mode.full": "完全抽出",
-  "project.option.skipProviderRejectedChunk": "モデル提供元のデータ検査を通過しなかった単一 chunk のスキップを許可",
+  "project.option.skipProviderRejectedChunk": "提供元が拒否した chunk をスキップ",
   "project.option.skipProviderRejectedChunk.tooltip": "オンの場合は warning を記録して後続 chunk を続行します。オフの場合、この条件で現在のプレビューまたは正式抽出を停止します。",
   "project.source.addFile": "素材ファイルを追加",
   "project.source.addFolder": "素材フォルダーを追加",

@@ -37,7 +37,7 @@
   "project.character.placeholder": "Example: Ai Hoshino, Aqua",
   "project.mode.preview": "Preview Run",
   "project.mode.full": "Full Extraction",
-  "project.option.skipProviderRejectedChunk": "Allow skipping a single chunk that fails model-provider data inspection",
+  "project.option.skipProviderRejectedChunk": "Skip provider-rejected chunks",
   "project.option.skipProviderRejectedChunk.tooltip": "When enabled, CharaPicker records a warning and continues with later chunks. When disabled, this condition stops the current preview or full extraction.",
   "project.source.addFile": "Add Material File",
   "project.source.addFolder": "Add Material Folder",

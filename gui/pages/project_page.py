@@ -494,6 +494,8 @@ class ProjectPage(QWidget):
 
         self.mode_combo = ComboBox(form_card)
         self.mode_combo.addItems([t("project.mode.preview"), t("project.mode.full")])
+        self.mode_combo.setMinimumWidth(180)
+        self.mode_combo.setMaximumWidth(240)
         self.skip_provider_rejected_chunk_check = CheckBox(
             t("project.option.skipProviderRejectedChunk"),
             form_card,
@@ -665,12 +667,19 @@ class ProjectPage(QWidget):
         form.addLayout(project_row, 0, 1)
         form.addWidget(BodyLabel(t("project.field.characters"), form_card), 1, 0)
         form.addWidget(self.targets_edit, 1, 1)
-        mode_block = QVBoxLayout()
-        mode_block.setSpacing(6)
-        mode_block.addWidget(self.mode_combo)
-        mode_block.addWidget(self.skip_provider_rejected_chunk_check)
-        form.addWidget(BodyLabel(t("project.field.mode"), form_card), 2, 0)
-        form.addLayout(mode_block, 2, 1)
+        mode_row = QHBoxLayout()
+        mode_row.setSpacing(12)
+        mode_row.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        mode_row.addWidget(self.mode_combo)
+        mode_row.addWidget(self.skip_provider_rejected_chunk_check)
+        mode_row.addStretch(1)
+        form.addWidget(
+            BodyLabel(t("project.field.mode"), form_card),
+            2,
+            0,
+            alignment=Qt.AlignmentFlag.AlignVCenter,
+        )
+        form.addLayout(mode_row, 2, 1)
         form.addWidget(BodyLabel(t("project.field.sources"), form_card), 3, 0, alignment=Qt.AlignmentFlag.AlignTop)
         form.addLayout(source_panel, 3, 1)
         form.addLayout(processing_block, 4, 0, 1, 2)

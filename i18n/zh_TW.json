@@ -37,7 +37,7 @@
   "project.character.placeholder": "例如：星野愛, 阿庫亞",
   "project.mode.preview": "預覽試跑",
   "project.mode.full": "完整提取",
-  "project.option.skipProviderRejectedChunk": "允許跳過未通過模型服務資料檢查的單個 chunk",
+  "project.option.skipProviderRejectedChunk": "跳過服務商拒絕的 chunk",
   "project.option.skipProviderRejectedChunk.tooltip": "勾選後會記錄 warning 並繼續後續 chunk；取消勾選後遇到此類 chunk 會停止目前預覽或正式提取。",
   "project.source.addFile": "新增素材檔案",
   "project.source.addFolder": "新增素材資料夾",

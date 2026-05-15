@@ -37,7 +37,7 @@
   "project.character.placeholder": "例如：星野爱, 阿库亚",
   "project.mode.preview": "预览试跑",
   "project.mode.full": "完整提取",
-  "project.option.skipProviderRejectedChunk": "允许跳过未通过模型服务数据检查的单个 chunk",
+  "project.option.skipProviderRejectedChunk": "跳过服务商拒绝的 chunk",
   "project.option.skipProviderRejectedChunk.tooltip": "勾选后会记录 warning 并继续后续 chunk；取消勾选后遇到此类 chunk 会停止当前预览或正式提取。",
   "project.source.addFile": "添加素材文件",
   "project.source.addFolder": "添加素材文件夹",
