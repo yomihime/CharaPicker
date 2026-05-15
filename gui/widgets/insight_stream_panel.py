@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, CaptionLabel, CardWidget, ScrollArea, StrongBodyLabel, isDarkTheme
 
@@ -23,6 +23,7 @@ STATUS_TEXT = {
     InsightStatus.DONE.value: "insight.status.done",
     InsightStatus.WARNING.value: "insight.status.warning",
 }
+AUTO_SCROLL_BOTTOM_THRESHOLD = 24
 
 class TimelineMarker(QLabel):
     def __init__(self, color: str, parent: QWidget | None = None) -> None:
@@ -122,17 +123,24 @@ class InsightStreamPanel(ScrollArea):
 
         self.setWidget(self.container)
         self._stream_cards: dict[str, InsightCard] = {}
+        self._auto_follow_scroll = True
+        scroll_bar = self.verticalScrollBar()
+        scroll_bar.valueChanged.connect(self._sync_auto_follow_from_position)
+        scroll_bar.rangeChanged.connect(self._schedule_scroll_to_bottom_if_following)
         self.apply_theme_colors()
 
     def set_empty_text_key(self, key: str) -> None:
         self.empty_label.setText(t(key))
 
     def append_event(self, event: dict) -> None:
+        should_follow = self._auto_follow_scroll or self._is_scroll_near_bottom()
         meta = event.get("meta")
         stream_id = meta.get("stream_id") if isinstance(meta, dict) else None
         is_update = bool(meta.get("update")) if isinstance(meta, dict) else False
         if isinstance(stream_id, str) and is_update and stream_id in self._stream_cards:
             self._stream_cards[stream_id].update_event(event)
+            if should_follow:
+                self._schedule_scroll_to_bottom()
             return
         if self.empty_label.isVisible():
             self.empty_label.hide()
@@ -140,8 +148,11 @@ class InsightStreamPanel(ScrollArea):
         self.layout.addWidget(card)
         if isinstance(stream_id, str):
             self._stream_cards[stream_id] = card
+        if should_follow:
+            self._schedule_scroll_to_bottom()
 
     def clear_events(self) -> None:
+        self._auto_follow_scroll = True
         self._stream_cards.clear()
         while self.layout.count():
             item = self.layout.takeAt(0)
@@ -155,6 +166,33 @@ class InsightStreamPanel(ScrollArea):
         self.layout.addWidget(self.empty_label, 1)
         self.layout.setAlignment(self.empty_label, Qt.AlignmentFlag.AlignCenter)
         self.apply_theme_colors()
+
+    def _is_scroll_near_bottom(self) -> bool:
+        scroll_bar = self.verticalScrollBar()
+        return scroll_bar.maximum() - scroll_bar.value() <= AUTO_SCROLL_BOTTOM_THRESHOLD
+
+    def _sync_auto_follow_from_position(self, _value: int | None = None) -> None:
+        self._auto_follow_scroll = self._is_scroll_near_bottom()
+
+    def _schedule_scroll_to_bottom(self) -> None:
+        QTimer.singleShot(0, self._scroll_to_bottom_if_following)
+        QTimer.singleShot(50, self._scroll_to_bottom_if_following)
+
+    def _schedule_scroll_to_bottom_if_following(
+        self,
+        _minimum: int | None = None,
+        _maximum: int | None = None,
+    ) -> None:
+        if self._auto_follow_scroll:
+            self._schedule_scroll_to_bottom()
+
+    def _scroll_to_bottom_if_following(self) -> None:
+        if self._auto_follow_scroll:
+            self._scroll_to_bottom()
+
+    def _scroll_to_bottom(self) -> None:
+        scroll_bar = self.verticalScrollBar()
+        scroll_bar.setValue(scroll_bar.maximum())
 
     def apply_theme_colors(self) -> None:
         if isDarkTheme():
