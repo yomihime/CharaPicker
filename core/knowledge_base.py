@@ -285,8 +285,11 @@ def load_current_season_episode_summaries(
         path = episode_summary_path(project_id, season_id, episode_id)
         if not path.exists():
             continue
-        payload = read_json(path)
-        if isinstance(payload, dict):
+        try:
+            payload = read_json_object(path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if is_full_artifact_payload(payload):
             summaries.append(payload)
     return summaries
 
@@ -310,8 +313,11 @@ def load_previous_season_summary(
     path = season_summary_path(project_id, previous_season_id)
     if not path.exists():
         return None
-    payload = read_json(path)
-    return payload if isinstance(payload, dict) else None
+    try:
+        payload = read_json_object(path)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    return payload if is_full_artifact_payload(payload) else None
 
 
 def load_character_stage_states(project_id: str, season_id: str) -> dict[str, Any]:

@@ -1681,20 +1681,7 @@ class Extractor(QObject):
         )
         emit_progress(15)
 
-        preset = cloud_preset
-        if preset is None:
-            presets = load_cloud_model_presets()
-            preferred_name = last_cloud_preset_name()
-            preset = next(
-                (
-                    item
-                    for item in presets
-                    if item.name == preferred_name and item.base_url.strip() and item.model_name.strip()
-                ),
-                None,
-            )
-            if preset is None:
-                preset = next((item for item in presets if item.base_url.strip() and item.model_name.strip()), None)
+        preset = self._select_cloud_video_preset(cloud_preset)
         if preset is None:
             emit_event(
                 InsightEvent(
