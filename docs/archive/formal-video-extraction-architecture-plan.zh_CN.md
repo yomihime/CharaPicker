@@ -1,5 +1,7 @@
 # 正式视频提取架构指南与任务计划（zh_CN）
 
+归档状态：本文档记录的 S1-S7 正式视频提取 MVP 已完成并归档。后续开发默认以当前代码、根目录 `README.md`、相关 `ARCHITECTURE.md` 和仍在 `docs/` 主目录中的稳定说明为准；如需引用本文档，必须先核对当前实现。
+
 本文面向后续 AI 开发者，用于指导 CharaPicker 正式视频提取流程的初步实现。它是实施计划与架构约束，不是当前功能已完成的证明。
 
 最近核对日期：2026-05-14。
@@ -41,10 +43,10 @@
 
 主要依据：
 
-- 主工作流说明：[提取工作流技术说明](extraction-workflow.zh_CN.md)
-- 长期开发路线：[提取与角色成长编译开发路线](extraction-development-roadmap.zh_CN.md)
-- 预览支线计划：[真实预览结果接入计划](preview-real-result-ingestion-plan.zh_CN.md)
-- 文档维护规则：[文档维护规范](documentation-maintenance.zh_CN.md)
+- 主工作流说明：[提取工作流技术说明](../extraction-workflow.zh_CN.md)
+- 长期开发路线：[提取与角色成长编译开发路线](../extraction-development-roadmap.zh_CN.md)
+- 预览支线计划：[真实预览结果接入计划](../preview-real-result-ingestion-plan.zh_CN.md)
+- 文档维护规则：[文档维护规范](../documentation-maintenance.zh_CN.md)
 
 代码核对入口：
 
@@ -324,7 +326,7 @@ knowledge_base/
 
 ## 9. 预览提取支线
 
-预览提取是正式提取计划的并行支线。详细计划见：[真实预览结果接入计划](preview-real-result-ingestion-plan.zh_CN.md)。
+预览提取是正式提取计划的并行支线。详细计划见：[真实预览结果接入计划](../preview-real-result-ingestion-plan.zh_CN.md)。
 
 本计划只规定两条强约束：
 
@@ -645,7 +647,7 @@ knowledge_base/
 
 ## 18. 支线步进 P：预览提取同步任务
 
-详细计划见：[真实预览结果接入计划](preview-real-result-ingestion-plan.zh_CN.md)。
+详细计划见：[真实预览结果接入计划](../preview-real-result-ingestion-plan.zh_CN.md)。
 
 这些任务可以与主线并行规划，但实现时仍要遵守步进门禁。
 

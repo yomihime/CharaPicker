@@ -7,3 +7,4 @@
 ## 已归档文档
 
 - [代码结构整理执行计划](refactor-plan.md)：所有计划里程碑已于 2026-05-13 完成，保留为历史阶段记录。
+- [正式视频提取架构指南与任务计划](formal-video-extraction-architecture-plan.zh_CN.md)：S1-S7 正式视频提取 MVP 已于 2026-05-15 完成，保留为架构演进和验收记录。
