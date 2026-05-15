@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QObject, QSignalBlocker, Qt, QThread, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QSignalBlocker, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -763,6 +763,8 @@ class ModelPage(QWidget):
         self._cloud_presets: list[CloudModelPreset] = []
         self._loading_cloud_preset = False
         self._restoring_model_selection = False
+        self._syncing_cloud_video_fps_slider_from_text = False
+        self._syncing_cloud_max_output_tokens_slider_from_text = False
         self._llamacpp_ready_cache = initial_llamacpp_ready
         self._cloud_easter_tap_count = 0
 
@@ -986,11 +988,15 @@ class ModelPage(QWidget):
         self.cloud_test_action_label.clicked.connect(self._record_cloud_easter_tap)
         self.local_model_combo.currentIndexChanged.connect(self._remember_selected_local_model)
         self.cloud_video_fps_slider.valueChanged.connect(self._sync_cloud_video_fps_from_slider)
+        self.cloud_video_fps.textChanged.connect(self._sync_cloud_video_fps_from_text)
         self.cloud_video_fps.editingFinished.connect(self._commit_cloud_video_fps_text)
         self.cloud_max_output_tokens_slider.valueChanged.connect(
             self._sync_cloud_max_output_tokens_from_slider
         )
+        self.cloud_max_output_tokens.textChanged.connect(self._sync_cloud_max_output_tokens_from_text)
         self.cloud_max_output_tokens.editingFinished.connect(self._commit_cloud_max_output_tokens_text)
+        self.cloud_video_fps.installEventFilter(self)
+        self.cloud_max_output_tokens.installEventFilter(self)
         self.cloud_provider_combo.currentIndexChanged.connect(self._sync_cloud_video_fps_availability)
         self.cloud_preset_combo.currentIndexChanged.connect(self._load_selected_cloud_preset)
         self.save_cloud_preset_button.clicked.connect(self._save_current_cloud_preset)
@@ -1328,10 +1334,25 @@ class ModelPage(QWidget):
         return self.current_cloud_video_preset()
 
     def _sync_cloud_video_fps_from_slider(self, value: int) -> None:
+        if self._syncing_cloud_video_fps_slider_from_text:
+            return
         self._set_cloud_video_fps(value / 10.0)
 
     def _sync_cloud_max_output_tokens_from_slider(self, value: int) -> None:
+        if self._syncing_cloud_max_output_tokens_slider_from_text:
+            return
         self._set_cloud_max_output_tokens(value * CLOUD_MAX_OUTPUT_TOKENS_STEP)
+
+    def _sync_cloud_video_fps_from_text(self, text: str) -> None:
+        try:
+            value = float(text.strip())
+        except ValueError:
+            return
+        if not 0.1 <= value <= 10.0:
+            return
+        normalized = round(value, 1)
+        self._last_valid_cloud_video_fps = normalized
+        self._set_cloud_video_fps_slider_value(int(round(normalized * 10)))
 
     def _commit_cloud_video_fps_text(self) -> None:
         try:
@@ -1348,10 +1369,31 @@ class ModelPage(QWidget):
         normalized = round(min(max(value, 0.1), 10.0), 1)
         self._last_valid_cloud_video_fps = normalized
         slider_value = int(round(normalized * 10))
-        with QSignalBlocker(self.cloud_video_fps_slider):
-            self.cloud_video_fps_slider.setValue(slider_value)
+        self._set_cloud_video_fps_slider_value(slider_value)
         with QSignalBlocker(self.cloud_video_fps):
             self.cloud_video_fps.setText(f"{normalized:.1f}")
+
+    def _set_cloud_video_fps_slider_value(self, slider_value: int) -> None:
+        self._syncing_cloud_video_fps_slider_from_text = True
+        try:
+            self.cloud_video_fps_slider.setValue(slider_value)
+        finally:
+            self._syncing_cloud_video_fps_slider_from_text = False
+        self.cloud_video_fps_slider._adjustHandlePos()
+        self.cloud_video_fps_slider.update()
+
+    def _sync_cloud_max_output_tokens_from_text(self, text: str) -> None:
+        try:
+            value = int(text.strip())
+        except ValueError:
+            return
+        if value <= 0:
+            return
+        normalized = coerce_cloud_max_output_tokens(value)
+        self._last_valid_cloud_max_output_tokens = normalized
+        self._set_cloud_max_output_tokens_slider_value(
+            normalized // CLOUD_MAX_OUTPUT_TOKENS_STEP
+        )
 
     def _commit_cloud_max_output_tokens_text(self) -> None:
         try:
@@ -1365,10 +1407,46 @@ class ModelPage(QWidget):
         normalized = coerce_cloud_max_output_tokens(value)
         self._last_valid_cloud_max_output_tokens = normalized
         slider_value = normalized // CLOUD_MAX_OUTPUT_TOKENS_STEP
-        with QSignalBlocker(self.cloud_max_output_tokens_slider):
-            self.cloud_max_output_tokens_slider.setValue(slider_value)
+        self._set_cloud_max_output_tokens_slider_value(slider_value)
         with QSignalBlocker(self.cloud_max_output_tokens):
             self.cloud_max_output_tokens.setText(str(normalized))
+
+    def _set_cloud_max_output_tokens_slider_value(self, slider_value: int) -> None:
+        self._syncing_cloud_max_output_tokens_slider_from_text = True
+        try:
+            self.cloud_max_output_tokens_slider.setValue(slider_value)
+        finally:
+            self._syncing_cloud_max_output_tokens_slider_from_text = False
+        self.cloud_max_output_tokens_slider._adjustHandlePos()
+        self.cloud_max_output_tokens_slider.update()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched is self.cloud_video_fps:
+            self._schedule_cloud_video_fps_text_sync(event)
+        elif watched is self.cloud_max_output_tokens:
+            self._schedule_cloud_max_output_tokens_text_sync(event)
+        return super().eventFilter(watched, event)
+
+    def _schedule_cloud_video_fps_text_sync(self, event: QEvent) -> None:
+        if event.type() in {
+            QEvent.Type.KeyRelease,
+            QEvent.Type.InputMethod,
+            QEvent.Type.MouseButtonRelease,
+        }:
+            QTimer.singleShot(0, lambda: self._sync_cloud_video_fps_from_text(self.cloud_video_fps.text()))
+
+    def _schedule_cloud_max_output_tokens_text_sync(self, event: QEvent) -> None:
+        if event.type() in {
+            QEvent.Type.KeyRelease,
+            QEvent.Type.InputMethod,
+            QEvent.Type.MouseButtonRelease,
+        }:
+            QTimer.singleShot(
+                0,
+                lambda: self._sync_cloud_max_output_tokens_from_text(
+                    self.cloud_max_output_tokens.text()
+                ),
+            )
 
     def _sync_cloud_video_fps_availability(self) -> None:
         provider = cloud_model_provider(self._current_cloud_provider_id())
