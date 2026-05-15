@@ -17,6 +17,7 @@
 ## 关键文件
 
 - `colors.py`：集中定义当前 UI 使用的颜色标识。
+- `app_icon.png`、`app_icon.ico`：运行时窗口图标和 Windows 打包图标；`app_icon_source.png` 保留透明源图，便于后续重新生成尺寸。
 - `default_prompts.json`：模型调用中间件使用的默认提示词。它不是 UI 可见文案，只能由 `utils/ai_model_middleware.py` 加载和渲染；业务代码不得硬编码或复制这里的 prompt 正文。
 - `test_media/`：模型页测试素材目录，存放固定的图片/视频测试文件，例如 `model_test_input.jpg`、`model_test_input.mp4`。
 - `__init__.py`：标记 `res` 为 Python 包，便于代码引用资源标识。

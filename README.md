@@ -1,5 +1,9 @@
 # CharaPicker / 拾卡姬
 
+<p align="center">
+  <img src="res/app_icon.png" alt="CharaPicker logo" width="96">
+</p>
+
 [繁體中文](docs/README.zh_TW.md) | [日本語](docs/README.ja_JP.md) | [English](docs/README.en_US.md)
 
 ## 项目简介

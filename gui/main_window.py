@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from PyQt6.QtCore import QObject, QThread, QSize, pyqtSignal
+from PyQt6.QtGui import QIcon
 from qfluentwidgets import (
     FluentIcon as FIF,
     FluentWindow,
@@ -22,6 +23,7 @@ from gui.pages.output_page import OutputPage
 from gui.pages.prompt_page import PromptPage
 from gui.pages.project_page import ProjectPage
 from gui.pages.settings_page import SettingsPage
+from res import APP_ICON_PATH
 from utils.i18n import t
 from utils.logging_middleware import apply_log_level_preference
 from utils.startup_middleware import StartupWarmupSnapshot
@@ -119,6 +121,7 @@ class MainWindow(FluentWindow):
         super().__init__()
         LOGGER.info("Main window initialization started")
         self.setWindowTitle("CharaPicker")
+        self._apply_window_icon()
         self.resize(1180, 760)
         self.setMinimumSize(QSize(980, 640))
 
@@ -147,6 +150,11 @@ class MainWindow(FluentWindow):
         self._init_navigation()
         self._connect_signals()
         LOGGER.info("Main window initialization finished")
+
+    def _apply_window_icon(self) -> None:
+        icon = QIcon(str(APP_ICON_PATH))
+        if not icon.isNull():
+            self.setWindowIcon(icon)
 
     def _init_navigation(self) -> None:
         self.addSubInterface(self.project_page, FIF.HOME, t("app.nav.home"))

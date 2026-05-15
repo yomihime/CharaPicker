@@ -4,7 +4,7 @@ import logging
 import sys
 
 from PyQt6.QtCore import QtMsgType, qInstallMessageHandler
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QIcon
 from PyQt6.QtWidgets import QApplication
 
 
@@ -26,6 +26,7 @@ def main() -> int:
     app.setOrganizationName("CharaPicker")
     app.setQuitOnLastWindowClosed(False)
     _ensure_valid_application_font(app)
+    _apply_application_icon(app)
 
     from gui.splash_screen import StartupController
     from utils.theme import apply_theme_preference
@@ -46,6 +47,14 @@ def _ensure_valid_application_font(app: QApplication) -> None:
     if font.pointSize() <= 0:
         font.setPointSize(DEFAULT_FONT_POINT_SIZE)
     app.setFont(font)
+
+
+def _apply_application_icon(app: QApplication) -> None:
+    from res import APP_ICON_PATH
+
+    icon = QIcon(str(APP_ICON_PATH))
+    if not icon.isNull():
+        app.setWindowIcon(icon)
 
 
 def _install_qt_message_filter() -> None:
