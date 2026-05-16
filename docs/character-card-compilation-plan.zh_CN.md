@@ -1,10 +1,17 @@
 # 角色卡最终编译与角色卡页面计划
 
-状态：草案，等待用户检查。
+状态：开发执行计划。
 
 本文只记录本任务特有的产品决策、边界和里程碑。通用开发规则、代码优先级、文档优先级、i18n、依赖、日志、worker/thread 等要求不在本文重复，执行时以根目录 `AGENTS.md`、当前代码和相关 `ARCHITECTURE.md` 为准。
 
-本文不代表功能已经实现。后续每个里程碑实施前都必须重新核对当前代码。
+本文不代表功能已经实现。每个里程碑实施前都必须重新核对当前代码。
+
+## 0. 执行方式
+
+- 本文是开发阶段执行计划。执行者应按本文的已确认决策、模块边界、里程碑、提交分组和验收规则推进。
+- 执行开始前先核对当前分支、最新代码、`AGENTS.md`、根目录与相关子目录 `ARCHITECTURE.md`；若当前代码与本文冲突，先更新本文或向用户确认，不直接按过期计划编码。
+- 若实施中发现必须改变长期数据结构、页面职责、导出格式或版本策略，先回到本文补充决策，再进入代码改动。
+- 若用户在验收阶段提出 bug 或 UI 布局调整，回到对应开发里程碑或提交分组处理，不把它们塞进验收后收尾。
 
 ## 1. 固定决策
 
@@ -23,7 +30,7 @@
 - 导入 CharaPicker JSON 时，非预览卡始终按当前项目规则生成新的 `card_id`，并把导入来源 ID 记录到元数据或 `source_context`，避免覆盖已有卡。
 - 预览使用弹窗；HTML 可作为默认展示视图，Markdown 要保留渲染和源码查看入口，JSON 要默认展示为人类友好的结构化视图，不直接把原始花括号文本作为默认视图。
 - 首版支持硬删除正式角色卡，删除前必须二次确认；删除只移除 `knowledge_base/character_cards/{card_id}/`，不自动清理已经导出的 `output/character_cards/` 文件。
-- 当前“输出”导航改名为“角色卡”，不新增单独输出页。
+- 现有“输出”导航改名为“角色卡”，不新增单独输出页。
 - 角色卡落盘结构采用 `character_cards/{card_id}/card.json`。
 - 主页素材预览提取只生成预览知识库和洞察流，不自动生成角色卡；角色卡页面发起“角色卡预览”时，才生成项目级唯一固定 ID 的预览草稿角色卡。
 - 角色卡预览草稿仅用于验证，不加入正式角色卡扫描；角色卡预览完成后弹窗默认展示 CharaPicker HTML 或等价渲染视图，并保留 Markdown/JSON 切换。
@@ -33,12 +40,13 @@
 - 裁剪导入功能开发阶段先保存原图副本；整个流程开发、bug 修复和用户验收完成后，收尾处理需要删除项目内原图副本，只保留裁剪后的图片。
 - 首个外部适配目标是 AstrBot 手动复制工作流，而不是 AstrBot 可导入 JSON。
 - AstrBot 首版只提供可供用户一条条复制到 AstrBot 的内容：名称、系统提示词、可选自定义报错回复信息、预设对话；工具、MCP 工具和 Skills 暂不纳入 CharaPicker 输出范围。
-- 如果 PR #4532 或等价改动已合并，且 AstrBot 官方本体提供稳定人格导入/导出格式，本计划应改为适配官方导入/导出格式，而不是继续只做手动复制辅助。
+- AstrBot “自定义报错回复信息”在首版中是可选复制字段；缺少 demo JSON 或官方字段名时，不阻塞名称、系统提示词和预设对话的基础复制能力。
+- 若 PR #4532 或等价改动已合并，且 AstrBot 官方本体提供稳定人格导入/导出格式，本计划应改为适配官方导入/导出格式，而不是继续只做手动复制辅助。
 
-## 2. 待确认取舍
+## 2. 实施前复核项
 
-- AstrBot demo 到位后，确认“自定义报错回复信息（可选）”在界面中的最终名称和填写限制。
-- 实施 M47 前重新检查 PR #4532 或等价官方改动是否已合并；如果已合并，先更新本计划中的 AstrBot 里程碑和提交分组。
+- 实施 M47 时重新检查 PR #4532 或等价官方改动是否已合并；若已合并，先更新本计划中的 AstrBot 里程碑和提交分组。
+- 实施 AstrBot 手动复制字段时检查 demo 或官方字段说明；若“自定义报错回复信息（可选）”仍无明确字段名，按用户可编辑的可选复制区处理。
 
 ## 3. AstrBot 官方资料记录
 
@@ -47,15 +55,15 @@
 - 官方配置文档：`https://docs.astrbot.app/dev/astrbot-config.html`
 - 官方开发文档：`https://docs.astrbot.app/dev/star/guides/ai.html`
 - 参考 PR：`https://github.com/AstrBotDevs/AstrBot/pull/4532`
-- 当前 AstrBot v4 文档说明 `persona` 配置项已废弃，应使用 WebUI 配置人格。
+- 截至 2026-05-16，AstrBot v4 文档说明 `persona` 配置项已废弃，应使用 WebUI 配置人格。
 - 旧版人格字段包含 `id`、`name`、`description`、`system_prompt`。
 - 开发文档中的 Persona 模型包含 `persona_id`、`system_prompt`、`begin_dialogs`、`tools` 等字段。
-- PR #4532 当前仍处于 open / 未合并状态，导入/导出功能和字段名在合并前可能变化。
+- 截至 2026-05-16，PR #4532 仍处于 open / 未合并状态，导入/导出功能和字段名在合并前可能变化。
 - PR #4532 的候选导出结构为 `{"version":"1.0","persona":[{"name": "...","prompt": "...","begin_dialogs":[{"user":"...","assistant":"..."}]}]}`。
 - PR #4532 的导入逻辑会把 `persona[0].name` 转为 `persona_id`，`persona[0].prompt` 转为 `system_prompt`，并把每组 `{user, assistant}` 展平成 AstrBot 内部的 `begin_dialogs` 列表。
-- 用户提供的 demo 截图还展示了“自定义报错回复信息（可选）”，但该字段需要等待 demo JSON 或后续 PR 字段确认后再写入正式映射。
-- 工具 / MCP 工具选择和 Skills 选择当前与 CharaPicker 角色卡输出无关，首版不生成这些字段。
-- 本计划当前不以 PR #4532 的导入 JSON 为实现标准；首版只做 AstrBot 手动复制辅助。PR #4532 和用户 demo 只作为字段理解参考。
+- demo 截图还展示了“自定义报错回复信息（可选）”，该字段需由 demo JSON 或官方字段说明确认后再写入正式映射。
+- 工具 / MCP 工具选择和 Skills 选择与 CharaPicker 角色卡输出无关，首版不生成这些字段。
+- 首版不以 PR #4532 的导入 JSON 为实现标准；首版只做 AstrBot 手动复制辅助。PR #4532 和 demo 截图只作为字段理解参考。
 - 若 PR #4532 或等价官方实现合并，应重新核对官方最终 schema，并优先实现 CharaPicker JSON 到官方人格导入 JSON 的导出路径。
 
 ## 4. 目标边界
@@ -109,7 +117,7 @@ projects/{project_id}/output/
 
 正式角色卡扫描只读取 `knowledge_base/character_cards/`。预览草稿角色卡放在隔离目录，或使用等价隔离机制，不能混入正式角色卡海报墙。预览草稿使用项目级唯一固定 ID，例如 `preview_card`，每次预览覆盖它。
 
-## 5. CharaPicker 卡格式草案
+## 5. CharaPicker 卡格式
 
 CharaPicker JSON 是本程序的主格式，不直接等同于 SillyTavern / Character Card V2、Character.AI、Agnai 或 AstrBot 的格式。它的目标是“信息尽量完整、证据可追溯、导出可降级”：内部保留丰富结构，导出到外部软件时再按目标软件能力裁剪和格式化。
 
@@ -169,9 +177,9 @@ CharaPicker JSON 是本程序的主格式，不直接等同于 SillyTavern / Cha
 顶层字段约定：
 
 - `format`：固定为 `charapicker.card`，用于和外部导入格式区分。
-- `schema_version`：整数版本；后续迁移按版本处理，不用外部格式版本替代。
+- `schema_version`：整数版本；迁移按版本处理，不用外部格式版本替代。
 - `card_id`：项目内正式角色卡唯一 ID。非预览角色卡采用“角色名 slug + 随机 UUID 短段”形式生成；预览草稿固定为 `preview_card`，并放入隔离目录。
-- `card_kind`：`official` / `preview` / `imported` / `template`。正式扫描只接受 `official`。
+- `card_kind`：`official` / `preview` / `template`。所有用户可管理的正式角色卡都使用 `official`，包括新建卡和导入卡；导入来源通过 `compile_source` 与 `source_context` 表达，避免导入卡被正式扫描漏掉。
 - `project_id`：所属项目 ID。角色卡不做全局库。
 - `created_at`、`updated_at`、`compiled_at`：ISO 8601 字符串。
 - `revision`：本卡保存修订号，元数据编辑也递增。
@@ -184,12 +192,12 @@ CharaPicker JSON 是本程序的主格式，不直接等同于 SillyTavern / Cha
 - 新建和导入的非预览角色卡都必须生成项目内唯一 `card_id`，推荐格式为 `{character_name_slug}-{uuid8}`。
 - `character_name_slug` 只用于文件夹可读性，不作为身份唯一来源。
 - 修改角色名或显示名不重命名既有 `card_id` 或目录。
-- 导入非预览卡时始终生成新 `card_id`，并在 `source_context.imported_card_id` 或等价元数据中记录原 ID。
+- 导入非预览卡时始终生成新 `card_id`，并在 `source_context.imported_card_id` 中记录原 ID。
 - `preview_card` 是保留 ID，不能被正式角色卡或导入卡使用。
 
 状态不变量：
 
-- 正式角色卡扫描只接受 `card_kind = "official"`，且不能读取 `preview_character_cards/`。
+- 正式角色卡扫描只接受 `card_kind = "official"`，且不能读取 `preview_character_cards/`。导入的可用角色卡也必须落为 `official`。
 - `card_kind = "preview"` 必须同时满足 `compile_source = "preview"` 和 `compile_status = "preview"`，并固定使用 `card_id = "preview_card"`。
 - `compile_status = "compiled"` 只用于正式知识库编译成功的卡片，通常对应 `compile_source = "knowledge_base"`。
 - `compile_status = "draft"` 可对应 `compile_source = "manual"`、`imported_charapicker` 或 `imported_external`。
@@ -251,6 +259,9 @@ CharaPicker JSON 是本程序的主格式，不直接等同于 SillyTavern / Cha
 - `prompt_profile_id`
 - `model_profile_id`
 - `compiled_from_preview`：正式卡必须为 `false`；预览草稿为 `true`。
+- `imported_from_format`：导入卡来源格式，例如 `charapicker.card`；非导入卡为空。
+- `imported_card_id`：导入卡原始 ID；新落盘卡必须仍使用当前项目新生成的 `card_id`。
+- `imported_at`：导入时间；非导入卡为空。
 
 路径记录规则：
 
@@ -314,7 +325,7 @@ CharaPicker JSON 是本程序的主格式，不直接等同于 SillyTavern / Cha
 - `preset_dialogues`：更适合外部软件导入/复制的问答对，可由 `example_dialogues` 精简生成。
 - `style_examples`：只展示角色说话方式、不一定是完整对话的片段。
 
-对话 turn 建议结构：
+对话 turn 结构：
 
 ```json
 {
@@ -339,7 +350,7 @@ CharaPicker JSON 是本程序的主格式，不直接等同于 SillyTavern / Cha
 - `recursive_scanning`
 - `entries`
 
-entry 建议字段：
+entry 字段：
 
 - `entry_id`
 - `keys`
@@ -400,7 +411,7 @@ entry 建议字段：
 - `coverage`：素材覆盖情况。
 - `confidence_summary`：整体置信度摘要。
 
-证据引用建议结构：
+证据引用结构：
 
 ```json
 {
@@ -454,7 +465,7 @@ JSON 预览必须按这些结构分组展示，不能直接丢一整坨花括号
 - `output_path`
 - `field_mapping`
 
-首版正式支持 `charapicker_json`、`charapicker_markdown`、`charapicker_html`、`character_card_v2_json`、`astrbot_copy`。其他候选只作为字段设计兼容目标，不在本次实现里声明可用。
+首版正式支持 `charapicker_json`、`charapicker_markdown`、`charapicker_html`、`character_card_v2_json`、`astrbot_copy`。其他候选只作为字段设计兼容目标，不在首版实现里声明可用。
 
 ### 5.15 外部格式映射原则
 
@@ -470,33 +481,33 @@ JSON 预览必须按这些结构分组展示，不能直接丢一整坨花括号
 
 ## 6. 代码结构设计
 
-本节提前约定后续实现的模块边界。目标是让角色卡功能成为清晰的项目内业务模块，而不是把编译、导入、导出、预览和文件读写堆进页面层或 `main_window.py`。
+本节约定实现阶段的模块边界。目标是让角色卡功能成为清晰的项目内业务模块，而不是把编译、导入、导出、预览和文件读写堆进页面层或 `main_window.py`。
 
-### 6.1 当前代码结论
+### 6.1 现状结论
 
-- `gui/pages/output_page.py` 当前只是 Markdown 预览页，后续应被“角色卡页面”接收职责。
-- `gui/main_window.py` 当前在预览成功后读取 `ProjectConfig.target_characters` 并调用 `core.compiler` / `core.generator` 生成一次简化输出；该链路需要移除或改为只提示预览知识库已生成。
-- `core/compiler.py` 当前负责从知识库聚合简化 `CharacterState`，可作为新角色卡编译的底层过渡能力，但不应继续承担导出格式、UI 预览或文件落盘职责。
-- `core/generator.py` 当前只有 `render_profile_markdown()`，后续不再作为所有角色卡渲染逻辑的堆放点；新 Markdown/HTML/AstrBot/Character Card V2 渲染应有独立模块。
+- `gui/pages/output_page.py` 现有职责只是 Markdown 预览，后续由“角色卡页面”接收导航与展示职责。
+- `gui/main_window.py` 现有预览成功链路会读取 `ProjectConfig.target_characters` 并调用 `core.compiler` / `core.generator` 生成一次简化输出；该链路需要移除或改为只提示预览知识库已生成。
+- `core/compiler.py` 现有职责是从知识库聚合简化 `CharacterState`，可作为新角色卡编译的底层过渡能力，但不应继续承担导出格式、UI 预览或文件落盘职责。
+- `core/generator.py` 现有职责只有 `render_profile_markdown()`，不再作为所有角色卡渲染逻辑的堆放点；新 Markdown/HTML/AstrBot/Character Card V2 渲染应有独立模块。
 - `core/knowledge_base.py` 已经是知识库路径和 JSON 读写集中点，适合补充窄路径 helper；角色卡业务规则不应塞入其中。
-- `gui/pages/project_page.py` 当前拥有项目选择与配置收集能力，但缺少专门给其他页面订阅的项目切换信号；角色卡页面需要稳定拿到当前 `project_id`。
+- `gui/pages/project_page.py` 现有职责包含项目选择与配置收集，但缺少专门给其他页面订阅的项目切换信号；角色卡页面需要稳定拿到当前 `project_id`。
 
 ### 6.2 核心模块边界
 
-建议新增或改造下列核心模块。文件名可在实施时按现有代码风格微调，但职责边界不应改变。
+规划新增或改造下列核心模块。文件名可在实施时按现有代码风格微调，但职责边界不应改变。
 
 `core/models.py`
 
 - 放置角色卡 Pydantic 模型和枚举；若实现时模型过多导致 `models.py` 过度膨胀，可拆出 `core/character_card_models.py`，再由 `core.models` 做兼容导出或集中引用。
 - 只定义数据结构、默认值和轻量校验，不做文件读写、不做 UI 展示、不做导出格式拼接。
-- 首批建议新增：`CharacterCard`、`CharacterCardSummary`、`CharacterCardIdentity`、`CharacterCardAssets`、`CharacterCardUserMetadata`、`CharacterCardSourceContext`、`CharacterCardProfile`、`CharacterCardPromptSurfaces`、`CharacterCardDialogue`、`CharacterCardBook`、`CharacterCardEvidence`、`CharacterCardQuality`、`CharacterCardExportProfiles`。
-- 首批建议新增枚举：`CharacterCardKind`、`CharacterCardStatus`、`CharacterCardCompileSource`、`DialogueRole`、`CharacterCardExportTarget`、`CharacterCardExportStatus`。
+- 首批规划新增：`CharacterCard`、`CharacterCardSummary`、`CharacterCardIdentity`、`CharacterCardAssets`、`CharacterCardUserMetadata`、`CharacterCardSourceContext`、`CharacterCardProfile`、`CharacterCardPromptSurfaces`、`CharacterCardDialogue`、`CharacterCardBook`、`CharacterCardEvidence`、`CharacterCardQuality`、`CharacterCardExportProfiles`。
+- 首批规划新增枚举：`CharacterCardKind`、`CharacterCardStatus`、`CharacterCardCompileSource`、`DialogueRole`、`CharacterCardExportTarget`、`CharacterCardExportStatus`。
 
 `core/knowledge_base.py`
 
 - 只补充角色卡路径 helper，不放业务逻辑。
-- 建议 helper：`character_cards_root_path()`、`character_card_dir_path()`、`character_card_json_path()`、`preview_character_cards_root_path()`、`preview_character_card_dir_path()`、`preview_character_card_json_path()`。
-- 路径 helper 必须由后续 store/导出器复用，页面层不直接拼接 `knowledge_base/character_cards/...`。
+- 规划 helper：`character_cards_root_path()`、`character_card_dir_path()`、`character_card_json_path()`、`preview_character_cards_root_path()`、`preview_character_card_dir_path()`、`preview_character_card_json_path()`。
+- 路径 helper 必须由 store 和导出器复用，页面层不直接拼接 `knowledge_base/character_cards/...`。
 
 `core/character_card_store.py`
 
@@ -504,7 +515,7 @@ JSON 预览必须按这些结构分组展示，不能直接丢一整坨花括号
 - 对外返回模型对象或轻量 summary，不返回未校验的原始 dict。
 - 处理损坏卡跳过、未知字段保留、旧 schema 兼容和 UTF-8 缩进写入。
 - 不调用 LLM、不创建 Qt 控件、不渲染 Markdown/HTML。
-- 建议接口：`create_empty_card()`、`generate_card_id()`、`load_card()`、`save_card()`、`delete_card()`、`list_card_summaries()`、`load_preview_card()`、`save_preview_card()`、`mark_card_stale()`、`resolve_cover_paths()`、`clear_original_cover_reference()`。
+- 规划接口：`create_empty_card()`、`generate_card_id()`、`load_card()`、`save_card()`、`delete_card()`、`list_card_summaries()`、`load_preview_card()`、`save_preview_card()`、`mark_card_stale()`、`resolve_cover_paths()`、`clear_original_cover_reference()`。
 
 `core/character_card_compiler.py`
 
@@ -512,20 +523,20 @@ JSON 预览必须按这些结构分组展示，不能直接丢一整坨花括号
 - 可复用 `core.compiler` 的阶段状态聚合能力，但新模块负责把聚合结果映射进 CharaPicker card schema。
 - 不写 UI，不直接展示弹窗；是否保存由调用方或 store 处理。
 - 不读取原始素材，不读取主页目标角色配置。
-- 建议接口：`compile_card_from_knowledge_base()`、`compile_preview_card_from_preview_knowledge_base()`、`build_compile_target()`、`collect_compile_warnings()`。
+- 规划接口：`compile_card_from_knowledge_base()`、`compile_preview_card_from_preview_knowledge_base()`、`build_compile_target()`、`collect_compile_warnings()`。
 
 `core/character_card_renderers.py`
 
 - 负责从 `CharacterCard` 生成展示内容。
 - 函数应尽量是纯函数，方便测试。
-- 建议接口：`render_card_markdown()`、`render_card_html()`、`build_human_json_sections()`。
+- 规划接口：`render_card_markdown()`、`render_card_html()`、`build_human_json_sections()`。
 - HTML 渲染必须集中在这里转义用户文本；页面层不手写 HTML 拼接。
 - Markdown 和 HTML 都只读 CharaPicker JSON 模型，不互相作为输入。
 
 `core/character_card_formats.py`
 
 - 负责外部格式映射，不负责写文件。
-- 建议接口：`to_character_card_v2_json()`、`to_astrbot_copy_sections()`、`to_astrbot_copy_markdown()`。
+- 规划接口：`to_character_card_v2_json()`、`to_astrbot_copy_sections()`、`to_astrbot_copy_markdown()`。
 - 无法映射字段时返回 warnings，不静默丢弃。
 - Character Card V2 的 `extensions.charapicker` 在这里统一生成，避免导出器和页面各写一套映射。
 
@@ -533,14 +544,14 @@ JSON 预览必须按这些结构分组展示，不能直接丢一整坨花括号
 
 - 负责把 CharaPicker card 派生产物写入 `projects/{project_id}/output/character_cards/`。
 - 调用 renderers 和 formats，但不包含字段映射细节。
-- 建议接口：`export_charapicker_json()`、`export_markdown()`、`export_html()`、`export_character_card_v2_json()`、`export_astrbot_copy_markdown()`、`export_selected_targets()`。
+- 规划接口：`export_charapicker_json()`、`export_markdown()`、`export_html()`、`export_character_card_v2_json()`、`export_astrbot_copy_markdown()`、`export_selected_targets()`。
 - 返回 `CharacterCardExportResult` 或等价结构，包含输出路径、warnings 和失败原因。
 
 `core/character_card_importer.py`
 
 - 负责导入 CharaPicker JSON 的校验、schema 迁移和冲突策略。
 - 不弹文件选择器，不写 UI 文案；错误用结构化异常或结果对象表达。
-- 首版只导入 CharaPicker JSON；Character Card V2 反向导入可作为后续能力。
+- 首版只导入 CharaPicker JSON；Character Card V2 反向导入不纳入首版。
 
 ### 6.3 GUI 模块边界
 
@@ -596,7 +607,7 @@ JSON 预览必须按这些结构分组展示，不能直接丢一整坨花括号
 
 - `gui/main_window.py` 只负责创建页面、导航和跨页面信号连接。
 - 主窗口应从 `OutputPage` 切换为 `CharacterCardPage`，导航文案使用 `app.nav.characterCards` 或等价 i18n key。
-- `ProjectPage` 应新增项目切换信号，例如 `projectChanged = pyqtSignal(object)`，在新建、删除、切换、保存后向角色卡页面同步当前项目。
+- `ProjectPage` 新增项目切换信号，例如 `projectChanged = pyqtSignal(object)`，在新建、删除、切换、保存后向角色卡页面同步当前项目。
 - `CharacterCardPage.set_project(config_or_none)` 只接收项目上下文并刷新角色卡列表，不向项目页反向读取控件状态。
 - 预览提取成功后，主窗口不再根据 `target_characters` 生成输出页内容；只提示预览知识库已更新，并可引导用户到角色卡页生成预览草稿。
 
@@ -664,14 +675,14 @@ CharacterCardPage select image
 
 ### 6.7 测试和验证结构
 
-- 若仓库仍无正式测试目录，首批可用轻量脚本或后续新增 `tests/` 针对纯 core 函数做验证。
+- 若仓库仍无正式测试目录，首批可用轻量脚本或新增 `tests/` 针对纯 core 函数做验证。
 - 优先覆盖纯函数：schema 校验、store 损坏卡跳过、Markdown/HTML 渲染、Character Card V2 映射、AstrBot copy section 生成。
 - GUI 验证以 `python -m compileall core gui utils`、可用时的 `ruff check`、以及人工启动应用为主。
 - HTML 渲染至少验证文本转义、无外部资源、封面相对路径和空字段展示。
 
 ## 7. 代码自审查与架构清洁约束
 
-本节是后续实现时的强制自审查要求。它不要求为了“整洁”做无关大重构；只处理本次任务引入或直接触及的结构问题、冗余代码和逻辑风险。发现历史遗留但不属于本次范围的问题时，记录为后续事项，不混入当前阶段。
+本节是实现阶段的强制自审查要求。它不要求为了“整洁”做无关大重构；只处理本任务引入或直接触及的结构问题、冗余代码和逻辑风险。发现历史遗留但不属于本任务范围的问题时，记录为独立事项，不混入当前阶段。
 
 每个提交分组完成后都必须先完成一次局部自审查，再进入提交或下一阶段。所有开发提交完成后、进入用户验收前，必须再做一次整体自审查。
 
@@ -698,7 +709,7 @@ CharacterCardPage select image
 - Markdown 和 HTML 都能从同一张 CharaPicker JSON 重新生成，不保存互相依赖的派生状态。
 - Character Card V2 与 AstrBot 复制辅助都只读取 CharaPicker JSON，不绕过母本读取 UI 状态。
 - 操作按钮、worker、错误反馈和日志之间没有重复状态判断。
-- 本次新增代码没有明显重复模块、过时注释、临时调试输出或未完成占位逻辑。
+- 本任务新增代码没有明显重复模块、过时注释、临时调试输出或未完成占位逻辑。
 - 可运行的验证命令已经执行；无法运行的验证要说明原因和残余风险。
 
 自审查发现的问题处理原则：
@@ -710,23 +721,23 @@ CharacterCardPage select image
 
 ## 8. 里程碑
 
-### M01：核对当前实现入口
+### M01：核对现有实现入口
 
 交付：
 
-- 只记录当前代码中与项目页目标角色、输出页、编译器、生成器和知识库角色卡相关的实际入口。
+- 只记录现有代码中与项目页目标角色、输出页、编译器、生成器和知识库角色卡相关的实际入口。
 
 验收：
 
-- 明确哪些文件需要在后续里程碑修改。
-- 明确当前是否仍存在 `ProjectConfig.target_characters` 的调用点。
+- 明确哪些文件需要在本计划里程碑中修改。
+- 明确是否仍存在 `ProjectConfig.target_characters` 的调用点。
 - 不改代码。
 
 ### M02：将输出导航改名为角色卡
 
 交付：
 
-- 当前“输出”导航改名为“角色卡”。
+- 现有“输出”导航改名为“角色卡”。
 
 验收：
 
@@ -788,7 +799,7 @@ CharacterCardPage select image
 
 - 预览完成不会调用第一个目标角色生成角色卡。
 - 用户下一步被引导到角色卡页面创建或编译角色卡。
-- 本里程碑不禁止角色卡页面后续根据预览知识库生成隔离预览草稿；两者是不同入口。
+- 本里程碑不禁止角色卡页面根据预览知识库生成隔离预览草稿；两者是不同入口。
 
 ### M08：建立正式角色卡路径 helper
 
@@ -830,12 +841,12 @@ CharacterCardPage select image
 
 交付：
 
-- 明确 `empty`、`draft`、`compiled`、`stale`、`failed` 等状态。
+- 明确 `empty`、`draft`、`preview`、`compiled`、`stale`、`failed` 等状态。
 
 验收：
 
 - UI 和保存数据使用同一套状态值。
-- 状态能表达未编译、已编译、需重编译和失败。
+- 状态能表达未编译、预览草稿、已编译、需重编译和失败。
 
 ### M12：实现角色卡创建保存读取
 
@@ -856,9 +867,10 @@ CharacterCardPage select image
 
 验收：
 
+- 新建卡、导入卡和正式编译卡都能在海报墙显示。
+- 预览草稿卡不出现在正式列表中。
 - 损坏的单张角色卡不会阻断其他角色卡显示。
 - 损坏项有可诊断的警告。
-- 预览草稿角色卡不出现在正式列表中。
 
 ### M14：建立角色卡图片目录规则
 
@@ -892,7 +904,7 @@ CharacterCardPage select image
 验收：
 
 - 支持至少名称、别名、状态、cover、更新时间字段。
-- 后续可接入 model/delegate 或分页，避免大量 QWidget 堆叠成为固定设计。
+- 扩展时可接入 model/delegate 或分页，避免大量 QWidget 堆叠成为固定设计。
 
 ### M17：实现海报墙卡片展示
 
@@ -1022,6 +1034,7 @@ CharacterCardPage select image
 
 - 海报墙使用裁剪后的 cover。
 - 重新打开项目后 cover 正常显示。
+- 裁剪参数写入 `assets.crop`，便于验收完成前重新裁剪或排查。
 
 ### M27：实现封面替换与清除
 
@@ -1032,6 +1045,7 @@ CharacterCardPage select image
 验收：
 
 - 清除后回到占位封面。
+- 清除封面时同步清空 `assets.cover_path` 和裁剪元数据；开发阶段是否保留原图副本按 M24 / C02 规则处理。
 - 替换不会留下 UI 仍显示旧图的缓存问题。
 
 ### M28：实现操作按钮启用规则
@@ -1100,7 +1114,7 @@ CharacterCardPage select image
 
 交付：
 
-- 编译前检查正式 `episode_content.json` 或后续正式阶段状态是否可用。
+- 编译前检查正式 `episode_content.json` 或正式阶段状态是否可用。
 
 验收：
 
@@ -1140,7 +1154,7 @@ CharacterCardPage select image
 
 - 阶段状态按季/集顺序可追溯。
 - 角色卡编译不反向修改正式知识库中的 `character_stage_states.json`。
-- 如后续确需维护共享阶段状态缓存，必须作为独立缓存里程碑设计，不能混入首版角色卡编译。
+- 若确需维护共享阶段状态缓存，必须作为独立缓存里程碑设计，不能混入首版角色卡编译。
 
 ### M37：记录编译警告
 
@@ -1262,7 +1276,7 @@ CharacterCardPage select image
 - 导出的 JSON 可再次导入。
 - 导出不修改知识库原始角色卡。
 - Markdown 和 HTML 文件名稳定。
-- Character Card V2 JSON 文件名稳定，建议为 `{card_id}.character-card-v2.json`。
+- Character Card V2 JSON 文件名稳定，固定为 `{card_id}.character-card-v2.json`。
 - Character Card V2 JSON 包含 `spec = "chara_card_v2"`、`spec_version = "2.0"`、`data`。
 - Character Card V2 导出不声明为 PNG 角色卡，不写入 PNG metadata。
 - 无法映射的 CharaPicker 字段进入 `extensions.charapicker` 或导出 warnings。
@@ -1273,14 +1287,14 @@ CharacterCardPage select image
 
 交付：
 
-- 参考 AstrBot 官方文档、PR #4532、用户截图和后续 demo，在计划或专门文档中记录 AstrBot 手动复制字段说明。
+- 参考 AstrBot 官方文档、PR #4532 和 demo 截图，在计划或专门文档中记录 AstrBot 手动复制字段说明。
 
 验收：
 
 - 明确首版目标不是生成 AstrBot 可导入 JSON，而是提供可逐项复制到 AstrBot 的内容。
 - 明确需要展示和复制的字段：名称、系统提示词、自定义报错回复信息、预设对话。
 - 明确预设对话支持任意组数，每组包含用户消息和 AI 回复。
-- 明确 demo 中“自定义报错回复信息（可选）”的生成策略和缺省策略。
+- 明确 demo 中“自定义报错回复信息（可选）”的生成策略和缺省策略；若实施时仍无 demo JSON 或官方字段名，该字段允许为空并作为用户可编辑复制区展示。
 - 明确 CharaPicker 字段如何生成 AstrBot 复制内容。
 - 明确无法生成字段的处理方式。
 - 明确工具 / MCP 工具和 Skills 不在首版导出范围。
@@ -1412,6 +1426,7 @@ CharacterCardPage select image
 - 删除或折叠已经没有正式调用方的旧输出页转接、临时命名别名、重复渲染路径和重复格式化逻辑；若某个兼容层仍承担旧项目数据迁移责任，必须保留并写清楚保留原因，不把用户数据兼容误删。
 - 清理开发过程中产生的临时测试项目、预览卡残留、手工导出样例、日志、缓存、截图和未纳入文档的实验文件，确保不会被提交或混入发布包。
 - 删除项目内裁剪前原图副本，只保留裁剪后的 `cover.png` 或等价正式封面文件；这是开发残留清理的一部分，不单独作为开发里程碑。
+- 删除原图副本后同步清空 `assets.original_cover_path`，避免角色卡 JSON 指向不存在的中间文件。
 - 清理未使用的 import、死代码、重复常量、过时 TODO、临时 print/debug 语句、无调用方的 UI 小部件、未使用 i18n key、未使用颜色常量和未引用资源。
 
 验收：
@@ -1428,10 +1443,10 @@ CharacterCardPage select image
 
 交付：
 
-- 按发布规范将本次功能阶段版本升级为 `v0.3.0-alpha`；这是分支合并前的收尾动作。
+- 按发布规范将本功能阶段版本升级为 `v0.3.0-alpha`；这是分支合并前的收尾动作。
 - 同步更新构建元数据、项目元数据、用户可见版本文案和多语言文档中的当前版本号。实现时至少核对 `build.bat`、`pyproject.toml`、`scripts/build_meta.py` 默认版本、`README.md`、`docs/README.*.md`、`i18n/*` 的 about 版本文案，以及仍在硬编码版本号的 User-Agent 常量。
 - 若发布规范文档中的示例命令被用作当前推荐命令，同步改为 `v0.3.0-alpha`；若只是历史示例，保持示例性质但避免让用户误读为当前版本。
-- 版本升级提交建议使用 `chore: prepare v0.3.0-alpha release`。
+- 版本升级提交使用 `chore: prepare v0.3.0-alpha release`。
 
 验收：
 
@@ -1484,7 +1499,7 @@ CharacterCardPage select image
 - 保留旧配置兼容。
 - 取消预览完成后自动生成正式角色卡。
 
-建议提交信息：
+提交信息：
 
 - `refactor: separate extraction page from character targets`
 
@@ -1504,7 +1519,7 @@ CharacterCardPage select image
 - 建立正式角色卡和预览草稿角色卡的路径边界。
 - 定义 CharaPicker 卡模型、状态和图片目录规则。
 
-建议提交信息：
+提交信息：
 
 - `feat: add character card storage model`
 
@@ -1524,7 +1539,7 @@ CharacterCardPage select image
 - 将输出导航改为角色卡页面。
 - 建立海报墙、搜索、选择、新建和删除角色卡入口。
 
-建议提交信息：
+提交信息：
 
 - `feat: add character card gallery page`
 
@@ -1546,7 +1561,7 @@ CharacterCardPage select image
 - 支持图片选择、复制、9:16 裁剪、cover 保存、替换和清除。
 - 完成操作按钮启用规则。
 
-建议提交信息：
+提交信息：
 
 - `feat: edit character card metadata and cover`
 
@@ -1566,7 +1581,7 @@ CharacterCardPage select image
 - 建立预览弹窗。
 - 实现人类友好 JSON 预览、Markdown 渲染预览和 CharaPicker HTML 展示预览。
 
-建议提交信息：
+提交信息：
 
 - `feat: add character card preview dialog`
 
@@ -1589,7 +1604,7 @@ CharacterCardPage select image
 - 后台编译 CharaPicker JSON。
 - 写入卡内阶段状态、警告、stale 和重编译流程。
 
-建议提交信息：
+提交信息：
 
 - `feat: compile character cards from knowledge base`
 
@@ -1610,7 +1625,7 @@ CharacterCardPage select image
 - 角色卡页触发角色卡预览时生成项目级唯一固定 ID 的预览草稿角色卡。
 - 预览完成弹出 CharaPicker HTML 展示结果，并保留 Markdown/JSON 切换。
 
-建议提交信息：
+提交信息：
 
 - `feat: generate isolated preview character card`
 
@@ -1632,7 +1647,7 @@ CharacterCardPage select image
 - 从 CharaPicker JSON 渲染 Markdown 和 HTML。
 - 导出 Markdown、HTML、CharaPicker JSON 和 Character Card V2 JSON。
 
-建议提交信息：
+提交信息：
 
 - `feat: import and export charapicker cards`
 
@@ -1655,7 +1670,7 @@ CharacterCardPage select image
 - 实现 AstrBot 手动复制视图、预览、复制清单导出和编译后可选生成复制清单。
 - 补齐角色卡页面状态反馈。
 
-建议提交信息：
+提交信息：
 
 - `feat: add astrbot persona copy helper`
 
@@ -1677,7 +1692,7 @@ CharacterCardPage select image
 
 - 更新架构文档、用户入口文档和 TODO 状态。
 
-建议提交信息：
+提交信息：
 
 - `docs: update character card workflow documentation`
 
