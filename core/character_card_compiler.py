@@ -188,7 +188,10 @@ def _review_card_with_ai(
             "character": card.identity.character_name,
             "current_card": _build_ai_card_draft_payload(card),
             "knowledge_summary": _build_ai_knowledge_summary(card, final_state, timeline, episode_payloads),
-            "extra_requirements": card.user_metadata.compile_requirements or "None",
+            "extra_requirements": _build_extra_requirements_prompt(card),
+            "extra_dialogue_count": _extra_dialogue_count_prompt_value(
+                card.user_metadata.extra_dialogue_count
+            ),
             "response_schema": _character_card_response_schema(),
         },
         metadata={
@@ -264,6 +267,7 @@ def _build_ai_card_draft_payload(card: CharacterCard) -> dict[str, Any]:
         "user_metadata": {
             "notes": _clip_text(card.user_metadata.notes, 1200),
             "compile_requirements": _clip_text(card.user_metadata.compile_requirements, 1200),
+            "extra_dialogue_count": card.user_metadata.extra_dialogue_count,
             "tags": card.user_metadata.tags,
         },
         "profile": {
@@ -347,6 +351,12 @@ def _character_card_response_schema() -> dict[str, Any]:
                     "messages": [{"role": "user|assistant", "content": "string"}],
                 }
             ],
+            "example_dialogues": [
+                {
+                    "title": "string",
+                    "messages": [{"role": "user|assistant", "content": "string"}],
+                }
+            ],
         },
         "character_book": {
             "entries": [{"keys": ["string"], "content": "string", "enabled": True, "insertion_order": 100}]
@@ -397,6 +407,79 @@ def _apply_ai_card_payload(card: CharacterCard, payload: dict[str, Any]) -> None
             ]
             if item
         )
+    _enforce_extra_dialogue_count(card)
+
+
+def _build_extra_requirements_prompt(card: CharacterCard) -> str:
+    requirements = card.user_metadata.compile_requirements.strip()
+    dialogue_count = card.user_metadata.extra_dialogue_count
+    count_instruction = _extra_dialogue_count_instruction(dialogue_count)
+    if requirements:
+        return f"{requirements}\n\n{count_instruction}"
+    return count_instruction
+
+
+def _extra_dialogue_count_prompt_value(value: int | None) -> str:
+    return "auto" if value is None else str(value)
+
+
+def _extra_dialogue_count_instruction(value: int | None) -> str:
+    if value is None:
+        return (
+            "Extra dialogue sample count: auto. Let the model choose an appropriate number of "
+            "dialogue sample groups based on available evidence, user requirements, and output budget."
+        )
+    if value == 0:
+        return (
+            "Extra dialogue sample count: 0. Do not generate dialogue sample groups; return empty "
+            "dialogue.preset_dialogues and dialogue.example_dialogues."
+        )
+    return (
+        f"Extra dialogue sample count: {value}. Generate exactly {value} dialogue sample group(s) "
+        "in dialogue.preset_dialogues. Each group should contain at least one user message and one "
+        "assistant reply. Also mirror the same groups in dialogue.example_dialogues when useful for "
+        "Character Card V2 export. Keep every group grounded in the formal knowledge base evidence "
+        "and the user's extra requirements."
+    )
+
+
+def _enforce_extra_dialogue_count(card: CharacterCard) -> None:
+    requested_count = card.user_metadata.extra_dialogue_count
+    if requested_count is None:
+        return
+    if requested_count == 0:
+        card.dialogue.preset_dialogues = []
+        card.dialogue.example_dialogues = []
+        return
+
+    preset_dialogues = _usable_dialogues(card.dialogue.preset_dialogues)
+    example_dialogues = _usable_dialogues(card.dialogue.example_dialogues)
+    if len(preset_dialogues) < requested_count:
+        preset_dialogues.extend(
+            dialogue.model_copy(deep=True)
+            for dialogue in example_dialogues
+            if len(preset_dialogues) < requested_count
+        )
+    if len(example_dialogues) < requested_count:
+        example_dialogues.extend(
+            dialogue.model_copy(deep=True)
+            for dialogue in preset_dialogues
+            if len(example_dialogues) < requested_count
+        )
+    card.dialogue.preset_dialogues = preset_dialogues[:requested_count]
+    card.dialogue.example_dialogues = example_dialogues[:requested_count]
+    actual_count = len(card.dialogue.preset_dialogues)
+    if actual_count < requested_count:
+        warning = (
+            f"requested {requested_count} dialogue sample group(s), "
+            f"but the model returned {actual_count}"
+        )
+        card.quality.warnings = _unique([*card.quality.warnings, warning])
+        card.evidence.warnings = collect_compile_warnings(card)
+
+
+def _usable_dialogues(dialogues: list[Any]) -> list[Any]:
+    return [dialogue for dialogue in dialogues if getattr(dialogue, "messages", None)]
 
 
 def _merged_payload(model: Any, payload: dict[str, Any]) -> dict[str, Any]:

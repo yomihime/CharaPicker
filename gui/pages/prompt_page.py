@@ -34,6 +34,7 @@ PROMPT_VARIABLES = {
         "current_card",
         "knowledge_summary",
         "extra_requirements",
+        "extra_dialogue_count",
         "response_schema",
     ),
     "final_polish": ("character", "character_state"),

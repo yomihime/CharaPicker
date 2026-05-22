@@ -1,8 +1,18 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtGui import QIntValidator
 from PyQt6.QtWidgets import QFormLayout, QHBoxLayout, QVBoxLayout, QWidget
-from qfluentwidgets import BodyLabel, CardWidget, CaptionLabel, CheckBox, LineEdit, PlainTextEdit, PrimaryPushButton, PushButton
+from qfluentwidgets import (
+    BodyLabel,
+    CardWidget,
+    CaptionLabel,
+    CheckBox,
+    LineEdit,
+    PlainTextEdit,
+    PrimaryPushButton,
+    PushButton,
+)
 
 from core.models import CharacterCard
 from utils.i18n import t
@@ -42,6 +52,9 @@ class CharacterCardDetailPanel(QWidget):
         self.tags = LineEdit(form_card)
         self.notes = PlainTextEdit(form_card)
         self.notes.setFixedHeight(88)
+        self.extra_dialogue_count = LineEdit(form_card)
+        self.extra_dialogue_count.setValidator(QIntValidator(0, 100, self.extra_dialogue_count))
+        self.extra_dialogue_count.setPlaceholderText(t("cards.field.extraDialogueCount.placeholder"))
         self.compile_requirements = PlainTextEdit(form_card)
         self.compile_requirements.setFixedHeight(88)
         self.compile_requirements.setPlaceholderText(t("cards.field.compileRequirements.placeholder"))
@@ -50,6 +63,10 @@ class CharacterCardDetailPanel(QWidget):
         form_layout.addRow(BodyLabel(t("cards.field.aliases"), form_card), self.aliases)
         form_layout.addRow(BodyLabel(t("cards.field.tags"), form_card), self.tags)
         form_layout.addRow(BodyLabel(t("cards.field.notes"), form_card), self.notes)
+        form_layout.addRow(
+            BodyLabel(t("cards.field.extraDialogueCount"), form_card),
+            self.extra_dialogue_count,
+        )
         form_layout.addRow(
             BodyLabel(t("cards.field.compileRequirements"), form_card),
             self.compile_requirements,
@@ -102,6 +119,7 @@ class CharacterCardDetailPanel(QWidget):
             self.aliases,
             self.tags,
             self.notes,
+            self.extra_dialogue_count,
             self.compile_requirements,
             self.save_button,
             self.cover_button,
@@ -121,6 +139,7 @@ class CharacterCardDetailPanel(QWidget):
             self.aliases.clear()
             self.tags.clear()
             self.notes.clear()
+            self.extra_dialogue_count.clear()
             self.compile_requirements.clear()
             return
         self.status_label.setText(
@@ -136,6 +155,8 @@ class CharacterCardDetailPanel(QWidget):
         self.aliases.setText(", ".join(card.identity.aliases))
         self.tags.setText(", ".join(card.user_metadata.tags))
         self.notes.setPlainText(card.user_metadata.notes)
+        dialogue_count = card.user_metadata.extra_dialogue_count
+        self.extra_dialogue_count.setText("" if dialogue_count is None else str(dialogue_count))
         self.compile_requirements.setPlainText(card.user_metadata.compile_requirements)
 
     def apply_to_card(self, card: CharacterCard) -> CharacterCard:
@@ -146,6 +167,9 @@ class CharacterCardDetailPanel(QWidget):
         output.identity.aliases = _split_csv(self.aliases.text())
         output.user_metadata.tags = _split_csv(self.tags.text())
         output.user_metadata.notes = self.notes.toPlainText().strip()
+        output.user_metadata.extra_dialogue_count = _optional_dialogue_count(
+            self.extra_dialogue_count.text()
+        )
         output.user_metadata.compile_requirements = self.compile_requirements.toPlainText().strip()
         if not output.identity.display_name:
             output.identity.display_name = output.identity.character_name
@@ -161,9 +185,20 @@ def _editable_snapshot(card: CharacterCard) -> tuple[object, ...]:
         tuple(card.identity.aliases),
         tuple(card.user_metadata.tags),
         card.user_metadata.notes,
+        card.user_metadata.extra_dialogue_count,
         card.user_metadata.compile_requirements,
     )
 
 
 def _split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.replace("\uff0c", ",").split(",") if item.strip()]
+
+
+def _optional_dialogue_count(value: str) -> int | None:
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return max(0, min(100, int(text)))
+    except ValueError:
+        return None

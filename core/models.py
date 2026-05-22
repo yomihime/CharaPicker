@@ -166,6 +166,7 @@ class CharacterCardAssets(BaseModel):
 class CharacterCardUserMetadata(BaseModel):
     notes: str = ""
     compile_requirements: str = ""
+    extra_dialogue_count: int | None = Field(default=None, ge=0, le=100)
     tags: list[str] = Field(default_factory=list)
     favorite: bool = False
     folder: str = ""
