@@ -26,6 +26,7 @@ from utils.cloud_model_presets import CloudModelPreset, cloud_model_provider
 
 LOGGER = logging.getLogger(__name__)
 CHARACTER_CARD_COMPILE_PROMPT = "character_card_compile"
+CHARACTER_CARD_COMPILE_TIMEOUT_SECONDS = 300
 
 
 def build_compile_target(card: CharacterCard) -> CharacterCardCompileTarget:
@@ -185,7 +186,7 @@ def _review_card_with_ai(
         max_tokens=cloud_preset.max_output_tokens,
         variables={
             "character": card.identity.character_name,
-            "current_card": card.model_dump(mode="json"),
+            "current_card": _build_ai_card_draft_payload(card),
             "knowledge_summary": _build_ai_knowledge_summary(card, final_state, timeline, episode_payloads),
             "extra_requirements": card.user_metadata.compile_requirements or "None",
             "response_schema": _character_card_response_schema(),
@@ -196,6 +197,7 @@ def _review_card_with_ai(
             "character": card.identity.character_name,
         },
     )
+    request = request.model_copy(update={"timeout_seconds": CHARACTER_CARD_COMPILE_TIMEOUT_SECONDS})
     result = call_text_model(request)
     payload = _parse_json_object(result.content)
     _apply_ai_card_payload(card, payload)
@@ -216,24 +218,101 @@ def _build_ai_knowledge_summary(
             {
                 "season_id": season_id,
                 "episode_id": episode_id,
-                "facts": _related_items(payload.get("facts", []), character)[:60],
-                "behavior_traits": _related_items(payload.get("behavior_traits", []), character)[:60],
-                "dialogue_style": _related_items(payload.get("dialogue_style", []), character)[:40],
-                "relationships": _related_items(
+                "facts": _compact_items(_related_items(payload.get("facts", []), character), 24),
+                "behavior_traits": _compact_items(
+                    _related_items(payload.get("behavior_traits", []), character),
+                    24,
+                ),
+                "dialogue_style": _compact_items(
+                    _related_items(payload.get("dialogue_style", []), character),
+                    16,
+                ),
+                "relationships": _compact_items(
+                    _related_items(
                     payload.get("relationship_interactions", payload.get("relationships", [])),
                     character,
-                )[:40],
-                "state_changes": _related_items(payload.get("character_state_changes", []), character)[:40],
-                "conflicts": _related_items(payload.get("conflicts", []), character)[:30],
-                "insight_summary": str(payload.get("insight_summary", "")),
-                "evidence_refs": [str(item) for item in payload.get("evidence_refs", []) if str(item).strip()][:40],
+                    ),
+                    16,
+                ),
+                "state_changes": _compact_items(
+                    _related_items(payload.get("character_state_changes", []), character),
+                    16,
+                ),
+                "conflicts": _compact_items(_related_items(payload.get("conflicts", []), character), 12),
+                "insight_summary": _clip_text(str(payload.get("insight_summary", "")), 500),
+                "evidence_refs": _compact_items(
+                    [str(item) for item in payload.get("evidence_refs", []) if str(item).strip()],
+                    20,
+                ),
             }
         )
     return {
-        "final_state": final_state,
-        "timeline": timeline,
+        "final_state": {
+            "character": final_state.get("character", ""),
+            "summary": _clip_text(str(final_state.get("summary", "")), 4000),
+            "evidence_count": final_state.get("evidence_count", 0),
+            "conflicts": _compact_items([str(item) for item in final_state.get("conflicts", [])], 20),
+        },
+        "timeline": _compact_timeline(timeline),
         "episodes": episodes,
     }
+
+
+def _build_ai_card_draft_payload(card: CharacterCard) -> dict[str, Any]:
+    return {
+        "identity": card.identity.model_dump(mode="json"),
+        "user_metadata": {
+            "notes": _clip_text(card.user_metadata.notes, 1200),
+            "compile_requirements": _clip_text(card.user_metadata.compile_requirements, 1200),
+            "tags": card.user_metadata.tags,
+        },
+        "profile": {
+            "summary": _clip_text(card.profile.summary, 2000),
+            "personality_traits": card.profile.personality_traits,
+            "speech_style": card.profile.speech_style,
+            "current_state": _clip_text(card.profile.current_state, 2000),
+        },
+        "prompt_surfaces": {
+            "system_prompt": _clip_text(card.prompt_surfaces.system_prompt, 2000),
+            "persona_prompt": _clip_text(card.prompt_surfaces.persona_prompt, 2000),
+            "scenario": _clip_text(card.prompt_surfaces.scenario, 1200),
+        },
+        "evidence": card.evidence.model_dump(mode="json"),
+    }
+
+
+def _compact_timeline(timeline: list[dict]) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    for item in timeline:
+        if not isinstance(item, dict):
+            continue
+        state = item.get("state", {})
+        if not isinstance(state, dict):
+            state = {}
+        output.append(
+            {
+                "season_id": item.get("season_id", ""),
+                "episode_id": item.get("episode_id", ""),
+                "state": {
+                    "character": state.get("character", ""),
+                    "summary": _clip_text(str(state.get("summary", "")), 1200),
+                    "evidence_count": state.get("evidence_count", 0),
+                    "conflicts": _compact_items([str(value) for value in state.get("conflicts", [])], 8),
+                },
+            }
+        )
+    return output
+
+
+def _compact_items(values: list[str], limit: int, *, max_chars: int = 500) -> list[str]:
+    return [_clip_text(value, max_chars) for value in _unique(values)[:limit]]
+
+
+def _clip_text(value: str, limit: int) -> str:
+    text = " ".join(str(value).split())
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)] + "..."
 
 
 def _character_card_response_schema() -> dict[str, Any]:

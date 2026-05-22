@@ -206,6 +206,8 @@
   "cards.compile.success.title": "Character card compiled",
   "cards.compile.success.content": "A CharaPicker JSON card was generated from the formal knowledge base.",
   "cards.compile.failed.title": "Compile failed",
+  "cards.compile.loading.title": "Compiling character card",
+  "cards.compile.loading.content": "Reading the formal knowledge base and asking the model to review the character card. Please wait.",
   "cards.import.fileDialog": "Import CharaPicker JSON",
   "cards.import.failed.title": "Import failed",
   "cards.export.success.title": "Export complete",

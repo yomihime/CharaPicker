@@ -14,6 +14,7 @@ from qfluentwidgets import (
     LineEdit,
     MessageBox,
     PrimaryPushButton,
+    ProgressBar,
     PushButton,
     SubtitleLabel,
 )
@@ -81,6 +82,20 @@ class NewCharacterCardDialog(FluentDialog):
             self.accept()
 
 
+class CharacterCardLoadingDialog(FluentDialog):
+    def __init__(self, title: str, message: str, parent: QWidget | None = None) -> None:
+        super().__init__(title, parent, width=440, height=170, close_rejects=False)
+        self.close_button.hide()
+
+        label = BodyLabel(message, self.dialog_card)
+        label.setWordWrap(True)
+        self.content_layout.addWidget(label)
+
+        progress = ProgressBar(self.dialog_card)
+        progress.setRange(0, 0)
+        self.content_layout.addWidget(progress)
+
+
 class CharacterCardPage(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -90,6 +105,7 @@ class CharacterCardPage(QWidget):
         self._worker_thread: QThread | None = None
         self._worker: object | None = None
         self._model_preset_provider: Callable[[], CloudModelPreset | None] | None = None
+        self._loading_dialog: CharacterCardLoadingDialog | None = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 24, 28, 24)
@@ -287,7 +303,9 @@ class CharacterCardPage(QWidget):
         worker = CharacterCardCompileWorker(self._current_card, cloud_preset)
         worker.succeeded.connect(self._on_compile_succeeded)
         worker.failed.connect(lambda error: self._show_warning(t("cards.compile.failed.title"), error))
-        self._start_worker(worker)
+        self._show_loading(t("cards.compile.loading.title"), t("cards.compile.loading.content"))
+        if not self._start_worker(worker):
+            self._hide_loading()
 
     def _preview_draft(self) -> None:
         if self._project is None:
@@ -349,24 +367,38 @@ class CharacterCardPage(QWidget):
             t("cards.export.success.content", count=len(ok_paths), path=output_dir),
         )
 
-    def _start_worker(self, worker: object) -> None:
+    def _start_worker(self, worker: object) -> bool:
         if self._worker_thread is not None:
             self._show_warning(t("cards.busy.title"), t("cards.busy.content"))
-            return
+            return False
         thread = QThread(self)
         self._worker_thread = thread
         self._worker = worker
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
+        worker.finished.connect(self._hide_loading)
         worker.finished.connect(self._clear_worker)
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
         thread.start()
+        return True
 
     def _clear_worker(self) -> None:
         self._worker_thread = None
         self._worker = None
+
+    def _show_loading(self, title: str, content: str) -> None:
+        self._hide_loading()
+        self._loading_dialog = CharacterCardLoadingDialog(title, content, self)
+        self._loading_dialog.show()
+
+    def _hide_loading(self) -> None:
+        if self._loading_dialog is None:
+            return
+        self._loading_dialog.close()
+        self._loading_dialog.deleteLater()
+        self._loading_dialog = None
 
     def _show_success(self, title: str, content: str) -> None:
         InfoBar.success(title=title, content=content, parent=self.window(), position=InfoBarPosition.TOP_RIGHT, duration=3500)

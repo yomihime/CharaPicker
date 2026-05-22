@@ -206,6 +206,8 @@
   "cards.compile.success.title": "キャラクターカード編纂完了",
   "cards.compile.success.content": "正式知識ベースから CharaPicker JSON を生成しました。",
   "cards.compile.failed.title": "編纂に失敗しました",
+  "cards.compile.loading.title": "キャラクターカードを編纂中",
+  "cards.compile.loading.content": "正式知識ベースを読み込み、モデルにキャラクターカード内容の確認を依頼しています。しばらくお待ちください。",
   "cards.import.fileDialog": "CharaPicker JSON をインポート",
   "cards.import.failed.title": "インポートに失敗しました",
   "cards.export.success.title": "エクスポート完了",

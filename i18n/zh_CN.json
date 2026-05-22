@@ -206,6 +206,8 @@
   "cards.compile.success.title": "角色卡编译完成",
   "cards.compile.success.content": "已从正式知识库生成 CharaPicker JSON。",
   "cards.compile.failed.title": "角色卡编译失败",
+  "cards.compile.loading.title": "正在编译角色卡",
+  "cards.compile.loading.content": "正在读取正式知识库并请求模型复核角色卡内容，请稍等。",
   "cards.import.fileDialog": "导入 CharaPicker JSON",
   "cards.import.failed.title": "导入失败",
   "cards.export.success.title": "导出完成",
