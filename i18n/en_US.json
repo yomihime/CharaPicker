@@ -223,6 +223,7 @@
   "cards.compile.stage.saving": "Saving character card",
   "cards.compile.stage.done": "Compile complete",
   "cards.compile.stage.failed": "Compile failed",
+  "cards.compile.elapsed": "Elapsed {elapsed}",
   "cards.compile.stream.placeholder": "Model output will appear here when streaming starts.",
   "cards.compile.stream.header": "[Model stream]\n",
   "cards.import.fileDialog": "Import CharaPicker JSON",

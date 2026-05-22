@@ -4,7 +4,7 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
-from PyQt6.QtCore import QThread
+from PyQt6.QtCore import QElapsedTimer, QThread, QTimer
 from PyQt6.QtGui import QImage
 from PyQt6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
@@ -98,6 +98,9 @@ class CharacterCardLoadingDialog(FluentDialog):
         self.stage_label.setWordWrap(True)
         self.content_layout.addWidget(self.stage_label)
 
+        self.elapsed_label = CaptionLabel("", self.dialog_card)
+        self.content_layout.addWidget(self.elapsed_label)
+
         progress = ProgressBar(self.dialog_card)
         progress.setRange(0, 0)
         self.content_layout.addWidget(progress)
@@ -108,6 +111,13 @@ class CharacterCardLoadingDialog(FluentDialog):
         self.stream_output.setPlaceholderText(t("cards.compile.stream.placeholder"))
         self.content_layout.addWidget(self.stream_output)
         self._stream_session = StreamingTextSession(self.stream_output)
+        self._elapsed_clock = QElapsedTimer()
+        self._elapsed_clock.start()
+        self._elapsed_timer = QTimer(self)
+        self._elapsed_timer.setInterval(1000)
+        self._elapsed_timer.timeout.connect(self._update_elapsed_label)
+        self._elapsed_timer.start()
+        self._update_elapsed_label()
 
     def set_stage(self, text: str) -> None:
         self.stage_label.setText(text)
@@ -118,6 +128,14 @@ class CharacterCardLoadingDialog(FluentDialog):
         if not self._stream_session.active:
             self._stream_session.start(t("cards.compile.stream.header"))
         self._stream_session.append_delta(delta)
+
+    def closeEvent(self, event) -> None:  # noqa: ANN001
+        self._elapsed_timer.stop()
+        super().closeEvent(event)
+
+    def _update_elapsed_label(self) -> None:
+        seconds = max(0, self._elapsed_clock.elapsed() // 1000)
+        self.elapsed_label.setText(t("cards.compile.elapsed", elapsed=_format_elapsed(seconds)))
 
 
 class CharacterCardPage(QWidget):
@@ -455,3 +473,11 @@ def _compile_inputs_snapshot(card: CharacterCard) -> tuple[object, ...]:
         card.user_metadata.compile_requirements,
         card.user_metadata.extra_dialogue_count,
     )
+
+
+def _format_elapsed(seconds: int) -> str:
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
