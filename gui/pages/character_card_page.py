@@ -4,7 +4,7 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
-from PyQt6.QtCore import QElapsedTimer, QThread, QTimer
+from PyQt6.QtCore import QElapsedTimer, QThread, QTimer, Qt
 from PyQt6.QtGui import QImage
 from PyQt6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
@@ -94,12 +94,17 @@ class CharacterCardLoadingDialog(FluentDialog):
         label.setWordWrap(True)
         self.content_layout.addWidget(label)
 
+        status_row = QHBoxLayout()
+        status_row.setContentsMargins(0, 0, 0, 0)
+        status_row.setSpacing(12)
         self.stage_label = CaptionLabel(t("cards.compile.stage.preparing"), self.dialog_card)
         self.stage_label.setWordWrap(True)
-        self.content_layout.addWidget(self.stage_label)
-
         self.elapsed_label = CaptionLabel("", self.dialog_card)
-        self.content_layout.addWidget(self.elapsed_label)
+        self.elapsed_label.setMinimumWidth(120)
+        self.elapsed_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        status_row.addWidget(self.stage_label, 1)
+        status_row.addWidget(self.elapsed_label, 0)
+        self.content_layout.addLayout(status_row)
 
         progress = ProgressBar(self.dialog_card)
         progress.setRange(0, 0)
