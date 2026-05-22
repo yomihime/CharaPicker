@@ -26,6 +26,30 @@ def seasons_root_path(project_id: str) -> Path:
     return root_path(project_id) / "seasons"
 
 
+def character_cards_root_path(project_id: str) -> Path:
+    return root_path(project_id) / "character_cards"
+
+
+def character_card_dir_path(project_id: str, card_id: str) -> Path:
+    return character_cards_root_path(project_id) / card_id
+
+
+def character_card_json_path(project_id: str, card_id: str) -> Path:
+    return character_card_dir_path(project_id, card_id) / "card.json"
+
+
+def preview_character_cards_root_path(project_id: str) -> Path:
+    return root_path(project_id) / "preview_character_cards"
+
+
+def preview_character_card_dir_path(project_id: str, card_id: str = "preview_card") -> Path:
+    return preview_character_cards_root_path(project_id) / card_id
+
+
+def preview_character_card_json_path(project_id: str, card_id: str = "preview_card") -> Path:
+    return preview_character_card_dir_path(project_id, card_id) / "card.json"
+
+
 def season_path(project_id: str, season_id: str) -> Path:
     return seasons_root_path(project_id) / season_id
 
