@@ -44,13 +44,13 @@ class CharacterCardDetailPanel(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(12)
 
-        header = QHBoxLayout()
+        header = QVBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(12)
+        header.setSpacing(4)
         header.addWidget(StrongBodyLabel(t("cards.detail.title"), self))
-        header.addStretch(1)
         self.status_label = CaptionLabel(t("cards.status.noSelection"), self)
         self.status_label.setWordWrap(True)
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         header.addWidget(self.status_label)
         root.addLayout(header)
 
@@ -65,7 +65,7 @@ class CharacterCardDetailPanel(QWidget):
         self.aliases = LineEdit(form_card)
         self.tags = LineEdit(form_card)
         self.notes = PlainTextEdit(form_card)
-        self.notes.setMinimumHeight(128)
+        self.notes.setFixedHeight(132)
         self.compile_variant = ComboBox(form_card)
         for variant in COMPILE_VARIANTS:
             self.compile_variant.addItem(t(f"cards.compileVariant.{variant.value}"))
@@ -73,7 +73,7 @@ class CharacterCardDetailPanel(QWidget):
         self.extra_dialogue_count.setValidator(QIntValidator(0, 100, self.extra_dialogue_count))
         self.extra_dialogue_count.setPlaceholderText(t("cards.field.extraDialogueCount.placeholder"))
         self.compile_requirements = PlainTextEdit(form_card)
-        self.compile_requirements.setMinimumHeight(128)
+        self.compile_requirements.setFixedHeight(132)
         self.compile_requirements.setPlaceholderText(t("cards.field.compileRequirements.placeholder"))
 
         form_layout.addWidget(StrongBodyLabel(t("cards.detail.identity"), form_card))
@@ -113,7 +113,7 @@ class CharacterCardDetailPanel(QWidget):
         text_grid.addWidget(self.compile_requirements, 1, 1)
         text_grid.setColumnStretch(0, 1)
         text_grid.setColumnStretch(1, 1)
-        form_layout.addLayout(text_grid, 1)
+        form_layout.addLayout(text_grid)
 
         form_layout.addWidget(StrongBodyLabel(t("cards.detail.compile"), form_card))
         compile_grid = QGridLayout()
@@ -145,9 +145,10 @@ class CharacterCardDetailPanel(QWidget):
             form_card,
         )
         form_layout.addWidget(self.export_astrbot_after_compile)
-        root.addWidget(form_card, 1)
+        root.addWidget(form_card)
 
-        actions = QHBoxLayout()
+        actions = QVBoxLayout()
+        actions.setContentsMargins(0, 0, 0, 0)
         actions.setSpacing(8)
         self.save_button = PrimaryPushButton(t("cards.action.save"), self)
         self.cover_button = PushButton(t("cards.action.cover"), self)
@@ -157,16 +158,25 @@ class CharacterCardDetailPanel(QWidget):
         self.export_button = PushButton(t("cards.action.export"), self)
         self.astrbot_button = PushButton(t("cards.action.astrbot"), self)
         self.delete_button = PushButton(t("cards.action.delete"), self)
+        edit_actions = QHBoxLayout()
+        edit_actions.setSpacing(8)
         for button in (self.save_button, self.cover_button, self.clear_cover_button):
             button.setMinimumWidth(104)
-            actions.addWidget(button)
-        actions.addStretch(1)
+            edit_actions.addWidget(button)
+        edit_actions.addStretch(1)
+        actions.addLayout(edit_actions)
+
+        run_actions = QHBoxLayout()
+        run_actions.setSpacing(8)
         for button in (self.preview_button, self.compile_button, self.export_button, self.astrbot_button):
             button.setMinimumWidth(112)
-            actions.addWidget(button)
+            run_actions.addWidget(button)
+        run_actions.addStretch(1)
         self.delete_button.setMinimumWidth(96)
-        actions.addWidget(self.delete_button)
+        run_actions.addWidget(self.delete_button)
+        actions.addLayout(run_actions)
         root.addLayout(actions)
+        root.addStretch(1)
 
         self.save_button.clicked.connect(self.saveRequested)
         self.cover_button.clicked.connect(self.coverRequested)
