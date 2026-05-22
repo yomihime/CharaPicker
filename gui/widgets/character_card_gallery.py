@@ -18,6 +18,8 @@ class CharacterCardGallery(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._cards: list[CharacterCardSummary] = []
+        self.setMinimumWidth(300)
+        self.setMaximumWidth(380)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -30,7 +32,7 @@ class CharacterCardGallery(QWidget):
 
         self.list_widget = QListWidget(self)
         self.list_widget.setObjectName("characterCardGallery")
-        self.list_widget.setMinimumWidth(260)
+        self.list_widget.setMinimumWidth(300)
         self.list_widget.setIconSize(QSize(54, 96))
         root.addWidget(self.list_widget, 1)
 
