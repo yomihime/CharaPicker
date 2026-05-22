@@ -34,6 +34,8 @@ PROMPT_VARIABLES = {
         "current_card",
         "knowledge_summary",
         "extra_requirements",
+        "compile_variant",
+        "compile_variant_instruction",
         "extra_dialogue_count",
         "response_schema",
     ),

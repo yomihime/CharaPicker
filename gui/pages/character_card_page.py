@@ -9,10 +9,12 @@ from PyQt6.QtGui import QImage
 from PyQt6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
+    CaptionLabel,
     InfoBar,
     InfoBarPosition,
     LineEdit,
     MessageBox,
+    PlainTextEdit,
     PrimaryPushButton,
     ProgressBar,
     PushButton,
@@ -35,6 +37,7 @@ from gui.widgets.astrbot_copy_dialog import AstrBotCopyDialog
 from gui.widgets.character_card_preview_dialog import CharacterCardPreviewDialog
 from gui.widgets.cover_crop_dialog import CoverCropDialog
 from gui.widgets.dialog_middleware import FluentDialog
+from gui.widgets.streaming_text_session import StreamingTextSession
 from gui.workers.character_card_workers import (
     CharacterCardCompileWorker,
     CharacterCardExportWorker,
@@ -84,16 +87,37 @@ class NewCharacterCardDialog(FluentDialog):
 
 class CharacterCardLoadingDialog(FluentDialog):
     def __init__(self, title: str, message: str, parent: QWidget | None = None) -> None:
-        super().__init__(title, parent, width=440, height=170, close_rejects=False)
+        super().__init__(title, parent, width=660, height=420, close_rejects=False)
         self.close_button.hide()
 
         label = BodyLabel(message, self.dialog_card)
         label.setWordWrap(True)
         self.content_layout.addWidget(label)
 
+        self.stage_label = CaptionLabel(t("cards.compile.stage.preparing"), self.dialog_card)
+        self.stage_label.setWordWrap(True)
+        self.content_layout.addWidget(self.stage_label)
+
         progress = ProgressBar(self.dialog_card)
         progress.setRange(0, 0)
         self.content_layout.addWidget(progress)
+
+        self.stream_output = PlainTextEdit(self.dialog_card)
+        self.stream_output.setReadOnly(True)
+        self.stream_output.setMinimumHeight(190)
+        self.stream_output.setPlaceholderText(t("cards.compile.stream.placeholder"))
+        self.content_layout.addWidget(self.stream_output)
+        self._stream_session = StreamingTextSession(self.stream_output)
+
+    def set_stage(self, text: str) -> None:
+        self.stage_label.setText(text)
+
+    def append_stream_delta(self, delta: str) -> None:
+        if not delta:
+            return
+        if not self._stream_session.active:
+            self._stream_session.start(t("cards.compile.stream.header"))
+        self._stream_session.append_delta(delta)
 
 
 class CharacterCardPage(QWidget):
@@ -202,12 +226,17 @@ class CharacterCardPage(QWidget):
         if self._current_card is None:
             return False
         original_name = self._current_card.identity.character_name
+        original_compile_inputs = _compile_inputs_snapshot(self._current_card)
         updated = self.detail.apply_to_card(self._current_card)
         changed = updated.revision != self._current_card.revision
         if not changed:
             return True
-        if original_name != updated.identity.character_name and updated.compile_status == CharacterCardStatus.COMPILED:
-            updated = store.mark_card_stale(updated, "character_name_changed")
+        compile_inputs_changed = original_compile_inputs != _compile_inputs_snapshot(updated)
+        if updated.compile_status == CharacterCardStatus.COMPILED:
+            if original_name != updated.identity.character_name:
+                updated = store.mark_card_stale(updated, "character_name_changed")
+            elif compile_inputs_changed:
+                updated = store.mark_card_stale(updated, "compile_inputs_changed")
         store.save_card(updated)
         self._current_card = updated
         self.refresh_gallery(updated.card_id)
@@ -303,6 +332,8 @@ class CharacterCardPage(QWidget):
         worker = CharacterCardCompileWorker(self._current_card, cloud_preset)
         worker.succeeded.connect(self._on_compile_succeeded)
         worker.failed.connect(lambda error: self._show_warning(t("cards.compile.failed.title"), error))
+        worker.stageChanged.connect(self._on_compile_stage_changed)
+        worker.streamDelta.connect(self._on_compile_stream_delta)
         self._show_loading(t("cards.compile.loading.title"), t("cards.compile.loading.content"))
         if not self._start_worker(worker):
             self._hide_loading()
@@ -355,6 +386,16 @@ class CharacterCardPage(QWidget):
                 self._show_warning(t("cards.astrbot.partial.title"), result.error or "; ".join(result.warnings))
         self._show_success(t("cards.compile.success.title"), t("cards.compile.success.content"))
 
+    def _on_compile_stage_changed(self, stage: str) -> None:
+        if self._loading_dialog is None:
+            return
+        self._loading_dialog.set_stage(t(f"cards.compile.stage.{stage}"))
+
+    def _on_compile_stream_delta(self, delta: str) -> None:
+        if self._loading_dialog is None:
+            return
+        self._loading_dialog.append_stream_delta(delta)
+
     def _on_export_succeeded(self, results: list) -> None:
         ok_paths = [
             result.output_path
@@ -405,3 +446,12 @@ class CharacterCardPage(QWidget):
 
     def _show_warning(self, title: str, content: str) -> None:
         InfoBar.warning(title=title, content=content, parent=self.window(), position=InfoBarPosition.TOP_RIGHT, duration=5500)
+
+
+def _compile_inputs_snapshot(card: CharacterCard) -> tuple[object, ...]:
+    return (
+        card.identity.character_name,
+        card.user_metadata.compile_variant,
+        card.user_metadata.compile_requirements,
+        card.user_metadata.extra_dialogue_count,
+    )

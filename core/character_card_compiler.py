@@ -14,6 +14,7 @@ from core.models import (
     CharacterCardBook,
     CharacterCardCompileSource,
     CharacterCardCompileTarget,
+    CharacterCardCompileVariant,
     CharacterCardDialogue,
     CharacterCardKind,
     CharacterCardProfile,
@@ -27,6 +28,8 @@ from utils.cloud_model_presets import CloudModelPreset, cloud_model_provider
 LOGGER = logging.getLogger(__name__)
 CHARACTER_CARD_COMPILE_PROMPT = "character_card_compile"
 CHARACTER_CARD_COMPILE_TIMEOUT_SECONDS = 300
+CompileStageCallback = Callable[[str], None]
+StreamDeltaCallback = Callable[[str], None]
 
 
 def build_compile_target(card: CharacterCard) -> CharacterCardCompileTarget:
@@ -37,6 +40,7 @@ def build_compile_target(card: CharacterCard) -> CharacterCardCompileTarget:
         project_id=card.project_id,
         card_id=card.card_id,
         character_name=character_name,
+        compile_variant=card.user_metadata.compile_variant,
         compile_source=CharacterCardCompileSource.KNOWLEDGE_BASE,
     )
 
@@ -45,8 +49,11 @@ def compile_card_from_knowledge_base(
     card: CharacterCard,
     *,
     cloud_preset: CloudModelPreset | None = None,
+    on_stage: CompileStageCallback | None = None,
+    on_stream_delta: StreamDeltaCallback | None = None,
 ) -> CharacterCard:
     target = build_compile_target(card)
+    _emit_stage(on_stage, "collecting")
     episode_payloads = _collect_episode_payloads(
         target.project_id,
         content_path=kb.episode_content_path,
@@ -56,6 +63,7 @@ def compile_card_from_knowledge_base(
     if not episode_payloads:
         raise ValueError("formal knowledge base is not available")
 
+    _emit_stage(on_stage, "local_compile")
     compiled = compile_character_state_by_season_episode(target.project_id, target.character_name)
     timeline = compiled.get("timeline", [])
     if not timeline:
@@ -75,7 +83,18 @@ def compile_card_from_knowledge_base(
     output.source_context.compiled_from_preview = False
     output.source_context.knowledge_base_ref = "seasons"
     _apply_compiled_state(output, final_state, timeline, episode_payloads)
-    _review_card_with_ai(output, final_state, timeline, episode_payloads, cloud_preset)
+    _emit_stage(on_stage, "ai_review")
+    _review_card_with_ai(
+        output,
+        final_state,
+        timeline,
+        episode_payloads,
+        cloud_preset,
+        target.compile_variant,
+        on_stream_delta=on_stream_delta,
+    )
+    _record_last_compile_variant(output, target.compile_variant)
+    _emit_stage(on_stage, "finalizing")
     return output
 
 
@@ -115,6 +134,22 @@ def collect_compile_warnings(card: CharacterCard) -> list[str]:
     if card.evidence.evidence_count <= 0:
         warnings.append("no evidence was matched")
     return list(dict.fromkeys(warnings))
+
+
+def _emit_stage(callback: CompileStageCallback | None, stage: str) -> None:
+    if callback is not None:
+        callback(stage)
+
+
+def _record_last_compile_variant(
+    card: CharacterCard,
+    compile_variant: CharacterCardCompileVariant,
+) -> None:
+    extension = card.extensions.get("charapicker")
+    if not isinstance(extension, dict):
+        extension = {}
+    extension["last_compile_variant"] = compile_variant.value
+    card.extensions["charapicker"] = extension
 
 
 def _apply_compiled_state(
@@ -176,6 +211,9 @@ def _review_card_with_ai(
     timeline: list[dict],
     episode_payloads: list[tuple[str, str, dict]],
     cloud_preset: CloudModelPreset,
+    compile_variant: CharacterCardCompileVariant,
+    *,
+    on_stream_delta: StreamDeltaCallback | None = None,
 ) -> None:
     request = build_model_call_request(
         purpose=CHARACTER_CARD_COMPILE_PROMPT,
@@ -188,7 +226,9 @@ def _review_card_with_ai(
             "character": card.identity.character_name,
             "current_card": _build_ai_card_draft_payload(card),
             "knowledge_summary": _build_ai_knowledge_summary(card, final_state, timeline, episode_payloads),
-            "extra_requirements": _build_extra_requirements_prompt(card),
+            "extra_requirements": _build_extra_requirements_prompt(card, compile_variant),
+            "compile_variant": compile_variant.value,
+            "compile_variant_instruction": _compile_variant_instruction(compile_variant),
             "extra_dialogue_count": _extra_dialogue_count_prompt_value(
                 card.user_metadata.extra_dialogue_count
             ),
@@ -199,9 +239,10 @@ def _review_card_with_ai(
             "card_id": card.card_id,
             "character": card.identity.character_name,
         },
+        stream=on_stream_delta is not None,
     )
     request = request.model_copy(update={"timeout_seconds": CHARACTER_CARD_COMPILE_TIMEOUT_SECONDS})
-    result = call_text_model(request)
+    result = call_text_model(request, on_stream_delta=on_stream_delta)
     payload = _parse_json_object(result.content)
     _apply_ai_card_payload(card, payload)
     card.source_context.prompt_profile_id = CHARACTER_CARD_COMPILE_PROMPT
@@ -267,6 +308,7 @@ def _build_ai_card_draft_payload(card: CharacterCard) -> dict[str, Any]:
         "user_metadata": {
             "notes": _clip_text(card.user_metadata.notes, 1200),
             "compile_requirements": _clip_text(card.user_metadata.compile_requirements, 1200),
+            "compile_variant": card.user_metadata.compile_variant.value,
             "extra_dialogue_count": card.user_metadata.extra_dialogue_count,
             "tags": card.user_metadata.tags,
         },
@@ -410,13 +452,39 @@ def _apply_ai_card_payload(card: CharacterCard, payload: dict[str, Any]) -> None
     _enforce_extra_dialogue_count(card)
 
 
-def _build_extra_requirements_prompt(card: CharacterCard) -> str:
+def _build_extra_requirements_prompt(
+    card: CharacterCard,
+    compile_variant: CharacterCardCompileVariant,
+) -> str:
     requirements = card.user_metadata.compile_requirements.strip()
-    dialogue_count = card.user_metadata.extra_dialogue_count
-    count_instruction = _extra_dialogue_count_instruction(dialogue_count)
+    parts = [
+        _compile_variant_instruction(compile_variant),
+        _extra_dialogue_count_instruction(card.user_metadata.extra_dialogue_count),
+    ]
     if requirements:
-        return f"{requirements}\n\n{count_instruction}"
-    return count_instruction
+        parts.insert(0, requirements)
+    return "\n\n".join(part for part in parts if part.strip())
+
+
+def _compile_variant_instruction(compile_variant: CharacterCardCompileVariant) -> str:
+    if compile_variant == CharacterCardCompileVariant.ASTRBOT:
+        return (
+            "Compile variant: AstrBot manual copy. Optimize prompt_surfaces.system_prompt, "
+            "prompt_surfaces.custom_error_reply, dialogue.preset_dialogues, and suggested starters "
+            "for AstrBot usage. The card must still remain a complete CharaPicker JSON card; "
+            "AstrBot text is a derived surface, not the source of truth."
+        )
+    if compile_variant == CharacterCardCompileVariant.CHARACTER_CARD_V2:
+        return (
+            "Compile variant: Character Card V2 export. Optimize profile.long_description, "
+            "profile.personality, profile.scenario_default, dialogue.first_message, "
+            "dialogue.example_dialogues, and prompt_surfaces.example_messages_text for a clean V2 "
+            "export. The card must still remain a complete CharaPicker JSON card."
+        )
+    return (
+        "Compile variant: general CharaPicker card. Balance profile, prompt surfaces, dialogue "
+        "examples, character book entries, and warnings so all derived formats can be generated later."
+    )
 
 
 def _extra_dialogue_count_prompt_value(value: int | None) -> str:

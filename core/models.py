@@ -62,6 +62,12 @@ class CharacterCardCompileSource(str, Enum):
     IMPORTED_EXTERNAL = "imported_external"
 
 
+class CharacterCardCompileVariant(str, Enum):
+    GENERAL = "general"
+    ASTRBOT = "astrbot"
+    CHARACTER_CARD_V2 = "character_card_v2"
+
+
 class DialogueRole(str, Enum):
     USER = "user"
     ASSISTANT = "assistant"
@@ -166,6 +172,7 @@ class CharacterCardAssets(BaseModel):
 class CharacterCardUserMetadata(BaseModel):
     notes: str = ""
     compile_requirements: str = ""
+    compile_variant: CharacterCardCompileVariant = CharacterCardCompileVariant.GENERAL
     extra_dialogue_count: int | None = Field(default=None, ge=0, le=100)
     tags: list[str] = Field(default_factory=list)
     favorite: bool = False
@@ -335,6 +342,7 @@ class CharacterCardCompileTarget(BaseModel):
     project_id: str
     card_id: str
     character_name: str
+    compile_variant: CharacterCardCompileVariant = CharacterCardCompileVariant.GENERAL
     compile_source: CharacterCardCompileSource = CharacterCardCompileSource.KNOWLEDGE_BASE
 
 

@@ -8,14 +8,22 @@ from qfluentwidgets import (
     CardWidget,
     CaptionLabel,
     CheckBox,
+    ComboBox,
     LineEdit,
     PlainTextEdit,
     PrimaryPushButton,
     PushButton,
 )
 
-from core.models import CharacterCard
+from core.models import CharacterCard, CharacterCardCompileVariant
 from utils.i18n import t
+
+
+COMPILE_VARIANTS = (
+    CharacterCardCompileVariant.GENERAL,
+    CharacterCardCompileVariant.ASTRBOT,
+    CharacterCardCompileVariant.CHARACTER_CARD_V2,
+)
 
 
 class CharacterCardDetailPanel(QWidget):
@@ -52,6 +60,9 @@ class CharacterCardDetailPanel(QWidget):
         self.tags = LineEdit(form_card)
         self.notes = PlainTextEdit(form_card)
         self.notes.setFixedHeight(88)
+        self.compile_variant = ComboBox(form_card)
+        for variant in COMPILE_VARIANTS:
+            self.compile_variant.addItem(t(f"cards.compileVariant.{variant.value}"))
         self.extra_dialogue_count = LineEdit(form_card)
         self.extra_dialogue_count.setValidator(QIntValidator(0, 100, self.extra_dialogue_count))
         self.extra_dialogue_count.setPlaceholderText(t("cards.field.extraDialogueCount.placeholder"))
@@ -63,6 +74,10 @@ class CharacterCardDetailPanel(QWidget):
         form_layout.addRow(BodyLabel(t("cards.field.aliases"), form_card), self.aliases)
         form_layout.addRow(BodyLabel(t("cards.field.tags"), form_card), self.tags)
         form_layout.addRow(BodyLabel(t("cards.field.notes"), form_card), self.notes)
+        form_layout.addRow(
+            BodyLabel(t("cards.field.compileVariant"), form_card),
+            self.compile_variant,
+        )
         form_layout.addRow(
             BodyLabel(t("cards.field.extraDialogueCount"), form_card),
             self.extra_dialogue_count,
@@ -119,6 +134,7 @@ class CharacterCardDetailPanel(QWidget):
             self.aliases,
             self.tags,
             self.notes,
+            self.compile_variant,
             self.extra_dialogue_count,
             self.compile_requirements,
             self.save_button,
@@ -139,6 +155,7 @@ class CharacterCardDetailPanel(QWidget):
             self.aliases.clear()
             self.tags.clear()
             self.notes.clear()
+            self._set_compile_variant(CharacterCardCompileVariant.GENERAL)
             self.extra_dialogue_count.clear()
             self.compile_requirements.clear()
             return
@@ -155,6 +172,7 @@ class CharacterCardDetailPanel(QWidget):
         self.aliases.setText(", ".join(card.identity.aliases))
         self.tags.setText(", ".join(card.user_metadata.tags))
         self.notes.setPlainText(card.user_metadata.notes)
+        self._set_compile_variant(card.user_metadata.compile_variant)
         dialogue_count = card.user_metadata.extra_dialogue_count
         self.extra_dialogue_count.setText("" if dialogue_count is None else str(dialogue_count))
         self.compile_requirements.setPlainText(card.user_metadata.compile_requirements)
@@ -167,6 +185,7 @@ class CharacterCardDetailPanel(QWidget):
         output.identity.aliases = _split_csv(self.aliases.text())
         output.user_metadata.tags = _split_csv(self.tags.text())
         output.user_metadata.notes = self.notes.toPlainText().strip()
+        output.user_metadata.compile_variant = self._current_compile_variant()
         output.user_metadata.extra_dialogue_count = _optional_dialogue_count(
             self.extra_dialogue_count.text()
         )
@@ -177,6 +196,19 @@ class CharacterCardDetailPanel(QWidget):
             output.revision += 1
         return output
 
+    def _set_compile_variant(self, variant: CharacterCardCompileVariant) -> None:
+        try:
+            index = COMPILE_VARIANTS.index(variant)
+        except ValueError:
+            index = 0
+        self.compile_variant.setCurrentIndex(index)
+
+    def _current_compile_variant(self) -> CharacterCardCompileVariant:
+        index = self.compile_variant.currentIndex()
+        if 0 <= index < len(COMPILE_VARIANTS):
+            return COMPILE_VARIANTS[index]
+        return CharacterCardCompileVariant.GENERAL
+
 
 def _editable_snapshot(card: CharacterCard) -> tuple[object, ...]:
     return (
@@ -185,6 +217,7 @@ def _editable_snapshot(card: CharacterCard) -> tuple[object, ...]:
         tuple(card.identity.aliases),
         tuple(card.user_metadata.tags),
         card.user_metadata.notes,
+        card.user_metadata.compile_variant,
         card.user_metadata.extra_dialogue_count,
         card.user_metadata.compile_requirements,
     )

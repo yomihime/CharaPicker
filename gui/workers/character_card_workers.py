@@ -18,6 +18,8 @@ from utils.cloud_model_presets import CloudModelPreset
 class CharacterCardCompileWorker(QObject):
     succeeded = pyqtSignal(object)
     failed = pyqtSignal(str)
+    stageChanged = pyqtSignal(str)
+    streamDelta = pyqtSignal(str)
     finished = pyqtSignal()
 
     def __init__(self, card: CharacterCard, cloud_preset: CloudModelPreset | None = None) -> None:
@@ -27,10 +29,18 @@ class CharacterCardCompileWorker(QObject):
 
     def run(self) -> None:
         try:
-            compiled = compile_card_from_knowledge_base(self.card, cloud_preset=self.cloud_preset)
+            compiled = compile_card_from_knowledge_base(
+                self.card,
+                cloud_preset=self.cloud_preset,
+                on_stage=self.stageChanged.emit,
+                on_stream_delta=self.streamDelta.emit,
+            )
+            self.stageChanged.emit("saving")
             store.save_card(compiled)
+            self.stageChanged.emit("done")
             self.succeeded.emit(compiled)
         except Exception as exc:  # noqa: BLE001
+            self.stageChanged.emit("failed")
             self.failed.emit(str(exc))
         finally:
             self.finished.emit()
