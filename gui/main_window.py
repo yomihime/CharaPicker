@@ -13,13 +13,11 @@ from qfluentwidgets import (
     NavigationItemPosition,
 )
 
-from core.compiler import compile_character_state, compile_preview_character_state_from_knowledge_base
 from core.extractor import ExtractionStoppedError, Extractor, PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE
-from core.generator import render_profile_markdown
 from core.models import ExtractionMode, ProjectConfig
 from gui.pages.about_page import AboutPage
 from gui.pages.model_page import ModelPage
-from gui.pages.output_page import OutputPage
+from gui.pages.character_card_page import CharacterCardPage
 from gui.pages.prompt_page import PromptPage
 from gui.pages.project_page import ProjectPage
 from gui.pages.settings_page import SettingsPage
@@ -136,7 +134,7 @@ class MainWindow(FluentWindow):
             initial_encoder_options=startup_snapshot.encoder_options if startup_snapshot else None,
             initial_ffmpeg_ready=startup_snapshot.ffmpeg_ready if startup_snapshot else None,
         )
-        self.output_page = OutputPage(self)
+        self.character_card_page = CharacterCardPage(self)
         self.model_page = ModelPage(
             self,
             initial_llamacpp_ready=startup_snapshot.llamacpp_ready if startup_snapshot else None,
@@ -158,7 +156,7 @@ class MainWindow(FluentWindow):
 
     def _init_navigation(self) -> None:
         self.addSubInterface(self.project_page, FIF.HOME, t("app.nav.home"))
-        self.addSubInterface(self.output_page, FIF.DOCUMENT, t("app.nav.output"))
+        self.addSubInterface(self.character_card_page, FIF.DOCUMENT, t("app.nav.characterCards"))
         self.addSubInterface(self.model_page, FIF.ROBOT, t("app.nav.model"))
         self.addSubInterface(self.prompt_page, FIF.EDIT, t("app.nav.prompts"))
         self.addSubInterface(
@@ -178,9 +176,12 @@ class MainWindow(FluentWindow):
     def _connect_signals(self) -> None:
         self.project_page.extractionRequested.connect(self.run_extraction)
         self.project_page.configSaved.connect(self.save_config)
+        self.project_page.projectChanged.connect(self.character_card_page.set_project)
         self.settings_page.languageChanged.connect(self.show_language_changed)
         self.settings_page.themeChanged.connect(self.apply_theme_changed)
         self.settings_page.logLevelChanged.connect(self.apply_log_level_changed)
+        self.character_card_page.set_model_preset_provider(self.model_page.current_cloud_video_preset)
+        self.character_card_page.set_project(self.project_page.current_project())
 
     def save_config(self, config: ProjectConfig) -> None:
         LOGGER.info("Saving project config from UI; project_id=%s", config.project_id)
@@ -227,9 +228,8 @@ class MainWindow(FluentWindow):
         if self._extraction_thread is not None:
             return
         LOGGER.info(
-            "Preview requested; project_id=%s targets=%s sources=%s",
+            "Preview requested; project_id=%s sources=%s",
             config.project_id,
-            len(config.target_characters),
             len(config.source_paths),
         )
         cloud_preset = self.model_page.current_cloud_video_preset()
@@ -266,9 +266,8 @@ class MainWindow(FluentWindow):
         if self._extraction_thread is not None:
             return
         LOGGER.info(
-            "Full extraction requested from UI; project_id=%s targets=%s sources=%s",
+            "Full extraction requested from UI; project_id=%s sources=%s",
             config.project_id,
-            len(config.target_characters),
             len(config.source_paths),
         )
         cloud_preset = self.model_page.current_cloud_video_preset()
@@ -300,20 +299,6 @@ class MainWindow(FluentWindow):
         self._extraction_thread.start()
 
     def _on_preview_succeeded(self, config: ProjectConfig) -> None:
-        first_character = config.target_characters[0] if config.target_characters else t("app.preview.defaultCharacter")
-        try:
-            state = compile_preview_character_state_from_knowledge_base(config.project_id, first_character)
-        except Exception:
-            LOGGER.warning(
-                "Knowledge-base-backed preview output failed; project_id=%s character=%s",
-                config.project_id,
-                first_character,
-                exc_info=True,
-            )
-            state = None
-        if state is None:
-            state = compile_character_state(first_character)
-        self.output_page.set_markdown(render_profile_markdown(state))
         InfoBar.info(
             title=t("app.preview.done.title"),
             content=t("app.preview.done.content"),
