@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -28,6 +29,15 @@ from utils.cloud_model_presets import CloudModelPreset, cloud_model_provider
 LOGGER = logging.getLogger(__name__)
 CHARACTER_CARD_COMPILE_PROMPT = "character_card_compile"
 CHARACTER_CARD_COMPILE_TIMEOUT_SECONDS = 300
+JSON_CODE_BLOCK_PATTERN = re.compile(r"```(?:json)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
+EXPECTED_AI_RESPONSE_KEYS = (
+    "profile",
+    "prompt_surfaces",
+    "dialogue",
+    "character_book",
+    "relationships",
+    "warnings",
+)
 CompileStageCallback = Callable[[str], None]
 StreamDeltaCallback = Callable[[str], None]
 
@@ -91,6 +101,7 @@ def compile_card_from_knowledge_base(
         episode_payloads,
         cloud_preset,
         target.compile_variant,
+        on_stage=on_stage,
         on_stream_delta=on_stream_delta,
     )
     _record_last_compile_variant(output, target.compile_variant)
@@ -213,6 +224,7 @@ def _review_card_with_ai(
     cloud_preset: CloudModelPreset,
     compile_variant: CharacterCardCompileVariant,
     *,
+    on_stage: CompileStageCallback | None = None,
     on_stream_delta: StreamDeltaCallback | None = None,
 ) -> None:
     request = build_model_call_request(
@@ -243,6 +255,7 @@ def _review_card_with_ai(
     )
     request = request.model_copy(update={"timeout_seconds": CHARACTER_CARD_COMPILE_TIMEOUT_SECONDS})
     result = call_text_model(request, on_stream_delta=on_stream_delta)
+    _emit_stage(on_stage, "parsing")
     payload = _parse_json_object(result.content)
     _apply_ai_card_payload(card, payload)
     card.source_context.prompt_profile_id = CHARACTER_CARD_COMPILE_PROMPT
@@ -576,22 +589,79 @@ def _normalize_dialogue_roles(payload: dict[str, Any]) -> None:
 
 
 def _parse_json_object(text: str) -> dict[str, Any]:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        stripped = stripped.strip("`")
-        if stripped.lstrip().startswith("json"):
-            stripped = stripped.lstrip()[4:].strip()
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start < 0 or end < start:
+    payloads: list[tuple[tuple[int, int, int], dict[str, Any]]] = []
+    last_error: json.JSONDecodeError | None = None
+    for candidate in _iter_json_candidate_texts(text):
+        candidate_payloads, error = _parse_json_candidate_payloads(candidate)
+        payloads.extend(candidate_payloads)
+        if error is not None:
+            last_error = error
+    if payloads:
+        return max(payloads, key=lambda item: item[0])[1]
+    if "{" not in text or "}" not in text:
         raise ValueError("character card model response did not contain a JSON object")
-    try:
-        payload = json.loads(stripped[start : end + 1])
-    except json.JSONDecodeError as exc:
-        raise ValueError("character card model response was not valid JSON") from exc
-    if not isinstance(payload, dict):
-        raise ValueError("character card model response must be a JSON object")
-    return payload
+    detail = ""
+    if last_error is not None:
+        detail = f": {last_error.msg} at line {last_error.lineno} column {last_error.colno}"
+    raise ValueError(f"character card model response was not valid JSON{detail}") from last_error
+
+
+def _iter_json_candidate_texts(text: str) -> list[str]:
+    stripped = text.strip().lstrip("\ufeff")
+    candidates = [match.group(1).strip() for match in JSON_CODE_BLOCK_PATTERN.finditer(stripped)]
+    candidates.append(stripped)
+    return [candidate for candidate in candidates if candidate]
+
+
+def _parse_json_candidate_payloads(
+    candidate: str,
+) -> tuple[list[tuple[tuple[int, int, int], dict[str, Any]]], json.JSONDecodeError | None]:
+    payloads: list[tuple[tuple[int, int, int], dict[str, Any]]] = []
+    last_error: json.JSONDecodeError | None = None
+    variants = [_strip_json_language_prefix(candidate)]
+    without_trailing_commas = _remove_trailing_json_commas(variants[0])
+    if without_trailing_commas != variants[0]:
+        variants.append(without_trailing_commas)
+
+    for variant in variants:
+        stripped = variant.strip()
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError as exc:
+            last_error = exc
+        else:
+            if isinstance(payload, dict):
+                payloads.append((_json_payload_score(payload, 0, len(stripped)), payload))
+
+        decoder = json.JSONDecoder()
+        for match in re.finditer(r"{", stripped):
+            start = match.start()
+            try:
+                payload, end = decoder.raw_decode(stripped[start:])
+            except json.JSONDecodeError as exc:
+                last_error = exc
+                continue
+            if isinstance(payload, dict):
+                payloads.append((_json_payload_score(payload, start, end), payload))
+    return payloads, last_error
+
+
+def _strip_json_language_prefix(text: str) -> str:
+    stripped = text.strip()
+    if stripped.lower().startswith("json\n"):
+        return stripped[5:].lstrip()
+    if stripped.lower().startswith("json\r\n"):
+        return stripped[6:].lstrip()
+    return stripped
+
+
+def _remove_trailing_json_commas(text: str) -> str:
+    return re.sub(r",(\s*[}\]])", r"\1", text)
+
+
+def _json_payload_score(payload: dict[str, Any], start: int, span: int) -> tuple[int, int, int]:
+    expected_key_count = sum(1 for key in EXPECTED_AI_RESPONSE_KEYS if key in payload)
+    return (expected_key_count, start, span)
 
 
 def _collect_episode_payloads(
