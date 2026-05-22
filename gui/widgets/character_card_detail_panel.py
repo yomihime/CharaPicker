@@ -61,11 +61,16 @@ class CharacterCardDetailPanel(QWidget):
         form_layout.setSpacing(14)
 
         self.character_name = LineEdit(form_card)
+        self.character_name.setPlaceholderText(t("cards.field.characterName.placeholder"))
         self.display_name = LineEdit(form_card)
+        self.display_name.setPlaceholderText(t("cards.field.displayName.placeholder"))
         self.aliases = LineEdit(form_card)
+        self.aliases.setPlaceholderText(t("cards.field.aliases.placeholder"))
         self.tags = LineEdit(form_card)
+        self.tags.setPlaceholderText(t("cards.field.tags.placeholder"))
         self.notes = PlainTextEdit(form_card)
         self.notes.setFixedHeight(132)
+        self.notes.setPlaceholderText(t("cards.field.notes.placeholder"))
         self.compile_variant = ComboBox(form_card)
         for variant in COMPILE_VARIANTS:
             self.compile_variant.addItem(t(f"cards.compileVariant.{variant.value}"))
