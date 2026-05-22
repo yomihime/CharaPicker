@@ -16,6 +16,7 @@
 - [抽出ワークフロー説明](extraction-workflow.ja_JP.md)
 - [提取与角色成长编译路线](extraction-development-roadmap.zh_CN.md)
 - [真实预览结果接入计划](preview-real-result-ingestion-plan.zh_CN.md)
+- [角色卡最终编译与角色卡页面计划](character-card-compilation-plan.zh_CN.md)
 
 ## 产品与运行时
 

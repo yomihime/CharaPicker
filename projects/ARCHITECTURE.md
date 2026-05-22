@@ -29,7 +29,11 @@
 - `{project_id}/knowledge_base/seasons/{season_id}/season_content.json`：单季完整结构化内容合并结果。
 - `{project_id}/knowledge_base/seasons/{season_id}/season_summary.json`：单季压缩摘要。
 - `{project_id}/knowledge_base/seasons/{season_id}/character_stage_states.json`：季内角色阶段状态。
-- `{project_id}/output/`：导出的角色卡和资料。
+- `{project_id}/knowledge_base/character_cards/{card_id}/card.json`：正式 CharaPicker 角色卡母本。
+- `{project_id}/knowledge_base/character_cards/{card_id}/cover.png`：角色卡裁剪后的 9:16 封面。
+- `{project_id}/knowledge_base/character_cards/{card_id}/original_cover.{ext}`：开发阶段保留的原图副本，验收后收尾时再按计划清理。
+- `{project_id}/knowledge_base/preview_character_cards/preview_card/card.json`：隔离的角色卡预览草稿，不进入正式海报墙扫描。
+- `{project_id}/output/character_cards/`：角色卡派生导出结果，包括 Markdown、HTML、CharaPicker JSON、Character Card V2 JSON 和 AstrBot 手动复制清单。
 
 ## 与其他目录的关系
 
@@ -37,7 +41,7 @@
 - `utils/state_manager.py` 保存和读取 `config.json`。
 - `utils/source_importer.py` 负责外部素材导入、`raw/` 到 `materials/` 的轻量链接、raw 清理和素材移除。
 - `core` 读取素材并写入 `knowledge_base/`；当前分层结构以 `core/extractor.py` 和 `core/ARCHITECTURE.md` 为准。
-- `gui` 通过项目页展示和编辑项目配置。
+- `gui` 通过项目页展示和编辑项目配置，通过角色卡页管理项目内角色卡。
 
 ## 维护注意事项
 
@@ -46,5 +50,6 @@
 - 清理 `raw/` 前必须确保 `materials/` 中已有可用素材，并在 `config.json` 中记录已清理路径。
 - 用户素材、缓存、知识库和输出结果默认不应进入版本控制。
 - 写入 JSON 时保持 UTF-8 和结构化格式。
+- 正式角色卡、预览草稿和导出产物路径必须隔离：正式卡只在 `knowledge_base/character_cards/`，预览草稿只在 `knowledge_base/preview_character_cards/`，导出只在 `output/character_cards/`。
 - 后续新增项目子目录时，同步更新本说明和路径工具。
 - 修改知识库结构时，同步核对 `docs/extraction-workflow.zh_CN.md` 和 `docs/extraction-development-roadmap.zh_CN.md`，避免把 roadmap 当成已实现事实。

@@ -50,7 +50,7 @@
 
 ## 3. AstrBot 官方资料记录
 
-最近核对日期：2026-05-16。
+最近核对日期：2026-05-22。
 
 - 官方配置文档：`https://docs.astrbot.app/dev/astrbot-config.html`
 - 官方开发文档：`https://docs.astrbot.app/dev/star/guides/ai.html`
@@ -58,7 +58,7 @@
 - 截至 2026-05-16，AstrBot v4 文档说明 `persona` 配置项已废弃，应使用 WebUI 配置人格。
 - 旧版人格字段包含 `id`、`name`、`description`、`system_prompt`。
 - 开发文档中的 Persona 模型包含 `persona_id`、`system_prompt`、`begin_dialogs`、`tools` 等字段。
-- 截至 2026-05-16，PR #4532 仍处于 open / 未合并状态，导入/导出功能和字段名在合并前可能变化。
+- 截至 2026-05-22，PR #4532 仍处于 open / 未合并状态，导入/导出功能和字段名在合并前可能变化。
 - PR #4532 的候选导出结构为 `{"version":"1.0","persona":[{"name": "...","prompt": "...","begin_dialogs":[{"user":"...","assistant":"..."}]}]}`。
 - PR #4532 的导入逻辑会把 `persona[0].name` 转为 `persona_id`，`persona[0].prompt` 转为 `system_prompt`，并把每组 `{user, assistant}` 展平成 AstrBot 内部的 `begin_dialogs` 列表。
 - demo 截图还展示了“自定义报错回复信息（可选）”，该字段需由 demo JSON 或官方字段说明确认后再写入正式映射。
