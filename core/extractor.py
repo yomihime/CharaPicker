@@ -1504,7 +1504,6 @@ class Extractor(QObject):
         base_url: str = "",
         api_key: str = "",
     ) -> ModelCallRequest:
-        targets = config.target_characters or [t("extractor.noTarget")]
         payload = self._build_chunk_payload(
             chunk_text,
             previous_episode_summary=previous_episode_summary,
@@ -1520,7 +1519,6 @@ class Extractor(QObject):
             base_url=base_url,
             api_key=api_key,
             variables={
-                "target_characters": targets,
                 "chunk_text": payload,
             },
             metadata={
@@ -1665,18 +1663,16 @@ class Extractor(QObject):
         emit_event = emit_event or self.insightGenerated.emit
         emit_progress = emit_progress or self.progressChanged.emit
 
-        targets = ", ".join(config.target_characters) or t("extractor.noTarget")
         LOGGER.info(
-            "Preview extraction started; project_id=%s targets=%s sources=%s mode=%s",
+            "Preview extraction started; project_id=%s sources=%s mode=%s",
             config.project_id,
-            len(config.target_characters),
             len(config.source_paths),
             config.extraction_mode.value,
         )
         emit_event(
             InsightEvent(
                 title=t("extractor.config.title"),
-                description=t("extractor.config.description", targets=targets),
+                description=t("extractor.config.description"),
                 status=InsightStatus.DONE,
             ).model_dump(mode="json")
         )
