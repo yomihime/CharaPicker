@@ -60,6 +60,7 @@ class CharacterCardGallery(QWidget):
         super().__init__(parent)
         self._cards: list[CharacterCardSummary] = []
         self._status_filter: CharacterCardStatus | None = None
+        self._tag_filter = ""
         self.setObjectName("characterCardGalleryPanel")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMinimumWidth(0)
@@ -107,6 +108,14 @@ class CharacterCardGallery(QWidget):
             filter_row.addWidget(button)
         root.addWidget(filter_panel)
 
+        self.tag_filter_buttons: dict[str, PushButton] = {}
+        self.tag_filter_panel = QWidget(self)
+        self.tag_filter_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        self.tag_filter_flow = FlowLayout(self.tag_filter_panel, spacing=4)
+        self.tag_filter_panel.setLayout(self.tag_filter_flow)
+        self.tag_filter_panel.hide()
+        root.addWidget(self.tag_filter_panel)
+
         self.list_widget = QListWidget(self)
         self.list_widget.setObjectName("characterCardGallery")
         self.list_widget.setMinimumWidth(0)
@@ -123,12 +132,17 @@ class CharacterCardGallery(QWidget):
         root.addWidget(self.count_label)
 
         self.search_edit.textChanged.connect(self._refresh_items)
+        self.filter_button.clicked.connect(self._toggle_tag_filter_panel)
         self.list_widget.currentItemChanged.connect(self._emit_selected)
+        self._sync_tag_filter_options()
         self._sync_filter_buttons()
         self.apply_theme_colors()
 
     def set_cards(self, cards: list[CharacterCardSummary]) -> None:
         self._cards = list(cards)
+        if self._tag_filter and self._tag_filter not in self._available_tags():
+            self._tag_filter = ""
+        self._sync_tag_filter_options()
         self._refresh_items()
 
     def selected_card_id(self) -> str:
@@ -218,6 +232,14 @@ class CharacterCardGallery(QWidget):
         self._sync_filter_buttons()
         self._refresh_items()
 
+    def _set_tag_filter(self, tag: str) -> None:
+        self._tag_filter = tag
+        self._sync_filter_buttons()
+        self._refresh_items()
+
+    def _toggle_tag_filter_panel(self) -> None:
+        self.tag_filter_panel.setVisible(not self.tag_filter_panel.isVisible())
+
     def _refresh_items(self) -> None:
         selected_id = self.selected_card_id()
         query = self.search_edit.text().strip().casefold()
@@ -243,6 +265,8 @@ class CharacterCardGallery(QWidget):
                     return False
             elif card.compile_status != self._status_filter:
                 return False
+        if self._tag_filter and self._tag_filter not in card.tags:
+            return False
         haystack = " ".join(
             [
                 card.display_name,
@@ -281,36 +305,61 @@ class CharacterCardGallery(QWidget):
         for status, button in self.filter_buttons.items():
             checked = status == self._status_filter
             button.setChecked(checked)
-            if checked:
-                button.setStyleSheet(
-                    f"""
-                    PushButton {{
-                        color: {CHARACTER_CARD_ACCENT};
-                        border: 1px solid {CHARACTER_CARD_ACCENT};
-                        background: {CHARACTER_CARD_ACCENT_SOFT};
-                        border-radius: 13px;
-                        padding: 0 7px;
-                        font-size: 11px;
-                    }}
-                    """
-                )
-            else:
-                button.setStyleSheet(
-                    f"""
-                    PushButton {{
-                        color: {inactive_text};
-                        border: 1px solid {inactive_border};
-                        background: {inactive_background};
-                        border-radius: 13px;
-                        padding: 0 7px;
-                        font-size: 11px;
-                    }}
-                    PushButton:hover {{
-                        border: 1px solid {CHARACTER_CARD_ACCENT};
-                        background: {CHARACTER_CARD_ACCENT_SOFT};
-                    }}
-                    """
-                )
+            _apply_filter_button_style(
+                button,
+                checked=checked,
+                inactive_text=inactive_text,
+                inactive_border=inactive_border,
+                inactive_background=inactive_background,
+            )
+        for tag, button in self.tag_filter_buttons.items():
+            checked = tag == self._tag_filter
+            button.setChecked(checked)
+            _apply_filter_button_style(
+                button,
+                checked=checked,
+                inactive_text=inactive_text,
+                inactive_border=inactive_border,
+                inactive_background=inactive_background,
+            )
+
+    def _sync_tag_filter_options(self) -> None:
+        while self.tag_filter_flow.count():
+            item = self.tag_filter_flow.takeAt(0)
+            widget = item.widget() if item is not None else None
+            if widget is not None:
+                widget.deleteLater()
+        self.tag_filter_buttons = {}
+
+        all_button = self._make_tag_filter_button(t("cards.tagFilter.all"), "")
+        self.tag_filter_flow.addWidget(all_button)
+        tags = self._available_tags()
+        if not tags:
+            empty = CaptionLabel(t("cards.tagFilter.empty"), self.tag_filter_panel)
+            empty.setWordWrap(True)
+            self.tag_filter_flow.addWidget(empty)
+            self._sync_filter_buttons()
+            return
+        for tag in tags:
+            self.tag_filter_flow.addWidget(self._make_tag_filter_button(_elide_text(tag, 14), tag))
+        self._sync_filter_buttons()
+
+    def _make_tag_filter_button(self, label: str, tag: str) -> PushButton:
+        button = PushButton(label, self.tag_filter_panel)
+        button.setCheckable(True)
+        button.setToolTip(tag or t("cards.tagFilter.all"))
+        button.setFixedSize(_tag_filter_chip_width(button, label), 26)
+        button.setMinimumWidth(0)
+        button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        button.clicked.connect(lambda _checked=False, value=tag: self._set_tag_filter(value))
+        self.tag_filter_buttons[tag] = button
+        return button
+
+    def _available_tags(self) -> list[str]:
+        return sorted(
+            {tag for card in self._cards for tag in card.tags if tag.strip()},
+            key=str.casefold,
+        )
 
 
 class PosterCardWidget(QWidget):
@@ -492,6 +541,50 @@ def _variant_text(value: str) -> str:
 
 def _filter_chip_width(button: PushButton, label: str) -> int:
     return max(36, min(68, button.fontMetrics().horizontalAdvance(label) + 14))
+
+
+def _tag_filter_chip_width(button: PushButton, label: str) -> int:
+    return max(52, min(128, button.fontMetrics().horizontalAdvance(label) + 18))
+
+
+def _apply_filter_button_style(
+    button: PushButton,
+    *,
+    checked: bool,
+    inactive_text: str,
+    inactive_border: str,
+    inactive_background: str,
+) -> None:
+    if checked:
+        button.setStyleSheet(
+            f"""
+            PushButton {{
+                color: {CHARACTER_CARD_ACCENT};
+                border: 1px solid {CHARACTER_CARD_ACCENT};
+                background: {CHARACTER_CARD_ACCENT_SOFT};
+                border-radius: 13px;
+                padding: 0 7px;
+                font-size: 11px;
+            }}
+            """
+        )
+        return
+    button.setStyleSheet(
+        f"""
+        PushButton {{
+            color: {inactive_text};
+            border: 1px solid {inactive_border};
+            background: {inactive_background};
+            border-radius: 13px;
+            padding: 0 7px;
+            font-size: 11px;
+        }}
+        PushButton:hover {{
+            border: 1px solid {CHARACTER_CARD_ACCENT};
+            background: {CHARACTER_CARD_ACCENT_SOFT};
+        }}
+        """
+    )
 
 
 def _elide_text(value: str, maximum: int) -> str:

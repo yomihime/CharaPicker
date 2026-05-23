@@ -155,7 +155,6 @@ class CharacterCardDetailPanel(QWidget):
 
     def apply_to_card(self, card: CharacterCard) -> CharacterCard:
         output = card.model_copy(deep=True)
-        original = _editable_snapshot(output)
         output.identity.character_name = self.character_name.text().strip()
         output.identity.display_name = self.display_name.text().strip()
         output.identity.aliases = self.aliases.values()
@@ -168,8 +167,6 @@ class CharacterCardDetailPanel(QWidget):
         output.user_metadata.compile_requirements = self.compile_requirements.toPlainText().strip()
         if not output.identity.display_name:
             output.identity.display_name = output.identity.character_name
-        if _editable_snapshot(output) != original:
-            output.revision += 1
         return output
 
     def is_dirty(self) -> bool:
@@ -574,6 +571,7 @@ class CharacterCardDetailPanel(QWidget):
         self.export_astrbot_after_compile.stateChanged.connect(self._sync_compile_button)
 
     def _on_text_changed(self) -> None:
+        self._enforce_text_limits()
         self._update_text_counters()
         self._sync_dirty_state()
 
@@ -664,6 +662,12 @@ class CharacterCardDetailPanel(QWidget):
         self.requirements_counter.setText(
             t("cards.textCounter", count=len(self.compile_requirements.toPlainText()), limit=TEXT_LIMIT)
         )
+
+    def _enforce_text_limits(self) -> None:
+        if not hasattr(self, "notes"):
+            return
+        for editor in (self.notes, self.compile_requirements):
+            _trim_textarea_to_limit(editor, TEXT_LIMIT)
 
     def _editable_widgets(self) -> tuple[QWidget, ...]:
         return (
@@ -796,6 +800,19 @@ def _configure_textarea(editor: PlainTextEdit) -> None:
     editor.setFixedHeight(86)
     if hasattr(editor, "setViewportMargins"):
         editor.setViewportMargins(0, 0, 0, 16)
+
+
+def _trim_textarea_to_limit(editor: PlainTextEdit, limit: int) -> None:
+    text = editor.toPlainText()
+    if len(text) <= limit:
+        return
+    cursor_position = editor.textCursor().position()
+    editor.blockSignals(True)
+    editor.setPlainText(text[:limit])
+    editor.blockSignals(False)
+    cursor = editor.textCursor()
+    cursor.setPosition(min(cursor_position, limit))
+    editor.setTextCursor(cursor)
 
 
 def _make_card(parent: QWidget, title: str, *, compact: bool = False) -> tuple[CardWidget, QVBoxLayout]:

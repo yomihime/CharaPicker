@@ -92,6 +92,37 @@ class NewCharacterCardDialog(FluentDialog):
             self.accept()
 
 
+class UnsavedCardSwitchDialog(FluentDialog):
+    SAVE = "save"
+    DISCARD = "discard"
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(t("cards.switchUnsaved.dialog.title"), parent, width=520, height=236)
+        self.choice = ""
+
+        description = BodyLabel(t("cards.switchUnsaved.dialog.content"), self.dialog_card)
+        description.setWordWrap(True)
+        self.content_layout.addWidget(description)
+
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        cancel_button = PushButton(t("cards.switchUnsaved.dialog.cancel"), self.dialog_card)
+        discard_button = PushButton(t("cards.switchUnsaved.dialog.discard"), self.dialog_card)
+        save_button = PrimaryPushButton(t("cards.switchUnsaved.dialog.save"), self.dialog_card)
+        actions.addWidget(cancel_button)
+        actions.addWidget(discard_button)
+        actions.addWidget(save_button)
+        self.content_layout.addLayout(actions)
+
+        cancel_button.clicked.connect(self.reject)
+        discard_button.clicked.connect(lambda: self._choose(self.DISCARD))
+        save_button.clicked.connect(lambda: self._choose(self.SAVE))
+
+    def _choose(self, choice: str) -> None:
+        self.choice = choice
+        self.accept()
+
+
 class CharacterCardLoadingDialog(FluentDialog):
     def __init__(self, title: str, message: str, parent: QWidget | None = None) -> None:
         super().__init__(title, parent, width=660, height=420, close_rejects=False)
@@ -160,6 +191,7 @@ class CharacterCardPage(QWidget):
         self._worker: object | None = None
         self._model_preset_provider: Callable[[], CloudModelPreset | None] | None = None
         self._loading_dialog: CharacterCardLoadingDialog | None = None
+        self._suppress_gallery_selection = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(22, 10, 22, 16)
@@ -177,8 +209,10 @@ class CharacterCardPage(QWidget):
         header_text.addWidget(self.project_label)
         header.addLayout(header_text, 1)
         header.addStretch(1)
+        self.preview_draft_button = PushButton(t("cards.action.previewDraft"), self)
         self.import_button = PushButton(t("cards.action.import"), self)
         self.new_button = PrimaryPushButton(t("cards.action.new"), self)
+        header.addWidget(self.preview_draft_button)
         header.addWidget(self.import_button)
         header.addWidget(self.new_button)
         root.addLayout(header)
@@ -195,6 +229,7 @@ class CharacterCardPage(QWidget):
         root.addLayout(self.workbench_layout, 1)
 
         self.gallery.cardSelected.connect(self._load_card)
+        self.preview_draft_button.clicked.connect(self._preview_draft)
         self.new_button.clicked.connect(self._create_card)
         self.import_button.clicked.connect(self._import_card)
         self.detail.saveRequested.connect(self._save_metadata)
@@ -233,7 +268,7 @@ class CharacterCardPage(QWidget):
         self._project = project
         self._current_card = None
         has_project = project is not None
-        for widget in (self.import_button, self.new_button, self.gallery):
+        for widget in (self.preview_draft_button, self.import_button, self.new_button, self.gallery):
             widget.setEnabled(has_project)
         if project is None:
             self.project_label.setText(t("cards.noProject"))
@@ -269,6 +304,14 @@ class CharacterCardPage(QWidget):
     def _load_card(self, card_id: str) -> None:
         if self._project is None or not card_id:
             return
+        if self._suppress_gallery_selection:
+            return
+        previous_card_id = self._current_card.card_id if self._current_card is not None else ""
+        if previous_card_id == card_id:
+            return
+        if not self._confirm_unsaved_switch():
+            self._select_gallery_silently(previous_card_id)
+            return
         try:
             self._current_card = store.load_card(self._project.project_id, card_id)
         except Exception as exc:  # noqa: BLE001
@@ -282,10 +325,10 @@ class CharacterCardPage(QWidget):
         original_name = self._current_card.identity.character_name
         original_compile_inputs = _compile_inputs_snapshot(self._current_card)
         updated = self.detail.apply_to_card(self._current_card)
-        changed = updated.revision != self._current_card.revision
+        compile_inputs_changed = original_compile_inputs != _compile_inputs_snapshot(updated)
+        changed = compile_inputs_changed
         if not changed:
             return True
-        compile_inputs_changed = original_compile_inputs != _compile_inputs_snapshot(updated)
         if updated.compile_status == CharacterCardStatus.COMPILED:
             if original_name != updated.identity.character_name:
                 updated = store.mark_card_stale(updated, "character_name_changed")
@@ -293,6 +336,7 @@ class CharacterCardPage(QWidget):
                 updated = store.mark_card_stale(updated, "compile_inputs_changed")
         store.save_card(updated)
         self._current_card = updated
+        self.detail.set_card(updated)
         self.refresh_gallery(updated.card_id)
         if not silent:
             self._show_success(t("cards.save.success.title"), t("cards.save.success.content"))
@@ -349,7 +393,6 @@ class CharacterCardPage(QWidget):
             height=dialog.crop_rect.height(),
             scale=dialog.crop_scale,
         )
-        card.revision += 1
         store.save_card(card)
         self._current_card = card
         self.detail.set_card(card)
@@ -361,7 +404,6 @@ class CharacterCardPage(QWidget):
         card = self._current_card.model_copy(deep=True)
         card.assets.cover_path = ""
         card.assets.crop = None
-        card.revision += 1
         store.save_card(card)
         self._current_card = card
         self.detail.set_card(card)
@@ -389,7 +431,7 @@ class CharacterCardPage(QWidget):
         cloud_preset = self._model_preset_provider() if self._model_preset_provider is not None else None
         worker = CharacterCardCompileWorker(self._current_card, cloud_preset)
         worker.succeeded.connect(self._on_compile_succeeded)
-        worker.failed.connect(lambda error: self._show_warning(t("cards.compile.failed.title"), error))
+        worker.failed.connect(self._on_compile_failed)
         worker.stageChanged.connect(self._on_compile_stage_changed)
         worker.streamDelta.connect(self._on_compile_stream_delta)
         self._show_loading(t("cards.compile.loading.title"), t("cards.compile.loading.content"))
@@ -444,6 +486,23 @@ class CharacterCardPage(QWidget):
                 self._show_warning(t("cards.astrbot.partial.title"), result.error or "; ".join(result.warnings))
         self._show_success(t("cards.compile.success.title"), t("cards.compile.success.content"))
 
+    def _on_compile_failed(self, error: str) -> None:
+        card = getattr(self._worker, "card", None)
+        if not isinstance(card, CharacterCard):
+            card = self._current_card
+        if card is not None:
+            failed = card.model_copy(deep=True)
+            failed.compile_status = CharacterCardStatus.FAILED
+            failed.quality.needs_review = True
+            failed.quality.last_error = error
+            if error and error not in failed.quality.warnings:
+                failed.quality.warnings = [*failed.quality.warnings, error]
+            store.save_card(failed)
+            self._current_card = failed
+            self.detail.set_card(failed)
+            self.refresh_gallery(failed.card_id)
+        self._show_warning(t("cards.compile.failed.title"), error)
+
     def _on_compile_stage_changed(self, stage: str) -> None:
         if self._loading_dialog is None:
             return
@@ -486,6 +545,25 @@ class CharacterCardPage(QWidget):
     def _clear_worker(self) -> None:
         self._worker_thread = None
         self._worker = None
+
+    def _confirm_unsaved_switch(self) -> bool:
+        if not self.detail.is_dirty():
+            return True
+        dialog = UnsavedCardSwitchDialog(self)
+        if not dialog.exec():
+            return False
+        if dialog.choice == UnsavedCardSwitchDialog.SAVE:
+            return self._save_metadata(silent=True)
+        return dialog.choice == UnsavedCardSwitchDialog.DISCARD
+
+    def _select_gallery_silently(self, card_id: str) -> None:
+        if not card_id:
+            return
+        self._suppress_gallery_selection = True
+        try:
+            self.gallery.select_card(card_id)
+        finally:
+            self._suppress_gallery_selection = False
 
     def _show_loading(self, title: str, content: str) -> None:
         self._hide_loading()
