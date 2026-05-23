@@ -53,6 +53,13 @@ COMPILE_VARIANTS = (
     CharacterCardCompileVariant.CHARACTER_CARD_V2,
 )
 TEXT_LIMIT = 3000
+STALE_WARNING_REASONS = {"character_name_changed", "compile_inputs_changed"}
+REVIEW_WARNING_MESSAGES = {
+    "summary is empty",
+    "no evidence was matched",
+    "system_prompt is empty",
+    "preset_dialogues is empty",
+}
 
 
 class CharacterCardDetailPanel(QWidget):
@@ -637,9 +644,13 @@ class CharacterCardDetailPanel(QWidget):
         self.status_values["compiledAt"].setText(
             card.compiled_at.strftime("%Y-%m-%d %H:%M") if card.compiled_at else "-"
         )
-        warnings = _warning_messages(card)
-        self.status_values["warnings"].setText(_warning_summary(card, warnings))
-        self.status_values["warnings"].setToolTip("\n".join(warnings))
+        errors, review_warnings, compile_notes = _notice_messages(card)
+        self.status_values["warnings"].setText(
+            _notice_summary(errors, review_warnings, compile_notes)
+        )
+        self.status_values["warnings"].setToolTip(
+            "\n".join([*errors, *review_warnings, *compile_notes])
+        )
         self.status_values["edit"].setStyleSheet(
             _status_value_style("warning" if self._dirty else "success")
         )
@@ -649,9 +660,9 @@ class CharacterCardDetailPanel(QWidget):
         self.status_values["warnings"].setStyleSheet(
             _status_value_style(
                 "danger"
-                if card.compile_status == CharacterCardStatus.FAILED or card.quality.last_error
+                if card.compile_status == CharacterCardStatus.FAILED or errors
                 else "warning"
-                if warnings
+                if review_warnings
                 else "neutral"
             )
         )
@@ -979,24 +990,51 @@ def _status_kind(card: CharacterCard, dirty: bool = False) -> str:
     return "neutral"
 
 
-def _warning_messages(card: CharacterCard) -> list[str]:
+def _notice_messages(card: CharacterCard) -> tuple[list[str], list[str], list[str]]:
+    errors = [card.quality.last_error.strip()] if card.quality.last_error.strip() else []
     messages = [
-        card.quality.last_error,
         *card.quality.warnings,
         *card.evidence.warnings,
     ]
-    return list(dict.fromkeys([message.strip() for message in messages if message.strip()]))
+    visible_messages = []
+    seen = set(errors)
+    for message in messages:
+        text = message.strip()
+        if not text or text in seen or _is_stale_warning_reason(text):
+            continue
+        visible_messages.append(text)
+        seen.add(text)
+    review_warnings = [message for message in visible_messages if _is_review_warning(message)]
+    compile_notes = [message for message in visible_messages if message not in review_warnings]
+    return errors, review_warnings, compile_notes
 
 
-def _warning_summary(card: CharacterCard, warnings: list[str]) -> str:
-    if card.quality.last_error:
-        return _elide_text(card.quality.last_error, 24)
-    if not warnings:
-        return "-"
-    first = warnings[0]
-    if len(warnings) == 1:
-        return _elide_text(first, 24)
-    return _elide_text(t("cards.status.warningCount", count=len(warnings)), 24)
+def _notice_summary(errors: list[str], review_warnings: list[str], compile_notes: list[str]) -> str:
+    if errors:
+        return _elide_text(errors[0], 24)
+    if review_warnings and compile_notes:
+        return _elide_text(
+            t(
+                "cards.status.mixedNoticeCount",
+                review=len(review_warnings),
+                notes=len(compile_notes),
+            ),
+            24,
+        )
+    if review_warnings:
+        return _elide_text(t("cards.status.reviewCount", count=len(review_warnings)), 24)
+    if compile_notes:
+        return _elide_text(t("cards.status.noteCount", count=len(compile_notes)), 24)
+    return "-"
+
+
+def _is_stale_warning_reason(message: str) -> bool:
+    return message in STALE_WARNING_REASONS
+
+
+def _is_review_warning(message: str) -> bool:
+    normalized = message.strip().lower()
+    return normalized in REVIEW_WARNING_MESSAGES
 
 
 def _short_compile_variant(variant: CharacterCardCompileVariant) -> str:

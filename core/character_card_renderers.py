@@ -7,6 +7,9 @@ from typing import Any
 from core.models import CharacterCard
 
 
+STALE_WARNING_REASONS = {"character_name_changed", "compile_inputs_changed"}
+
+
 def render_card_markdown(card: CharacterCard) -> str:
     name = _card_name(card)
     aliases = ", ".join(card.identity.aliases)
@@ -48,9 +51,9 @@ def render_card_markdown(card: CharacterCard) -> str:
             label = " / ".join(str(item.get(key, "")) for key in ("season_id", "episode_id") if item.get(key))
             state = item.get("state", {})
             lines.append(f"- {label}: {_dict_text(state) if isinstance(state, dict) else state}")
-    warnings = [*card.quality.warnings, *card.evidence.warnings]
+    warnings = _display_warnings(card)
     if warnings:
-        lines.extend(["", "## Warnings"])
+        lines.extend(["", "## Compile Notes"])
         lines.extend([f"- {item}" for item in warnings if item.strip()])
     lines.extend(
         [
@@ -74,7 +77,7 @@ def render_card_html(card: CharacterCard) -> str:
         _list_section("Personality", [card.profile.personality, *card.profile.personality_traits]),
         _list_section("Speech Style", card.profile.speech_style),
         _list_section("Behavior", card.profile.behavior_patterns),
-        _list_section("Warnings", [*card.quality.warnings, *card.evidence.warnings]),
+        _list_section("Compile Notes", _display_warnings(card)),
         _timeline_section(card),
         _list_section("Evidence", card.evidence.refs),
     ]
@@ -136,6 +139,16 @@ def build_human_json_sections(card: CharacterCard) -> list[dict[str, Any]]:
 
 def _card_name(card: CharacterCard) -> str:
     return card.identity.display_name or card.identity.character_name or card.card_id or "Untitled Character"
+
+
+def _display_warnings(card: CharacterCard) -> list[str]:
+    return list(
+        dict.fromkeys(
+            item.strip()
+            for item in [*card.quality.warnings, *card.evidence.warnings]
+            if isinstance(item, str) and item.strip() and item.strip() not in STALE_WARNING_REASONS
+        )
+    )
 
 
 def _cover_html(card: CharacterCard) -> str:

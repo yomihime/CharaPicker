@@ -19,6 +19,7 @@ from core.models import (
 
 LOGGER = logging.getLogger(__name__)
 PREVIEW_CARD_ID = "preview_card"
+STALE_WARNING_REASONS = {"character_name_changed", "compile_inputs_changed"}
 
 
 def generate_card_id(character_name: str, *, existing_ids: set[str] | None = None) -> str:
@@ -147,8 +148,9 @@ def save_preview_card(card: CharacterCard) -> Path:
 def mark_card_stale(card: CharacterCard, reason: str = "") -> CharacterCard:
     if card.compile_status == CharacterCardStatus.COMPILED:
         card.compile_status = CharacterCardStatus.STALE
-        if reason:
-            card.quality.warnings = [*card.quality.warnings, reason]
+        card.quality.warnings = [
+            warning for warning in card.quality.warnings if warning not in STALE_WARNING_REASONS
+        ]
     card.updated_at = datetime.now()
     return card
 

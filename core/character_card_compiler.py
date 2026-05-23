@@ -38,6 +38,7 @@ EXPECTED_AI_RESPONSE_KEYS = (
     "relationships",
     "warnings",
 )
+STALE_WARNING_REASONS = {"character_name_changed", "compile_inputs_changed"}
 CompileStageCallback = Callable[[str], None]
 StreamDeltaCallback = Callable[[str], None]
 
@@ -139,7 +140,11 @@ def compile_preview_card_from_preview_knowledge_base(project_id: str, character_
 
 
 def collect_compile_warnings(card: CharacterCard) -> list[str]:
-    warnings = [*card.quality.warnings, *card.evidence.warnings]
+    warnings = [
+        item
+        for item in [*card.quality.warnings, *card.evidence.warnings]
+        if item not in STALE_WARNING_REASONS
+    ]
     if not card.profile.summary.strip():
         warnings.append("summary is empty")
     if card.evidence.evidence_count <= 0:
