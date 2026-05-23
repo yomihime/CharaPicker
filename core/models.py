@@ -334,6 +334,8 @@ class CharacterCardSummary(BaseModel):
     cover_path: str = ""
     compile_status: CharacterCardStatus = CharacterCardStatus.EMPTY
     compile_source: CharacterCardCompileSource = CharacterCardCompileSource.MANUAL
+    compile_variant: CharacterCardCompileVariant = CharacterCardCompileVariant.GENERAL
+    revision: int = 1
     updated_at: datetime = Field(default_factory=datetime.now)
     warnings: list[str] = Field(default_factory=list)
 

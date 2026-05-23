@@ -104,9 +104,6 @@ def list_card_summaries(project_id: str) -> list[CharacterCardSummary]:
 
 def summary_from_card(card: CharacterCard) -> CharacterCardSummary:
     display_name = card.identity.display_name or card.identity.character_name or card.card_id
-    cover_path = ""
-    if card.assets.cover_path:
-        cover_path = str(kb.character_card_dir_path(card.project_id, card.card_id) / card.assets.cover_path)
     return CharacterCardSummary(
         card_id=card.card_id,
         character_name=card.identity.character_name,
@@ -114,12 +111,20 @@ def summary_from_card(card: CharacterCard) -> CharacterCardSummary:
         aliases=card.identity.aliases,
         notes=card.user_metadata.notes,
         tags=card.user_metadata.tags,
-        cover_path=cover_path,
+        cover_path=cover_path_for_card(card),
         compile_status=card.compile_status,
         compile_source=card.compile_source,
+        compile_variant=card.user_metadata.compile_variant,
+        revision=card.revision,
         updated_at=card.updated_at,
         warnings=[*card.quality.warnings, *card.evidence.warnings],
     )
+
+
+def cover_path_for_card(card: CharacterCard) -> str:
+    if not card.assets.cover_path:
+        return ""
+    return str(kb.character_card_dir_path(card.project_id, card.card_id) / card.assets.cover_path)
 
 
 def load_preview_card(project_id: str) -> CharacterCard:

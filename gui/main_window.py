@@ -360,6 +360,7 @@ class MainWindow(FluentWindow):
         LOGGER.info("Theme preference changed; theme=%s", theme)
         apply_theme_preference(theme)
         self.project_page.apply_theme_colors()
+        self.character_card_page.apply_theme_colors()
         InfoBar.info(
             title=t("settings.theme.changed.title"),
             content=t("settings.theme.changed.content"),

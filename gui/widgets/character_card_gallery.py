@@ -1,11 +1,51 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import QListWidget, QListWidgetItem, QVBoxLayout, QWidget
-from qfluentwidgets import BodyLabel, CaptionLabel, LineEdit
+from pathlib import Path
 
-from core.models import CharacterCardSummary
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QPixmap
+from PyQt6.QtWidgets import (
+    QAbstractItemView,
+    QButtonGroup,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+from qfluentwidgets import (
+    BodyLabel,
+    CaptionLabel,
+    FluentIcon as FIF,
+    LineEdit,
+    PushButton,
+    StrongBodyLabel,
+    TransparentToolButton,
+    isDarkTheme,
+)
+
+from core.models import CharacterCardStatus, CharacterCardSummary
+from gui.widgets.chip_tag_editor import FlowLayout
+from res.colors import (
+    CHARACTER_CARD_ACCENT,
+    CHARACTER_CARD_ACCENT_SOFT,
+    CHARACTER_CARD_DARK_BORDER,
+    CHARACTER_CARD_DARK_MUTED_TEXT,
+    CHARACTER_CARD_DARK_PANEL,
+    CHARACTER_CARD_DARK_PANEL_ALT,
+    CHARACTER_CARD_DARK_TEXT,
+    CHARACTER_CARD_LIGHT_BORDER,
+    CHARACTER_CARD_LIGHT_MUTED_TEXT,
+    CHARACTER_CARD_LIGHT_PANEL,
+    CHARACTER_CARD_LIGHT_PANEL_ALT,
+    CHARACTER_CARD_LIGHT_TEXT,
+    CHARACTER_CARD_STATUS_COMPILED,
+    CHARACTER_CARD_STATUS_DRAFT,
+    CHARACTER_CARD_STATUS_FAILED,
+    CHARACTER_CARD_STATUS_PREVIEW,
+    CHARACTER_CARD_STATUS_STALE,
+)
 from utils.i18n import t
 
 
@@ -18,30 +58,67 @@ class CharacterCardGallery(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._cards: list[CharacterCardSummary] = []
-        self.setMinimumWidth(300)
-        self.setMaximumWidth(380)
+        self._status_filter: CharacterCardStatus | None = None
+        self.setMinimumWidth(0)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(8)
 
-        root.addWidget(BodyLabel(t("cards.gallery.title"), self))
+        title = StrongBodyLabel(t("cards.gallery.title"), self)
+        root.addWidget(title)
+
+        search_row = QHBoxLayout()
+        search_row.setContentsMargins(0, 0, 0, 0)
+        search_row.setSpacing(8)
         self.search_edit = LineEdit(self)
         self.search_edit.setPlaceholderText(t("cards.search.placeholder"))
-        root.addWidget(self.search_edit)
+        self.filter_button = TransparentToolButton(FIF.FILTER, self)
+        self.filter_button.setToolTip(t("cards.gallery.filter.tooltip"))
+        search_row.addWidget(self.search_edit, 1)
+        search_row.addWidget(self.filter_button)
+        root.addLayout(search_row)
+
+        self.filter_group = QButtonGroup(self)
+        self.filter_group.setExclusive(True)
+        self.filter_buttons: dict[CharacterCardStatus | None, PushButton] = {}
+        filter_panel = QWidget(self)
+        filter_row = FlowLayout(filter_panel, spacing=6)
+        filter_panel.setLayout(filter_row)
+        for status, label in (
+            (None, t("cards.statusFilter.all")),
+            (CharacterCardStatus.DRAFT, t("cards.statusFilter.draft")),
+            (CharacterCardStatus.COMPILED, t("cards.statusFilter.compiled")),
+            (CharacterCardStatus.STALE, t("cards.statusFilter.stale")),
+        ):
+            button = PushButton(label, self)
+            button.setCheckable(True)
+            button.setMinimumHeight(26)
+            button.clicked.connect(lambda _checked=False, value=status: self._set_status_filter(value))
+            self.filter_group.addButton(button)
+            self.filter_buttons[status] = button
+            filter_row.addWidget(button)
+        root.addWidget(filter_panel)
 
         self.list_widget = QListWidget(self)
         self.list_widget.setObjectName("characterCardGallery")
-        self.list_widget.setMinimumWidth(300)
-        self.list_widget.setIconSize(QSize(54, 96))
+        self.list_widget.setMinimumWidth(0)
+        self.list_widget.setSpacing(6)
+        self.list_widget.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         root.addWidget(self.list_widget, 1)
 
         self.empty_label = CaptionLabel(t("cards.empty.noCards"), self)
         self.empty_label.setWordWrap(True)
         root.addWidget(self.empty_label)
 
+        self.count_label = CaptionLabel("", self)
+        self.count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        root.addWidget(self.count_label)
+
         self.search_edit.textChanged.connect(self._refresh_items)
         self.list_widget.currentItemChanged.connect(self._emit_selected)
+        self._sync_filter_buttons()
+        self.apply_theme_colors()
 
     def set_cards(self, cards: list[CharacterCardSummary]) -> None:
         self._cards = list(cards)
@@ -56,39 +133,294 @@ class CharacterCardGallery(QWidget):
             item = self.list_widget.item(row)
             if item.data(CARD_ID_ROLE) == card_id:
                 self.list_widget.setCurrentRow(row)
+                self._sync_selection_styles()
                 return
 
+    def apply_theme_colors(self) -> None:
+        if isDarkTheme():
+            background = CHARACTER_CARD_DARK_PANEL_ALT
+            border = CHARACTER_CARD_DARK_BORDER
+            text = CHARACTER_CARD_DARK_TEXT
+            muted = CHARACTER_CARD_DARK_MUTED_TEXT
+        else:
+            background = CHARACTER_CARD_LIGHT_PANEL_ALT
+            border = CHARACTER_CARD_LIGHT_BORDER
+            text = CHARACTER_CARD_LIGHT_TEXT
+            muted = CHARACTER_CARD_LIGHT_MUTED_TEXT
+        self.list_widget.setStyleSheet(
+            f"""
+            QListWidget#characterCardGallery {{
+                background: {background};
+                border: 1px solid {border};
+                border-radius: 8px;
+                outline: none;
+                padding: 6px;
+            }}
+            QListWidget#characterCardGallery::item {{
+                border: none;
+                padding: 0;
+                margin: 0;
+            }}
+            QListWidget#characterCardGallery::item:selected {{
+                background: transparent;
+            }}
+            """
+        )
+        self.empty_label.setStyleSheet(f"color: {muted};")
+        self.count_label.setStyleSheet(f"color: {muted};")
+        self.setStyleSheet(f"QWidget {{ color: {text}; }}")
+        self._sync_filter_buttons()
+        self._sync_selection_styles()
+
+    def _set_status_filter(self, status: CharacterCardStatus | None) -> None:
+        self._status_filter = status
+        self._sync_filter_buttons()
+        self._refresh_items()
+
     def _refresh_items(self) -> None:
+        selected_id = self.selected_card_id()
         query = self.search_edit.text().strip().casefold()
         self.list_widget.clear()
-        for card in self._cards:
-            haystack = " ".join(
-                [
-                    card.display_name,
-                    card.character_name,
-                    " ".join(card.aliases),
-                    " ".join(card.tags),
-                    card.notes,
-                    card.compile_status.value,
-                ]
-            ).casefold()
-            if query and query not in haystack:
-                continue
-            item = QListWidgetItem(self._item_text(card))
+        visible_cards = [card for card in self._cards if self._matches(card, query)]
+        for card in visible_cards:
+            item = QListWidgetItem()
             item.setData(CARD_ID_ROLE, card.card_id)
             item.setToolTip(card.card_id)
-            if card.cover_path:
-                icon = QIcon(card.cover_path)
-                if not icon.isNull():
-                    item.setIcon(icon)
+            item.setSizeHint(QSize(0, 92))
             self.list_widget.addItem(item)
+            self.list_widget.setItemWidget(item, PosterCardWidget(card, self.list_widget))
         self.empty_label.setVisible(self.list_widget.count() == 0)
+        self.count_label.setText(t("cards.gallery.count", count=len(self._cards)))
+        if selected_id:
+            self.select_card(selected_id)
+        self._sync_selection_styles()
+
+    def _matches(self, card: CharacterCardSummary, query: str) -> bool:
+        if self._status_filter is not None:
+            if self._status_filter == CharacterCardStatus.DRAFT:
+                if card.compile_status not in (CharacterCardStatus.DRAFT, CharacterCardStatus.EMPTY):
+                    return False
+            elif card.compile_status != self._status_filter:
+                return False
+        haystack = " ".join(
+            [
+                card.display_name,
+                card.character_name,
+                " ".join(card.aliases),
+                " ".join(card.tags),
+                card.notes,
+                card.compile_status.value,
+                card.compile_source.value,
+                card.compile_variant.value,
+            ]
+        ).casefold()
+        return not query or query in haystack
 
     def _emit_selected(self, current: QListWidgetItem | None) -> None:
+        self._sync_selection_styles()
         if current is not None:
             self.cardSelected.emit(str(current.data(CARD_ID_ROLE)))
 
-    def _item_text(self, card: CharacterCardSummary) -> str:
-        name = card.display_name or card.character_name or card.card_id
-        tags = f" [{', '.join(card.tags)}]" if card.tags else ""
-        return f"{name}{tags}\n{card.compile_status.value}"
+    def _sync_selection_styles(self) -> None:
+        for row in range(self.list_widget.count()):
+            item = self.list_widget.item(row)
+            widget = self.list_widget.itemWidget(item)
+            if isinstance(widget, PosterCardWidget):
+                widget.set_selected(item is self.list_widget.currentItem())
+
+    def _sync_filter_buttons(self) -> None:
+        for status, button in self.filter_buttons.items():
+            checked = status == self._status_filter
+            button.setChecked(checked)
+            if checked:
+                button.setStyleSheet(
+                    f"""
+                    PushButton {{
+                        color: {CHARACTER_CARD_ACCENT};
+                        border: 1px solid {CHARACTER_CARD_ACCENT};
+                        background: {CHARACTER_CARD_ACCENT_SOFT};
+                        border-radius: 8px;
+                    }}
+                    """
+                )
+            else:
+                button.setStyleSheet(
+                    """
+                    PushButton {
+                        border-radius: 8px;
+                    }
+                    """
+                )
+
+
+class PosterCardWidget(QWidget):
+    def __init__(self, card: CharacterCardSummary, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.card = card
+        self._selected = False
+        self.setObjectName("posterCard")
+
+        root = QHBoxLayout(self)
+        root.setContentsMargins(8, 7, 8, 7)
+        root.setSpacing(8)
+
+        self.cover = CoverThumbnail(self)
+        self.cover.set_cover_path(card.cover_path)
+        root.addWidget(self.cover, 0)
+
+        content = QVBoxLayout()
+        content.setContentsMargins(0, 1, 0, 1)
+        content.setSpacing(3)
+        name = _display_name_with_tags(card)
+        self.name_label = BodyLabel(_elide_text(name, 34), self)
+        self.name_label.setWordWrap(False)
+        self.name_label.setToolTip(name)
+        content.addWidget(self.name_label)
+
+        status_row = QHBoxLayout()
+        status_row.setContentsMargins(0, 0, 0, 0)
+        status_row.setSpacing(6)
+        self.status_badge = QLabel(_status_text(card.compile_status), self)
+        self.status_badge.setObjectName("statusBadge")
+        status_row.addWidget(self.status_badge, 0)
+        status_row.addStretch(1)
+        content.addLayout(status_row)
+
+        self.source_label = CaptionLabel(_secondary_text(card), self)
+        self.source_label.setWordWrap(False)
+        content.addWidget(self.source_label)
+
+        self.meta_label = CaptionLabel(
+            t(
+                "cards.gallery.itemMeta",
+                revision=card.revision,
+                format=_variant_text(card.compile_variant.value),
+            ),
+            self,
+        )
+        content.addWidget(self.meta_label)
+        content.addStretch(1)
+        root.addLayout(content, 1)
+
+        self._apply_styles()
+
+    def set_selected(self, selected: bool) -> None:
+        self._selected = selected
+        self._apply_styles()
+
+    def _apply_styles(self) -> None:
+        if isDarkTheme():
+            panel = CHARACTER_CARD_DARK_PANEL
+            border = CHARACTER_CARD_DARK_BORDER
+            text = CHARACTER_CARD_DARK_TEXT
+            muted = CHARACTER_CARD_DARK_MUTED_TEXT
+        else:
+            panel = CHARACTER_CARD_LIGHT_PANEL
+            border = CHARACTER_CARD_LIGHT_BORDER
+            text = CHARACTER_CARD_LIGHT_TEXT
+            muted = CHARACTER_CARD_LIGHT_MUTED_TEXT
+        selected_border = CHARACTER_CARD_ACCENT if self._selected else border
+        selected_background = "rgba(37, 217, 232, 0.10)" if self._selected else panel
+        self.setStyleSheet(
+            f"""
+            QWidget#posterCard {{
+                background: {selected_background};
+                border: 1px solid {selected_border};
+                border-radius: 8px;
+            }}
+            QLabel#statusBadge {{
+                color: {_status_foreground(self.card.compile_status)};
+                background: {_status_background(self.card.compile_status)};
+                border-radius: 7px;
+                padding: 2px 8px;
+                font-size: 11px;
+            }}
+            """
+        )
+        self.name_label.setStyleSheet(f"color: {text}; font-weight: 600;")
+        self.source_label.setStyleSheet(f"color: {muted};")
+        self.meta_label.setStyleSheet(f"color: {muted};")
+
+
+class CoverThumbnail(QLabel):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(42, 75)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setScaledContents(False)
+
+    def set_cover_path(self, cover_path: str) -> None:
+        pixmap = QPixmap()
+        if cover_path and Path(cover_path).exists():
+            pixmap = QPixmap(cover_path)
+        if pixmap.isNull():
+            self.clear()
+            self.setText("9:16")
+            self.setStyleSheet(
+                f"""
+                QLabel {{
+                    color: {CHARACTER_CARD_DARK_MUTED_TEXT};
+                    border: 1px dashed {CHARACTER_CARD_DARK_BORDER};
+                    border-radius: 6px;
+                    background: rgba(255, 255, 255, 0.04);
+                }}
+                """
+            )
+            return
+        self.setText("")
+        self.setPixmap(
+            pixmap.scaled(
+                self.size(),
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+        self.setStyleSheet("QLabel { border-radius: 6px; background: transparent; }")
+
+
+def _display_name_with_tags(card: CharacterCardSummary) -> str:
+    name = card.display_name or card.character_name or card.card_id
+    tags = f" [{', '.join(card.tags)}]" if card.tags else ""
+    return f"{name}{tags}"
+
+
+def _secondary_text(card: CharacterCardSummary) -> str:
+    return card.compile_source.value
+
+
+def _status_text(status: CharacterCardStatus) -> str:
+    if status == CharacterCardStatus.STALE:
+        return t("cards.statusFilter.stale")
+    return status.value
+
+
+def _status_foreground(status: CharacterCardStatus) -> str:
+    if status == CharacterCardStatus.STALE:
+        return "#f8e08e"
+    if status == CharacterCardStatus.FAILED:
+        return "#ffd8d8"
+    if status == CharacterCardStatus.COMPILED:
+        return "#c9fbff"
+    if status == CharacterCardStatus.PREVIEW:
+        return "#eee5ff"
+    return "#eef1f4"
+
+
+def _status_background(status: CharacterCardStatus) -> str:
+    color = {
+        CharacterCardStatus.COMPILED: CHARACTER_CARD_STATUS_COMPILED,
+        CharacterCardStatus.STALE: CHARACTER_CARD_STATUS_STALE,
+        CharacterCardStatus.FAILED: CHARACTER_CARD_STATUS_FAILED,
+        CharacterCardStatus.PREVIEW: CHARACTER_CARD_STATUS_PREVIEW,
+    }.get(status, CHARACTER_CARD_STATUS_DRAFT)
+    return f"{color}66"
+
+
+def _variant_text(value: str) -> str:
+    return t(f"cards.compileVariant.{value}")
+
+
+def _elide_text(value: str, maximum: int) -> str:
+    if len(value) <= maximum:
+        return value
+    return value[: max(0, maximum - 3)].rstrip() + "..."

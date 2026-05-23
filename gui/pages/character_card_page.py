@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import QElapsedTimer, QThread, QTimer, Qt
 from PyQt6.QtGui import QImage
-from PyQt6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFileDialog, QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
@@ -155,16 +155,14 @@ class CharacterCardPage(QWidget):
         self._loading_dialog: CharacterCardLoadingDialog | None = None
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(28, 24, 28, 24)
-        root.setSpacing(14)
+        root.setContentsMargins(22, 18, 22, 18)
+        root.setSpacing(12)
 
         header = QHBoxLayout()
         header.addWidget(SubtitleLabel(t("cards.title"), self))
         header.addStretch(1)
-        self.preview_draft_button = PushButton(t("cards.action.previewDraft"), self)
         self.import_button = PushButton(t("cards.action.import"), self)
         self.new_button = PrimaryPushButton(t("cards.action.new"), self)
-        header.addWidget(self.preview_draft_button)
         header.addWidget(self.import_button)
         header.addWidget(self.new_button)
         root.addLayout(header)
@@ -173,18 +171,20 @@ class CharacterCardPage(QWidget):
         self.project_label.setWordWrap(True)
         root.addWidget(self.project_label)
 
-        content = QHBoxLayout()
-        content.setSpacing(16)
+        self.workbench_layout = QHBoxLayout()
+        self.workbench_layout.setContentsMargins(0, 0, 0, 0)
+        self.workbench_layout.setSpacing(16)
         self.gallery = CharacterCardGallery(self)
         self.detail = CharacterCardDetailPanel(self)
-        content.addWidget(self.gallery, 0)
-        content.addWidget(self.detail, 1)
-        root.addLayout(content, 1)
+        self.gallery.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        self.detail.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.workbench_layout.addWidget(self.gallery, 24)
+        self.workbench_layout.addWidget(self.detail, 76)
+        root.addLayout(self.workbench_layout, 1)
 
         self.gallery.cardSelected.connect(self._load_card)
         self.new_button.clicked.connect(self._create_card)
         self.import_button.clicked.connect(self._import_card)
-        self.preview_draft_button.clicked.connect(self._preview_draft)
         self.detail.saveRequested.connect(self._save_metadata)
         self.detail.deleteRequested.connect(self._delete_card)
         self.detail.coverRequested.connect(self._choose_cover)
@@ -194,15 +194,20 @@ class CharacterCardPage(QWidget):
         self.detail.exportRequested.connect(self._export_current_card)
         self.detail.astrbotRequested.connect(self._show_astrbot_current_card)
         self.set_project(None)
+        self.apply_theme_colors()
 
     def set_model_preset_provider(self, provider: Callable[[], CloudModelPreset | None]) -> None:
         self._model_preset_provider = provider
+
+    def apply_theme_colors(self) -> None:
+        self.gallery.apply_theme_colors()
+        self.detail.apply_theme_colors()
 
     def set_project(self, project: ProjectConfig | None) -> None:
         self._project = project
         self._current_card = None
         has_project = project is not None
-        for widget in (self.preview_draft_button, self.import_button, self.new_button, self.gallery):
+        for widget in (self.import_button, self.new_button, self.gallery):
             widget.setEnabled(has_project)
         if project is None:
             self.project_label.setText(t("cards.noProject"))
@@ -338,7 +343,11 @@ class CharacterCardPage(QWidget):
 
     def _preview_current_card(self) -> None:
         if self._current_card is not None:
-            CharacterCardPreviewDialog(self._current_card, self).exec()
+            CharacterCardPreviewDialog(
+                self._current_card,
+                self,
+                stale=self.detail.is_result_stale(),
+            ).exec()
 
     def _show_astrbot_current_card(self) -> None:
         if self._current_card is not None:
@@ -474,6 +483,10 @@ class CharacterCardPage(QWidget):
 def _compile_inputs_snapshot(card: CharacterCard) -> tuple[object, ...]:
     return (
         card.identity.character_name,
+        card.identity.display_name,
+        tuple(card.identity.aliases),
+        tuple(card.user_metadata.tags),
+        card.user_metadata.notes,
         card.user_metadata.compile_variant,
         card.user_metadata.compile_requirements,
         card.user_metadata.extra_dialogue_count,
