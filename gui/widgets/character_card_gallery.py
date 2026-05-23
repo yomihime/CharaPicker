@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -83,6 +84,7 @@ class CharacterCardGallery(QWidget):
         self.filter_group.setExclusive(True)
         self.filter_buttons: dict[CharacterCardStatus | None, PushButton] = {}
         filter_panel = QWidget(self)
+        filter_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         filter_row = FlowLayout(filter_panel, spacing=6)
         filter_panel.setLayout(filter_row)
         for status, label in (
@@ -93,7 +95,9 @@ class CharacterCardGallery(QWidget):
         ):
             button = PushButton(label, self)
             button.setCheckable(True)
-            button.setMinimumHeight(26)
+            button.setFixedHeight(28)
+            button.setMinimumWidth(0)
+            button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             button.clicked.connect(lambda _checked=False, value=status: self._set_status_filter(value))
             self.filter_group.addButton(button)
             self.filter_buttons[status] = button
@@ -229,6 +233,14 @@ class CharacterCardGallery(QWidget):
                 widget.set_selected(item is self.list_widget.currentItem())
 
     def _sync_filter_buttons(self) -> None:
+        if isDarkTheme():
+            inactive_text = CHARACTER_CARD_DARK_TEXT
+            inactive_border = CHARACTER_CARD_DARK_BORDER
+            inactive_background = "rgba(255, 255, 255, 0.035)"
+        else:
+            inactive_text = CHARACTER_CARD_LIGHT_TEXT
+            inactive_border = CHARACTER_CARD_LIGHT_BORDER
+            inactive_background = "rgba(0, 0, 0, 0.035)"
         for status, button in self.filter_buttons.items():
             checked = status == self._status_filter
             button.setChecked(checked)
@@ -239,16 +251,27 @@ class CharacterCardGallery(QWidget):
                         color: {CHARACTER_CARD_ACCENT};
                         border: 1px solid {CHARACTER_CARD_ACCENT};
                         background: {CHARACTER_CARD_ACCENT_SOFT};
-                        border-radius: 8px;
+                        border-radius: 14px;
+                        padding: 1px 11px;
+                        font-size: 12px;
                     }}
                     """
                 )
             else:
                 button.setStyleSheet(
-                    """
-                    PushButton {
-                        border-radius: 8px;
-                    }
+                    f"""
+                    PushButton {{
+                        color: {inactive_text};
+                        border: 1px solid {inactive_border};
+                        background: {inactive_background};
+                        border-radius: 14px;
+                        padding: 1px 11px;
+                        font-size: 12px;
+                    }}
+                    PushButton:hover {{
+                        border: 1px solid {CHARACTER_CARD_ACCENT};
+                        background: {CHARACTER_CARD_ACCENT_SOFT};
+                    }}
                     """
                 )
 

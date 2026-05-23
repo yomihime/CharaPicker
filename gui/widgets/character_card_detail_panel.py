@@ -94,8 +94,8 @@ class CharacterCardDetailPanel(QWidget):
         self.inspector_content = QWidget(self.inspector_scroll)
         self.inspector_content.setMinimumWidth(0)
         self.inspector_layout = QVBoxLayout(self.inspector_content)
-        self.inspector_layout.setContentsMargins(0, 0, 0, 0)
-        self.inspector_layout.setSpacing(12)
+        self.inspector_layout.setContentsMargins(1, 0, 12, 10)
+        self.inspector_layout.setSpacing(10)
         self.inspector_scroll.setWidget(self.inspector_content)
         self.root_layout.addWidget(self.inspector_scroll, 24)
 
@@ -198,6 +198,12 @@ class CharacterCardDetailPanel(QWidget):
             QLabel#sectionHelper, QLabel#mutedLabel {{
                 color: {muted};
             }}
+            QLabel#textareaCounter {{
+                color: {muted};
+                background: transparent;
+                padding: 0 8px 6px 0;
+                font-size: 11px;
+            }}
             QLabel#summaryChip, QLabel#statusBadge {{
                 border-radius: 7px;
                 padding: 2px 8px;
@@ -255,7 +261,7 @@ class CharacterCardDetailPanel(QWidget):
         self.display_name = LineEdit(self.editor_content)
         self.display_name.setPlaceholderText(t("cards.field.displayName.placeholder"))
         for field in (self.character_name, self.display_name):
-            field.setMinimumHeight(36)
+            field.setMinimumHeight(34)
         self.aliases = ChipTagEditor(
             self.editor_content,
             placeholder=t("cards.field.aliases.placeholder"),
@@ -271,34 +277,56 @@ class CharacterCardDetailPanel(QWidget):
         self.identity_grid = QGridLayout()
         self.identity_grid.setContentsMargins(0, 0, 0, 0)
         self.identity_grid.setHorizontalSpacing(14)
-        self.identity_grid.setVerticalSpacing(12)
-        self.character_name_field = _field_stack_widget(
+        self.identity_grid.setVerticalSpacing(10)
+        self.character_name_field = _inline_field_widget(
             t("cards.field.characterName"),
             self.character_name,
             identity_card,
+            label_width=54,
         )
-        self.display_name_field = _field_stack_widget(
+        self.display_name_field = _inline_field_widget(
             t("cards.field.displayName"),
             self.display_name,
             identity_card,
+            label_width=54,
         )
         self.identity_grid.addWidget(self.character_name_field, 0, 0)
         self.identity_grid.addWidget(self.display_name_field, 0, 1)
         self.identity_grid.setColumnStretch(0, 1)
         self.identity_grid.setColumnStretch(1, 1)
         identity_layout.addLayout(self.identity_grid)
-        identity_layout.addWidget(_field_title(t("cards.field.aliases"), identity_card))
-        identity_layout.addWidget(self.aliases)
-        identity_layout.addWidget(_field_title(t("cards.field.tags"), identity_card))
-        identity_layout.addWidget(self.tags)
+        identity_layout.addWidget(
+            _inline_field_widget(
+                t("cards.field.aliases"),
+                self.aliases,
+                identity_card,
+                label_width=54,
+                align_top=True,
+            )
+        )
+        identity_layout.addWidget(
+            _inline_field_widget(
+                t("cards.field.tags"),
+                self.tags,
+                identity_card,
+                label_width=54,
+                align_top=True,
+            )
+        )
         self.editor_layout.addWidget(identity_card)
 
         self.notes = PlainTextEdit(self.editor_content)
-        self.notes.setFixedHeight(86)
+        _configure_textarea(self.notes)
         self.notes.setPlaceholderText(t("cards.field.notes.placeholder"))
         self.compile_requirements = PlainTextEdit(self.editor_content)
-        self.compile_requirements.setFixedHeight(86)
+        _configure_textarea(self.compile_requirements)
         self.compile_requirements.setPlaceholderText(t("cards.field.compileRequirements.placeholder"))
+        self.notes_counter = CaptionLabel("", self.editor_content)
+        self.notes_counter.setObjectName("textareaCounter")
+        self.notes_counter.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.requirements_counter = CaptionLabel("", self.editor_content)
+        self.requirements_counter.setObjectName("textareaCounter")
+        self.requirements_counter.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
         ai_card, ai_layout = _make_card(self.editor_content, t("cards.section.aiInput"))
         ai_layout.addLayout(
@@ -306,23 +334,19 @@ class CharacterCardDetailPanel(QWidget):
                 t("cards.field.notes"),
                 t("cards.field.notes.helper"),
                 self.notes,
+                self.notes_counter,
                 self.editor_content,
             )
         )
-        self.notes_counter = CaptionLabel("", self.editor_content)
-        self.notes_counter.setAlignment(Qt.AlignmentFlag.AlignRight)
-        ai_layout.addWidget(self.notes_counter)
         ai_layout.addLayout(
             _textarea_block(
                 t("cards.field.compileRequirements"),
                 t("cards.field.compileRequirements.helper"),
                 self.compile_requirements,
+                self.requirements_counter,
                 self.editor_content,
             )
         )
-        self.requirements_counter = CaptionLabel("", self.editor_content)
-        self.requirements_counter.setAlignment(Qt.AlignmentFlag.AlignRight)
-        ai_layout.addWidget(self.requirements_counter)
         self.editor_layout.addWidget(ai_card)
 
         self.compile_variant = ComboBox(self.editor_content)
@@ -331,8 +355,8 @@ class CharacterCardDetailPanel(QWidget):
         self.extra_dialogue_count = LineEdit(self.editor_content)
         self.extra_dialogue_count.setValidator(QIntValidator(0, 100, self.extra_dialogue_count))
         self.extra_dialogue_count.setPlaceholderText(t("cards.field.extraDialogueCount.placeholder"))
-        self.compile_variant.setMinimumHeight(36)
-        self.extra_dialogue_count.setMinimumHeight(36)
+        self.compile_variant.setMinimumHeight(34)
+        self.extra_dialogue_count.setMinimumHeight(34)
         self.export_astrbot_after_compile = CheckBox(
             t("cards.option.exportAstrbotAfterCompile"),
             self.editor_content,
@@ -342,16 +366,18 @@ class CharacterCardDetailPanel(QWidget):
         self.output_grid = QGridLayout()
         self.output_grid.setContentsMargins(0, 0, 0, 0)
         self.output_grid.setHorizontalSpacing(14)
-        self.output_grid.setVerticalSpacing(12)
-        self.compile_variant_field = _field_stack_widget(
+        self.output_grid.setVerticalSpacing(10)
+        self.compile_variant_field = _inline_field_widget(
             t("cards.field.compileVariant"),
             self.compile_variant,
             output_card,
+            label_width=86,
         )
-        self.extra_dialogue_count_field = _field_stack_widget(
+        self.extra_dialogue_count_field = _inline_field_widget(
             t("cards.field.extraDialogueCount"),
             self.extra_dialogue_count,
             output_card,
+            label_width=96,
         )
         self.output_grid.addWidget(self.compile_variant_field, 0, 0)
         self.output_grid.addWidget(self.extra_dialogue_count_field, 0, 1)
@@ -381,11 +407,11 @@ class CharacterCardDetailPanel(QWidget):
         cover_layout.addLayout(cover_row)
         cover_actions = QHBoxLayout()
         cover_actions.setContentsMargins(0, 0, 0, 0)
-        cover_actions.setSpacing(8)
+        cover_actions.setSpacing(6)
         self.cover_button = PushButton(t("cards.action.cover"), self.inspector_content)
         self.clear_cover_button = PushButton(t("cards.action.clearCover"), self.inspector_content)
         for button in (self.cover_button, self.clear_cover_button):
-            button.setMinimumHeight(34)
+            _configure_inspector_button(button, 28)
         cover_actions.addWidget(self.cover_button, 1)
         cover_actions.addWidget(self.clear_cover_button, 1)
         cover_layout.addLayout(cover_actions)
@@ -394,8 +420,8 @@ class CharacterCardDetailPanel(QWidget):
         status_card, status_layout = _make_card(self.inspector_content, t("cards.inspector.status"))
         status_grid = QGridLayout()
         status_grid.setContentsMargins(0, 0, 0, 0)
-        status_grid.setHorizontalSpacing(12)
-        status_grid.setVerticalSpacing(8)
+        status_grid.setHorizontalSpacing(10)
+        status_grid.setVerticalSpacing(6)
         self.status_values: dict[str, QLabel] = {}
         for row, (key, label) in enumerate(
             (
@@ -420,11 +446,11 @@ class CharacterCardDetailPanel(QWidget):
         quick_card, quick_layout = _make_card(self.inspector_content, t("cards.inspector.quickActions"))
         quick_row = QHBoxLayout()
         quick_row.setContentsMargins(0, 0, 0, 0)
-        quick_row.setSpacing(8)
+        quick_row.setSpacing(6)
         self.save_button = PrimaryPushButton(t("cards.action.save"), self.inspector_content)
         self.preview_button = PushButton(t("cards.action.previewResult"), self.inspector_content)
         for button in (self.save_button, self.preview_button):
-            button.setMinimumHeight(36)
+            _configure_inspector_button(button, 28)
         quick_row.addWidget(self.save_button, 1)
         quick_row.addWidget(self.preview_button, 1)
         quick_layout.addLayout(quick_row)
@@ -432,18 +458,18 @@ class CharacterCardDetailPanel(QWidget):
         self.stale_warning_label.setWordWrap(True)
         quick_layout.addWidget(self.stale_warning_label)
         self.compile_button = PrimaryPushButton(t("cards.action.compile"), self.inspector_content)
-        self.compile_button.setMinimumHeight(36)
+        _configure_inspector_button(self.compile_button, 28)
         quick_layout.addWidget(self.compile_button)
         self.inspector_layout.addWidget(quick_card)
 
         output_card, output_layout = _make_card(self.inspector_content, t("cards.inspector.outputActions"))
         output_row = QHBoxLayout()
         output_row.setContentsMargins(0, 0, 0, 0)
-        output_row.setSpacing(8)
+        output_row.setSpacing(6)
         self.export_button = PushButton(t("cards.action.export"), self.inspector_content)
         self.astrbot_button = PushButton(t("cards.action.astrbotHelper"), self.inspector_content)
         for button in (self.export_button, self.astrbot_button):
-            button.setMinimumHeight(36)
+            _configure_inspector_button(button, 28)
         output_row.addWidget(self.export_button, 1)
         output_row.addWidget(self.astrbot_button, 1)
         output_layout.addLayout(output_row)
@@ -452,7 +478,7 @@ class CharacterCardDetailPanel(QWidget):
         danger_card, danger_layout = _make_card(self.inspector_content, t("cards.inspector.dangerActions"))
         self.delete_button = PushButton(t("cards.action.deleteCard"), self.inspector_content)
         self.delete_button.setObjectName("dangerButton")
-        self.delete_button.setMinimumHeight(36)
+        _configure_inspector_button(self.delete_button, 28)
         danger_layout.addWidget(self.delete_button)
         self.inspector_layout.addWidget(danger_card)
         self.inspector_layout.addStretch(1)
@@ -627,7 +653,7 @@ class CoverPreviewLabel(QLabel):
         super().__init__(parent)
         self._path = ""
         self.setObjectName("coverPreview")
-        self.setFixedSize(72, 128)
+        self.setFixedSize(64, 114)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setWordWrap(True)
 
@@ -665,14 +691,27 @@ def _make_scroll_area(parent: QWidget) -> QScrollArea:
     return scroll
 
 
+def _configure_inspector_button(button: QWidget, height: int) -> None:
+    button.setMinimumWidth(0)
+    button.setMinimumHeight(height)
+    button.setMaximumHeight(height)
+    button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+
+def _configure_textarea(editor: PlainTextEdit) -> None:
+    editor.setFixedHeight(86)
+    if hasattr(editor, "setViewportMargins"):
+        editor.setViewportMargins(0, 0, 0, 16)
+
+
 def _make_card(parent: QWidget, title: str) -> tuple[CardWidget, QVBoxLayout]:
     card = CardWidget(parent)
     card.setBorderRadius(8)
     card.setMinimumWidth(0)
     card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
     layout = QVBoxLayout(card)
-    layout.setContentsMargins(14, 10, 14, 12)
-    layout.setSpacing(8)
+    layout.setContentsMargins(12, 9, 12, 10)
+    layout.setSpacing(7)
     layout.addWidget(StrongBodyLabel(title, card))
     return card, layout
 
@@ -688,6 +727,33 @@ def _field_stack_widget(label_text: str, widget: QWidget, parent: QWidget) -> QW
     return container
 
 
+def _inline_field_widget(
+    label_text: str,
+    widget: QWidget,
+    parent: QWidget,
+    *,
+    label_width: int,
+    align_top: bool = False,
+) -> QWidget:
+    container = QWidget(parent)
+    container.setMinimumWidth(0)
+    layout = QHBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(8)
+    label = _field_title(label_text, container)
+    label.setFixedWidth(label_width)
+    if align_top:
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        layout.addWidget(label, 0, Qt.AlignmentFlag.AlignTop)
+    else:
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(label)
+    widget.setMinimumWidth(0)
+    widget.setSizePolicy(QSizePolicy.Policy.Expanding, widget.sizePolicy().verticalPolicy())
+    layout.addWidget(widget, 1)
+    return container
+
+
 def _add_field_stack(layout: QGridLayout, row: int, column: int, label_text: str, widget: QWidget) -> None:
     stack = QVBoxLayout()
     stack.setContentsMargins(0, 0, 0, 0)
@@ -697,7 +763,13 @@ def _add_field_stack(layout: QGridLayout, row: int, column: int, label_text: str
     layout.addLayout(stack, row, column)
 
 
-def _textarea_block(title: str, helper: str, editor: PlainTextEdit, parent: QWidget) -> QVBoxLayout:
+def _textarea_block(
+    title: str,
+    helper: str,
+    editor: PlainTextEdit,
+    counter: QLabel,
+    parent: QWidget,
+) -> QVBoxLayout:
     layout = QVBoxLayout()
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(6)
@@ -710,8 +782,20 @@ def _textarea_block(title: str, helper: str, editor: PlainTextEdit, parent: QWid
     helper_label.setWordWrap(True)
     title_row.addWidget(helper_label, 1)
     layout.addLayout(title_row)
-    layout.addWidget(editor)
+    layout.addWidget(_textarea_counter_overlay(editor, counter, parent))
     return layout
+
+
+def _textarea_counter_overlay(editor: PlainTextEdit, counter: QLabel, parent: QWidget) -> QWidget:
+    container = QWidget(parent)
+    container.setMinimumWidth(0)
+    layout = QGridLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(0)
+    layout.addWidget(editor, 0, 0)
+    counter.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
+    layout.addWidget(counter, 0, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
+    return container
 
 
 def _field_title(text: str, parent: QWidget | None) -> CaptionLabel:

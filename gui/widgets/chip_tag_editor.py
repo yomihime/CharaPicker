@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import QPoint, QRect, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QPoint, QRect, QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QLayout, QLayoutItem, QSizePolicy, QWidget
 from qfluentwidgets import FluentIcon as FIF, LineEdit, PushButton, TransparentToolButton, isDarkTheme
 
 from res.colors import (
     CHARACTER_CARD_ACCENT,
+    CHARACTER_CARD_ACCENT_SOFT,
     CHARACTER_CARD_DARK_BORDER,
     CHARACTER_CARD_DARK_MUTED_TEXT,
     CHARACTER_CARD_DARK_PANEL_ALT,
@@ -59,6 +60,9 @@ class FlowLayout(QLayout):
     def minimumSize(self) -> QSize:  # noqa: N802
         size = QSize()
         for item in self._items:
+            widget = item.widget()
+            if widget is not None and widget.isHidden():
+                continue
             size = size.expandedTo(item.minimumSize())
         margins = self.contentsMargins()
         size += QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
@@ -73,6 +77,9 @@ class FlowLayout(QLayout):
         spacing = self.spacing()
 
         for item in self._items:
+            widget = item.widget()
+            if widget is not None and widget.isHidden():
+                continue
             item_size = item.sizeHint()
             next_x = x + item_size.width() + spacing
             if next_x - spacing > effective.right() and line_height > 0:
@@ -96,20 +103,21 @@ class ChipWidget(QWidget):
         self.value = value
         self.setToolTip(value)
         self.setObjectName("tagChip")
+        self.setFixedHeight(25)
         self._apply_colors()
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(7, 1, 5, 1)
+        layout.setContentsMargins(8, 1, 4, 1)
         layout.setSpacing(4)
 
-        label = QLabel(_elide_middle(value, 28), self)
+        label = QLabel(_elide_middle(value, 26), self)
         label.setToolTip(value)
-        label.setMinimumHeight(20)
-        label.setMaximumWidth(220)
+        label.setMinimumHeight(18)
+        label.setMaximumWidth(168)
         layout.addWidget(label)
 
         remove_button = TransparentToolButton(FIF.CLOSE, self)
-        remove_button.setFixedSize(20, 20)
+        remove_button.setFixedSize(17, 17)
         remove_button.clicked.connect(lambda: self.removeRequested.emit(self.value))
         layout.addWidget(remove_button)
 
@@ -132,7 +140,7 @@ class ChipWidget(QWidget):
                 color: {text};
                 background: {background};
                 border: 1px solid {border};
-                border-radius: 6px;
+                border-radius: 12px;
             }}
             """
         )
@@ -152,34 +160,39 @@ class ChipTagEditor(QWidget):
         self._values: list[str] = []
         self._updating = False
         self._add_text = add_text
+        self._input_active = False
 
         self.setObjectName("chipTagEditor")
 
         self.chip_container = QWidget(self)
         self.chip_container.setObjectName("chipTagEditorPanel")
-        self.chip_container.setMinimumHeight(38)
-        self.chip_container.setMaximumHeight(70)
+        self.chip_container.setMinimumHeight(27)
+        self.chip_container.setMaximumHeight(58)
         self.chip_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         self.flow = FlowLayout(self.chip_container, spacing=6)
-        self.flow.setContentsMargins(7, 5, 7, 5)
+        self.flow.setContentsMargins(0, 0, 0, 0)
         self.chip_container.setLayout(self.flow)
 
         self.input = LineEdit(self)
         self.input.setPlaceholderText(placeholder)
-        self.input.setMinimumWidth(120)
-        self.input.setMaximumWidth(260)
-        self.input.setMinimumHeight(28)
+        self.input.setMinimumWidth(118)
+        self.input.setMaximumWidth(220)
+        self.input.setFixedHeight(25)
         self.input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.add_button = PushButton("+", self)
+        self.input.installEventFilter(self)
+        self.add_button = PushButton(add_text, self)
         self.add_button.setToolTip(add_text)
-        self.add_button.setFixedSize(32, 28)
+        self.add_button.setMinimumWidth(0)
+        self.add_button.setMinimumHeight(25)
+        self.add_button.setMaximumHeight(25)
+        self.add_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.addWidget(self.chip_container, 1)
 
         self.input.returnPressed.connect(self._add_from_input)
-        self.add_button.clicked.connect(self._add_from_input)
+        self.add_button.clicked.connect(self._start_input)
         self._rebuild()
         self.apply_theme_colors()
 
@@ -196,10 +209,32 @@ class ChipTagEditor(QWidget):
     def clear(self) -> None:
         self.set_values([])
         self.input.clear()
+        self._set_input_active(False)
+
+    def eventFilter(self, watched: object, event: QEvent) -> bool:  # noqa: N802
+        if watched is self.input:
+            if event.type() == QEvent.Type.FocusOut and not self.input.text().strip():
+                self._set_input_active(False)
+            elif event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Escape:
+                self.input.clear()
+                self._set_input_active(False)
+                return True
+        return super().eventFilter(watched, event)
+
+    def _start_input(self) -> None:
+        self._set_input_active(True)
+        self.input.setFocus()
+
+    def _set_input_active(self, active: bool) -> None:
+        self._input_active = active
+        self.input.setVisible(active)
+        self.add_button.setVisible(not active)
+        self.updateGeometry()
 
     def _add_from_input(self) -> None:
         raw = self.input.text().strip()
         if not raw:
+            self._set_input_active(False)
             return
         additions = [_normalize(part) for part in raw.replace("\uff0c", ",").split(",")]
         additions = [part for part in additions if part]
@@ -207,6 +242,7 @@ class ChipTagEditor(QWidget):
             return
         self._values.extend(additions)
         self.input.clear()
+        self._set_input_active(False)
         self._rebuild()
         self._emit_values_changed()
 
@@ -220,6 +256,7 @@ class ChipTagEditor(QWidget):
 
     def _edit_value(self, value: str) -> None:
         self._remove_value(value)
+        self._set_input_active(True)
         self.input.setText(value)
         self.input.setFocus()
 
@@ -236,6 +273,7 @@ class ChipTagEditor(QWidget):
             self.flow.addWidget(chip)
         self.flow.addWidget(self.input)
         self.flow.addWidget(self.add_button)
+        self._set_input_active(self._input_active)
         self.updateGeometry()
 
     def _emit_values_changed(self) -> None:
@@ -257,18 +295,19 @@ class ChipTagEditor(QWidget):
             f"""
             QWidget#chipTagEditorPanel {{
                 color: {text};
-                background: {background};
-                border: 1px solid {border};
-                border-radius: 6px;
+                background: transparent;
+                border: none;
             }}
             """
         )
         self.input.setStyleSheet(
             f"""
             LineEdit {{
-                background: transparent;
-                border: none;
+                background: {background};
+                border: 1px solid {border};
+                border-radius: 12px;
                 color: {text};
+                padding: 0 8px;
             }}
             LineEdit:disabled {{
                 color: {muted};
@@ -279,7 +318,14 @@ class ChipTagEditor(QWidget):
             f"""
             PushButton {{
                 color: {CHARACTER_CARD_ACCENT};
-                border-radius: 6px;
+                background: transparent;
+                border: 1px dashed {border};
+                border-radius: 12px;
+                padding: 0 9px;
+            }}
+            PushButton:hover {{
+                background: {CHARACTER_CARD_ACCENT_SOFT};
+                border: 1px solid {CHARACTER_CARD_ACCENT};
             }}
             """
         )
