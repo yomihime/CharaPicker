@@ -244,7 +244,7 @@ def _review_card_with_ai(
             "extra_dialogue_count": _extra_dialogue_count_prompt_value(
                 card.user_metadata.extra_dialogue_count
             ),
-            "response_schema": _character_card_response_schema(),
+            "response_schema": _character_card_response_schema(compile_variant),
         },
         metadata={
             "project_id": card.project_id,
@@ -374,7 +374,52 @@ def _clip_text(value: str, limit: int) -> str:
     return text[: max(0, limit - 3)] + "..."
 
 
-def _character_card_response_schema() -> dict[str, Any]:
+def _character_card_response_schema(compile_variant: CharacterCardCompileVariant) -> dict[str, Any]:
+    if compile_variant == CharacterCardCompileVariant.ASTRBOT:
+        return {
+            "prompt_surfaces": {
+                "system_prompt": "string",
+                "custom_error_reply": "string",
+                "suggested_starters": ["string"],
+                "creator_notes": "string",
+            },
+            "dialogue": {
+                "preset_dialogues": [
+                    {
+                        "title": "string",
+                        "messages": [{"role": "user|assistant", "content": "string"}],
+                    }
+                ]
+            },
+            "warnings": ["string"],
+        }
+    if compile_variant == CharacterCardCompileVariant.CHARACTER_CARD_V2:
+        return {
+            "profile": {
+                "long_description": "string",
+                "personality": "string",
+                "scenario_default": "string",
+                "creator_notes": "string",
+            },
+            "prompt_surfaces": {
+                "first_message": "string",
+                "example_messages_text": "string",
+                "creator_notes": "string",
+            },
+            "dialogue": {
+                "first_message": "string",
+                "example_dialogues": [
+                    {
+                        "title": "string",
+                        "messages": [{"role": "user|assistant", "content": "string"}],
+                    }
+                ],
+            },
+            "character_book": {
+                "entries": [{"keys": ["string"], "content": "string", "enabled": True, "insertion_order": 100}]
+            },
+            "warnings": ["string"],
+        }
     return {
         "profile": {
             "summary": "string",
@@ -482,21 +527,27 @@ def _build_extra_requirements_prompt(
 def _compile_variant_instruction(compile_variant: CharacterCardCompileVariant) -> str:
     if compile_variant == CharacterCardCompileVariant.ASTRBOT:
         return (
-            "Compile variant: AstrBot manual copy. Optimize prompt_surfaces.system_prompt, "
-            "prompt_surfaces.custom_error_reply, dialogue.preset_dialogues, and suggested starters "
-            "for AstrBot usage. The card must still remain a complete CharaPicker JSON card; "
-            "AstrBot text is a derived surface, not the source of truth."
+            "Compile target: AstrBot manual copy only. For this run, write only the AstrBot-facing "
+            "surface: prompt_surfaces.system_prompt, prompt_surfaces.custom_error_reply, "
+            "dialogue.preset_dialogues, and any directly needed suggested starters. Do not spend "
+            "output budget rewriting general profile text or Character Card V2 fields unless needed "
+            "to keep the returned JSON valid. CharaPicker JSON remains the source of truth; AstrBot "
+            "text is a derived target surface."
         )
     if compile_variant == CharacterCardCompileVariant.CHARACTER_CARD_V2:
         return (
-            "Compile variant: Character Card V2 export. Optimize profile.long_description, "
-            "profile.personality, profile.scenario_default, dialogue.first_message, "
-            "dialogue.example_dialogues, and prompt_surfaces.example_messages_text for a clean V2 "
-            "export. The card must still remain a complete CharaPicker JSON card."
+            "Compile target: Character Card V2 only. For this run, write only the fields needed for "
+            "a clean V2 export: profile.long_description, profile.personality, "
+            "profile.scenario_default, prompt_surfaces.first_message, "
+            "prompt_surfaces.example_messages_text, and dialogue.example_dialogues. Do not spend "
+            "output budget rewriting AstrBot-specific fields or unrelated general profile fields "
+            "unless needed to keep the returned JSON valid. CharaPicker JSON remains the source of "
+            "truth; V2 JSON is a derived target surface."
         )
     return (
-        "Compile variant: general CharaPicker card. Balance profile, prompt surfaces, dialogue "
-        "examples, character book entries, and warnings so all derived formats can be generated later."
+        "Compile target: general CharaPicker card only. For this run, write the general profile, "
+        "prompt surfaces, dialogue examples, character book entries, and warnings needed by the "
+        "native CharaPicker card. Do not specialize the output for AstrBot or Character Card V2."
     )
 
 

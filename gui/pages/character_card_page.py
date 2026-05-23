@@ -323,11 +323,12 @@ class CharacterCardPage(QWidget):
         if self._current_card is None:
             return False
         original_name = self._current_card.identity.character_name
+        original_editable_inputs = _editable_inputs_snapshot(self._current_card)
         original_compile_inputs = _compile_inputs_snapshot(self._current_card)
         updated = self.detail.apply_to_card(self._current_card)
+        editable_inputs_changed = original_editable_inputs != _editable_inputs_snapshot(updated)
         compile_inputs_changed = original_compile_inputs != _compile_inputs_snapshot(updated)
-        changed = compile_inputs_changed
-        if not changed:
+        if not editable_inputs_changed:
             return True
         if updated.compile_status == CharacterCardStatus.COMPILED:
             if original_name != updated.identity.character_name:
@@ -520,6 +521,19 @@ class CharacterCardPage(QWidget):
             if getattr(result, "status", None) == CharacterCardExportStatus.SUCCESS and result.output_path
         ]
         output_dir = str(Path(ok_paths[0]).parent) if ok_paths else ""
+        issues = _export_issue_summary(results)
+        if issues:
+            self._show_warning(
+                t("cards.export.partial.title"),
+                t(
+                    "cards.export.partial.content",
+                    count=len(ok_paths),
+                    path=output_dir or "-",
+                    issue_count=len(issues),
+                    summary="; ".join(issues[:3]),
+                ),
+            )
+            return
         self._show_success(
             t("cards.export.success.title"),
             t("cards.export.success.content", count=len(ok_paths), path=output_dir),
@@ -587,6 +601,16 @@ class CharacterCardPage(QWidget):
 def _compile_inputs_snapshot(card: CharacterCard) -> tuple[object, ...]:
     return (
         card.identity.character_name,
+        card.user_metadata.notes,
+        card.user_metadata.compile_variant,
+        card.user_metadata.compile_requirements,
+        card.user_metadata.extra_dialogue_count,
+    )
+
+
+def _editable_inputs_snapshot(card: CharacterCard) -> tuple[object, ...]:
+    return (
+        card.identity.character_name,
         card.identity.display_name,
         tuple(card.identity.aliases),
         tuple(card.user_metadata.tags),
@@ -595,6 +619,20 @@ def _compile_inputs_snapshot(card: CharacterCard) -> tuple[object, ...]:
         card.user_metadata.compile_requirements,
         card.user_metadata.extra_dialogue_count,
     )
+
+
+def _export_issue_summary(results: list) -> list[str]:
+    issues: list[str] = []
+    for result in results:
+        target = getattr(getattr(result, "target", None), "value", str(getattr(result, "target", "")))
+        status = getattr(result, "status", None)
+        error = str(getattr(result, "error", "") or "").strip()
+        warnings = [str(item).strip() for item in getattr(result, "warnings", []) if str(item).strip()]
+        if status == CharacterCardExportStatus.FAILED:
+            issues.append(f"{target}: {error or 'failed'}")
+        for warning in warnings:
+            issues.append(f"{target}: {warning}")
+    return list(dict.fromkeys(issues))
 
 
 def _format_elapsed(seconds: int) -> str:

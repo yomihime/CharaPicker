@@ -479,6 +479,7 @@ class CharacterCardDetailPanel(QWidget):
                 ("source", t("cards.status.source")),
                 ("revision", t("cards.status.revision")),
                 ("compiledAt", t("cards.status.lastCompile")),
+                ("warnings", t("cards.status.warnings")),
             )
         ):
             label_widget = CaptionLabel(label, status_card)
@@ -624,6 +625,7 @@ class CharacterCardDetailPanel(QWidget):
         if card is None:
             for value in self.status_values.values():
                 value.setText("-")
+                value.setToolTip("")
                 value.setStyleSheet(_status_value_style("neutral"))
             return
         self.status_values["edit"].setText(
@@ -635,12 +637,24 @@ class CharacterCardDetailPanel(QWidget):
         self.status_values["compiledAt"].setText(
             card.compiled_at.strftime("%Y-%m-%d %H:%M") if card.compiled_at else "-"
         )
+        warnings = _warning_messages(card)
+        self.status_values["warnings"].setText(_warning_summary(card, warnings))
+        self.status_values["warnings"].setToolTip("\n".join(warnings))
         self.status_values["edit"].setStyleSheet(
             _status_value_style("warning" if self._dirty else "success")
         )
         self.status_values["compile"].setStyleSheet(_status_value_style(_status_kind(card, self._dirty)))
         for key in ("source", "revision", "compiledAt"):
             self.status_values[key].setStyleSheet(_status_value_style("neutral"))
+        self.status_values["warnings"].setStyleSheet(
+            _status_value_style(
+                "danger"
+                if card.compile_status == CharacterCardStatus.FAILED or card.quality.last_error
+                else "warning"
+                if warnings
+                else "neutral"
+            )
+        )
 
     def _sync_compile_button(self) -> None:
         if self._card is None:
@@ -963,6 +977,26 @@ def _status_kind(card: CharacterCard, dirty: bool = False) -> str:
     if card.compile_status == CharacterCardStatus.COMPILED:
         return "success"
     return "neutral"
+
+
+def _warning_messages(card: CharacterCard) -> list[str]:
+    messages = [
+        card.quality.last_error,
+        *card.quality.warnings,
+        *card.evidence.warnings,
+    ]
+    return list(dict.fromkeys([message.strip() for message in messages if message.strip()]))
+
+
+def _warning_summary(card: CharacterCard, warnings: list[str]) -> str:
+    if card.quality.last_error:
+        return _elide_text(card.quality.last_error, 24)
+    if not warnings:
+        return "-"
+    first = warnings[0]
+    if len(warnings) == 1:
+        return _elide_text(first, 24)
+    return _elide_text(t("cards.status.warningCount", count=len(warnings)), 24)
 
 
 def _short_compile_variant(variant: CharacterCardCompileVariant) -> str:
