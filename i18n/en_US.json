@@ -179,6 +179,7 @@
   "cards.summaryChip.source": "Source {value}",
   "cards.summaryChip.revision": "Rev {value}",
   "cards.summaryChip.format": "Card format {value}",
+  "cards.summaryChip.formatShort": "Format {value}",
   "cards.detail.title": "Edit Card",
   "cards.detail.identity": "Basic Info",
   "cards.detail.compile": "Output Settings",

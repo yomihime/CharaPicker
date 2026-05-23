@@ -75,29 +75,40 @@ class CharacterCardDetailPanel(QWidget):
 
         self.root_layout = QHBoxLayout(self)
         self.root_layout.setContentsMargins(0, 0, 0, 0)
-        self.root_layout.setSpacing(16)
+        self.root_layout.setSpacing(8)
 
-        self.editor_scroll = _make_scroll_area(self)
+        self.editor_panel = _make_column_panel(self)
+        editor_panel_layout = QVBoxLayout(self.editor_panel)
+        editor_panel_layout.setContentsMargins(12, 4, 12, 12)
+        editor_panel_layout.setSpacing(0)
+        self.editor_scroll = _make_scroll_area(self.editor_panel)
         self.editor_scroll.setMinimumWidth(0)
         self.editor_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.editor_content = QWidget(self.editor_scroll)
         self.editor_content.setMinimumWidth(0)
         self.editor_layout = QVBoxLayout(self.editor_content)
         self.editor_layout.setContentsMargins(0, 0, 0, 0)
-        self.editor_layout.setSpacing(12)
+        self.editor_layout.setSpacing(4)
         self.editor_scroll.setWidget(self.editor_content)
-        self.root_layout.addWidget(self.editor_scroll, 52)
+        editor_panel_layout.addWidget(self.editor_scroll)
+        self.root_layout.addWidget(self.editor_panel, 51)
 
-        self.inspector_scroll = _make_scroll_area(self)
+        self.inspector_panel = _make_column_panel(self)
+        inspector_panel_layout = QVBoxLayout(self.inspector_panel)
+        inspector_panel_layout.setContentsMargins(12, 10, 8, 12)
+        inspector_panel_layout.setSpacing(0)
+        self.inspector_scroll = _make_scroll_area(self.inspector_panel)
+        self.inspector_scroll.setViewportMargins(0, 0, 6, 0)
         self.inspector_scroll.setMinimumWidth(0)
         self.inspector_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.inspector_content = QWidget(self.inspector_scroll)
         self.inspector_content.setMinimumWidth(0)
         self.inspector_layout = QVBoxLayout(self.inspector_content)
-        self.inspector_layout.setContentsMargins(1, 0, 12, 10)
-        self.inspector_layout.setSpacing(10)
+        self.inspector_layout.setContentsMargins(1, 0, 20, 10)
+        self.inspector_layout.setSpacing(4)
         self.inspector_scroll.setWidget(self.inspector_content)
-        self.root_layout.addWidget(self.inspector_scroll, 24)
+        inspector_panel_layout.addWidget(self.inspector_scroll)
+        self.root_layout.addWidget(self.inspector_panel, 26)
 
         self._build_editor()
         self._build_inspector()
@@ -117,6 +128,7 @@ class CharacterCardDetailPanel(QWidget):
         if card is None:
             self._clear_fields()
             self.status_label.setText(t("cards.status.noSelection"))
+            self.status_label.show()
             self.cover_preview.set_card(None)
             self._baseline = None
             self._dirty = False
@@ -183,8 +195,13 @@ class CharacterCardDetailPanel(QWidget):
             muted = CHARACTER_CARD_LIGHT_MUTED_TEXT
         self.setStyleSheet(
             f"""
-            CardWidget {{
+            CardWidget#characterCardColumnPanel {{
                 background: {panel};
+                border: 1px solid {border};
+                border-radius: 10px;
+            }}
+            CardWidget#characterCardSectionCard {{
+                background: {panel_alt};
                 border: 1px solid {border};
                 border-radius: 8px;
             }}
@@ -193,6 +210,26 @@ class CharacterCardDetailPanel(QWidget):
                 background: transparent;
             }}
             QWidget#editorContent, QWidget#inspectorContent {{
+                background: transparent;
+            }}
+            QScrollBar:vertical {{
+                width: 6px;
+                background: transparent;
+                margin: 2px 0 2px 0;
+            }}
+            QScrollBar::handle:vertical {{
+                background: rgba(169, 176, 184, 0.22);
+                border-radius: 3px;
+                min-height: 28px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: rgba(169, 176, 184, 0.36);
+            }}
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical,
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {{
+                height: 0;
                 background: transparent;
             }}
             QLabel#sectionHelper, QLabel#mutedLabel {{
@@ -206,7 +243,7 @@ class CharacterCardDetailPanel(QWidget):
             }}
             QLabel#summaryChip, QLabel#statusBadge {{
                 border-radius: 7px;
-                padding: 2px 8px;
+                padding: 2px 6px;
             }}
             QLabel#summaryChip {{
                 color: {text};
@@ -236,20 +273,20 @@ class CharacterCardDetailPanel(QWidget):
         self.editor_content.setObjectName("editorContent")
         header = QVBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(8)
+        header.setSpacing(2)
         header.addWidget(StrongBodyLabel(t("cards.detail.title"), self.editor_content))
 
         self.status_label = CaptionLabel(t("cards.status.noSelection"), self.editor_content)
         self.status_label.setWordWrap(True)
         self.summary_chip_panel = QWidget(self.editor_content)
-        self.summary_chip_flow = FlowLayout(self.summary_chip_panel, spacing=6)
+        self.summary_chip_flow = FlowLayout(self.summary_chip_panel, spacing=4)
         self.summary_chip_panel.setLayout(self.summary_chip_flow)
         self.summary_chips: dict[str, QLabel] = {}
         for key in ("status", "source", "revision", "format"):
             chip = QLabel("", self.editor_content)
             chip.setObjectName("summaryChip")
             chip.setWordWrap(False)
-            chip.setMaximumWidth(240)
+            chip.setMaximumWidth(190)
             self.summary_chips[key] = chip
             self.summary_chip_flow.addWidget(chip)
         header.addWidget(self.summary_chip_panel)
@@ -261,7 +298,7 @@ class CharacterCardDetailPanel(QWidget):
         self.display_name = LineEdit(self.editor_content)
         self.display_name.setPlaceholderText(t("cards.field.displayName.placeholder"))
         for field in (self.character_name, self.display_name):
-            field.setMinimumHeight(34)
+            field.setMinimumHeight(32)
         self.aliases = ChipTagEditor(
             self.editor_content,
             placeholder=t("cards.field.aliases.placeholder"),
@@ -362,11 +399,15 @@ class CharacterCardDetailPanel(QWidget):
             self.editor_content,
         )
 
-        output_card, output_layout = _make_card(self.editor_content, t("cards.section.outputSettings"))
+        output_card, output_layout = _make_card(
+            self.editor_content,
+            t("cards.section.outputSettings"),
+            compact=True,
+        )
         self.output_grid = QGridLayout()
         self.output_grid.setContentsMargins(0, 0, 0, 0)
-        self.output_grid.setHorizontalSpacing(14)
-        self.output_grid.setVerticalSpacing(10)
+        self.output_grid.setHorizontalSpacing(10)
+        self.output_grid.setVerticalSpacing(4)
         self.compile_variant_field = _inline_field_widget(
             t("cards.field.compileVariant"),
             self.compile_variant,
@@ -388,6 +429,9 @@ class CharacterCardDetailPanel(QWidget):
         hint = CaptionLabel(t("cards.outputSettings.hint"), output_card)
         hint.setObjectName("mutedLabel")
         hint.setWordWrap(True)
+        hint.hide()
+        output_card.setToolTip(hint.text())
+        self.export_astrbot_after_compile.setToolTip(hint.text())
         output_layout.addWidget(hint)
         self.editor_layout.addWidget(output_card)
         self.editor_layout.addStretch(1)
@@ -397,7 +441,11 @@ class CharacterCardDetailPanel(QWidget):
     def _build_inspector(self) -> None:
         self.inspector_content.setObjectName("inspectorContent")
 
-        cover_card, cover_layout = _make_card(self.inspector_content, t("cards.inspector.cover"))
+        cover_card, cover_layout = _make_card(
+            self.inspector_content,
+            t("cards.inspector.cover"),
+            compact=True,
+        )
         cover_row = QHBoxLayout()
         cover_row.setContentsMargins(0, 0, 0, 0)
         cover_row.addStretch(1)
@@ -407,7 +455,7 @@ class CharacterCardDetailPanel(QWidget):
         cover_layout.addLayout(cover_row)
         cover_actions = QHBoxLayout()
         cover_actions.setContentsMargins(0, 0, 0, 0)
-        cover_actions.setSpacing(6)
+        cover_actions.setSpacing(4)
         self.cover_button = PushButton(t("cards.action.cover"), self.inspector_content)
         self.clear_cover_button = PushButton(t("cards.action.clearCover"), self.inspector_content)
         for button in (self.cover_button, self.clear_cover_button):
@@ -417,11 +465,15 @@ class CharacterCardDetailPanel(QWidget):
         cover_layout.addLayout(cover_actions)
         self.inspector_layout.addWidget(cover_card)
 
-        status_card, status_layout = _make_card(self.inspector_content, t("cards.inspector.status"))
+        status_card, status_layout = _make_card(
+            self.inspector_content,
+            t("cards.inspector.status"),
+            compact=True,
+        )
         status_grid = QGridLayout()
         status_grid.setContentsMargins(0, 0, 0, 0)
         status_grid.setHorizontalSpacing(10)
-        status_grid.setVerticalSpacing(6)
+        status_grid.setVerticalSpacing(2)
         self.status_values: dict[str, QLabel] = {}
         for row, (key, label) in enumerate(
             (
@@ -432,21 +484,28 @@ class CharacterCardDetailPanel(QWidget):
                 ("compiledAt", t("cards.status.lastCompile")),
             )
         ):
-            status_grid.addWidget(CaptionLabel(label, status_card), row, 0)
+            label_widget = CaptionLabel(label, status_card)
+            label_widget.setFixedHeight(20)
+            status_grid.addWidget(label_widget, row, 0)
             value = BodyLabel("-", status_card)
             value.setWordWrap(True)
+            value.setFixedHeight(20)
             value.setMinimumWidth(0)
-            value.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            value.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             self.status_values[key] = value
             status_grid.addWidget(value, row, 1)
         status_grid.setColumnStretch(1, 1)
         status_layout.addLayout(status_grid)
         self.inspector_layout.addWidget(status_card)
 
-        quick_card, quick_layout = _make_card(self.inspector_content, t("cards.inspector.quickActions"))
+        quick_card, quick_layout = _make_card(
+            self.inspector_content,
+            t("cards.inspector.quickActions"),
+            compact=True,
+        )
         quick_row = QHBoxLayout()
         quick_row.setContentsMargins(0, 0, 0, 0)
-        quick_row.setSpacing(6)
+        quick_row.setSpacing(4)
         self.save_button = PrimaryPushButton(t("cards.action.save"), self.inspector_content)
         self.preview_button = PushButton(t("cards.action.previewResult"), self.inspector_content)
         for button in (self.save_button, self.preview_button):
@@ -456,16 +515,22 @@ class CharacterCardDetailPanel(QWidget):
         quick_layout.addLayout(quick_row)
         self.stale_warning_label = CaptionLabel(t("cards.preview.staleHint"), self.inspector_content)
         self.stale_warning_label.setWordWrap(True)
+        self.stale_warning_label.hide()
+        quick_card.setToolTip(self.stale_warning_label.text())
         quick_layout.addWidget(self.stale_warning_label)
         self.compile_button = PrimaryPushButton(t("cards.action.compile"), self.inspector_content)
         _configure_inspector_button(self.compile_button, 28)
         quick_layout.addWidget(self.compile_button)
         self.inspector_layout.addWidget(quick_card)
 
-        output_card, output_layout = _make_card(self.inspector_content, t("cards.inspector.outputActions"))
+        output_card, output_layout = _make_card(
+            self.inspector_content,
+            t("cards.inspector.outputActions"),
+            compact=True,
+        )
         output_row = QHBoxLayout()
         output_row.setContentsMargins(0, 0, 0, 0)
-        output_row.setSpacing(6)
+        output_row.setSpacing(4)
         self.export_button = PushButton(t("cards.action.export"), self.inspector_content)
         self.astrbot_button = PushButton(t("cards.action.astrbotHelper"), self.inspector_content)
         for button in (self.export_button, self.astrbot_button):
@@ -475,7 +540,11 @@ class CharacterCardDetailPanel(QWidget):
         output_layout.addLayout(output_row)
         self.inspector_layout.addWidget(output_card)
 
-        danger_card, danger_layout = _make_card(self.inspector_content, t("cards.inspector.dangerActions"))
+        danger_card, danger_layout = _make_card(
+            self.inspector_content,
+            t("cards.inspector.dangerActions"),
+            compact=True,
+        )
         self.delete_button = PushButton(t("cards.action.deleteCard"), self.inspector_content)
         self.delete_button.setObjectName("dangerButton")
         _configure_inspector_button(self.delete_button, 28)
@@ -519,28 +588,37 @@ class CharacterCardDetailPanel(QWidget):
         self._sync_summary_chips()
         self._sync_status_card()
         self._sync_compile_button()
-        self.stale_warning_label.setVisible(self.is_result_stale())
+        self.stale_warning_label.hide()
 
     def _sync_summary_chips(self) -> None:
         card = self._card
         if card is None:
             for chip in self.summary_chips.values():
                 chip.hide()
+            self.status_label.show()
             return
-        self.status_label.setText("")
+        self.status_label.hide()
+        full_format = t(f"cards.compileVariant.{self._current_compile_variant().value}")
         values = {
-            "status": t("cards.summaryChip.status", value=_status_display(card, self._dirty)),
-            "source": t("cards.summaryChip.source", value=card.compile_source.value),
-            "revision": t("cards.summaryChip.revision", value=card.revision),
-            "format": t(
-                "cards.summaryChip.format",
-                value=t(f"cards.compileVariant.{self._current_compile_variant().value}"),
+            "status": (
+                t("cards.summaryChip.status", value=_status_display(card, self._dirty)),
+                _status_kind(card, self._dirty),
+            ),
+            "source": (t("cards.summaryChip.source", value=card.compile_source.value), "neutral"),
+            "revision": (t("cards.summaryChip.revision", value=card.revision), "neutral"),
+            "format": (
+                t(
+                    "cards.summaryChip.formatShort",
+                    value=_short_compile_variant(self._current_compile_variant()),
+                ),
+                "neutral",
             ),
         }
-        for key, value in values.items():
+        for key, (value, kind) in values.items():
             chip = self.summary_chips[key]
-            chip.setText(_elide_text(value, 28))
-            chip.setToolTip(value)
+            chip.setText(_compact_summary_chip_text(value))
+            chip.setToolTip(full_format if key == "format" else value)
+            chip.setStyleSheet(_chip_style(kind))
             chip.show()
 
     def _sync_status_card(self) -> None:
@@ -548,6 +626,7 @@ class CharacterCardDetailPanel(QWidget):
         if card is None:
             for value in self.status_values.values():
                 value.setText("-")
+                value.setStyleSheet(_status_value_style("neutral"))
             return
         self.status_values["edit"].setText(
             t("cards.status.unsaved") if self._dirty else t("cards.status.saved")
@@ -558,6 +637,12 @@ class CharacterCardDetailPanel(QWidget):
         self.status_values["compiledAt"].setText(
             card.compiled_at.strftime("%Y-%m-%d %H:%M") if card.compiled_at else "-"
         )
+        self.status_values["edit"].setStyleSheet(
+            _status_value_style("warning" if self._dirty else "success")
+        )
+        self.status_values["compile"].setStyleSheet(_status_value_style(_status_kind(card, self._dirty)))
+        for key in ("source", "revision", "compiledAt"):
+            self.status_values[key].setStyleSheet(_status_value_style("neutral"))
 
     def _sync_compile_button(self) -> None:
         if self._card is None:
@@ -691,6 +776,15 @@ def _make_scroll_area(parent: QWidget) -> QScrollArea:
     return scroll
 
 
+def _make_column_panel(parent: QWidget) -> CardWidget:
+    panel = CardWidget(parent)
+    panel.setObjectName("characterCardColumnPanel")
+    panel.setBorderRadius(10)
+    panel.setMinimumWidth(0)
+    panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+    return panel
+
+
 def _configure_inspector_button(button: QWidget, height: int) -> None:
     button.setMinimumWidth(0)
     button.setMinimumHeight(height)
@@ -704,14 +798,19 @@ def _configure_textarea(editor: PlainTextEdit) -> None:
         editor.setViewportMargins(0, 0, 0, 16)
 
 
-def _make_card(parent: QWidget, title: str) -> tuple[CardWidget, QVBoxLayout]:
+def _make_card(parent: QWidget, title: str, *, compact: bool = False) -> tuple[CardWidget, QVBoxLayout]:
     card = CardWidget(parent)
+    card.setObjectName("characterCardSectionCard")
     card.setBorderRadius(8)
     card.setMinimumWidth(0)
     card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
     layout = QVBoxLayout(card)
-    layout.setContentsMargins(12, 9, 12, 10)
-    layout.setSpacing(7)
+    if compact:
+        layout.setContentsMargins(10, 6, 10, 7)
+        layout.setSpacing(4)
+    else:
+        layout.setContentsMargins(12, 9, 12, 10)
+        layout.setSpacing(7)
     layout.addWidget(StrongBodyLabel(title, card))
     return card, layout
 
@@ -837,7 +936,73 @@ def _status_display(card: CharacterCard, dirty: bool = False) -> str:
     return t(f"cards.status.display.{card.compile_status.value}")
 
 
+def _status_kind(card: CharacterCard, dirty: bool = False) -> str:
+    if dirty and card.compile_status == CharacterCardStatus.COMPILED:
+        return "warning"
+    if card.compile_status == CharacterCardStatus.STALE:
+        return "warning"
+    if card.compile_status == CharacterCardStatus.FAILED:
+        return "danger"
+    if card.compile_status == CharacterCardStatus.COMPILED:
+        return "success"
+    return "neutral"
+
+
+def _short_compile_variant(variant: CharacterCardCompileVariant) -> str:
+    if variant == CharacterCardCompileVariant.ASTRBOT:
+        return "AstrBot"
+    if variant == CharacterCardCompileVariant.CHARACTER_CARD_V2:
+        return "Card V2"
+    return t(f"cards.compileVariant.{variant.value}")
+
+
+def _semantic_colors(kind: str) -> tuple[str, str, str]:
+    if isDarkTheme():
+        return {
+            "success": ("#9fe6c0", "rgba(62, 180, 137, 0.14)", "rgba(62, 180, 137, 0.32)"),
+            "warning": ("#f1d27a", "rgba(220, 165, 42, 0.14)", "rgba(220, 165, 42, 0.34)"),
+            "danger": ("#f0a0a0", "rgba(230, 106, 106, 0.13)", "rgba(230, 106, 106, 0.34)"),
+            "neutral": (
+                CHARACTER_CARD_DARK_TEXT,
+                CHARACTER_CARD_DARK_PANEL_ALT,
+                CHARACTER_CARD_DARK_BORDER,
+            ),
+        }.get(kind, (CHARACTER_CARD_DARK_TEXT, CHARACTER_CARD_DARK_PANEL_ALT, CHARACTER_CARD_DARK_BORDER))
+    return {
+        "success": ("#166b4a", "rgba(62, 180, 137, 0.12)", "rgba(62, 180, 137, 0.32)"),
+        "warning": ("#7a5608", "rgba(220, 165, 42, 0.13)", "rgba(220, 165, 42, 0.34)"),
+        "danger": ("#a43f3f", "rgba(230, 106, 106, 0.12)", "rgba(230, 106, 106, 0.34)"),
+        "neutral": (
+            CHARACTER_CARD_LIGHT_TEXT,
+            CHARACTER_CARD_LIGHT_PANEL_ALT,
+            CHARACTER_CARD_LIGHT_BORDER,
+        ),
+    }.get(kind, (CHARACTER_CARD_LIGHT_TEXT, CHARACTER_CARD_LIGHT_PANEL_ALT, CHARACTER_CARD_LIGHT_BORDER))
+
+
+def _chip_style(kind: str) -> str:
+    foreground, background, border = _semantic_colors(kind)
+    return (
+        "QLabel#summaryChip {"
+        f"color: {foreground};"
+        f"background: {background};"
+        f"border: 1px solid {border};"
+        "border-radius: 7px;"
+        "padding: 2px 6px;"
+        "}"
+    )
+
+
+def _status_value_style(kind: str) -> str:
+    foreground, _background, _border = _semantic_colors(kind)
+    return f"color: {foreground};"
+
+
 def _elide_text(value: str, maximum: int) -> str:
     if len(value) <= maximum:
         return value
     return value[: max(0, maximum - 3)].rstrip() + "..."
+
+
+def _compact_summary_chip_text(value: str) -> str:
+    return _elide_text(" ".join(value.split()), 22)

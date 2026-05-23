@@ -175,16 +175,17 @@ class ChipTagEditor(QWidget):
 
         self.input = LineEdit(self)
         self.input.setPlaceholderText(placeholder)
-        self.input.setMinimumWidth(118)
-        self.input.setMaximumWidth(220)
+        input_width = max(176, min(280, self.fontMetrics().horizontalAdvance(placeholder) + 34))
+        self.input.setFixedWidth(input_width)
         self.input.setFixedHeight(25)
-        self.input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.input.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.input.installEventFilter(self)
         self.add_button = PushButton(add_text, self)
         self.add_button.setToolTip(add_text)
-        self.add_button.setMinimumWidth(0)
-        self.add_button.setMinimumHeight(25)
-        self.add_button.setMaximumHeight(25)
+        self.add_button.setFixedSize(
+            max(70, min(126, self.fontMetrics().horizontalAdvance(add_text) + 18)),
+            25,
+        )
         self.add_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
         root = QHBoxLayout(self)
@@ -203,7 +204,10 @@ class ChipTagEditor(QWidget):
         clean = [_normalize(value) for value in values if _normalize(value)]
         self._updating = True
         self._values = clean
+        self.input.clear()
+        self._input_active = False
         self._rebuild()
+        self._refresh_layout()
         self._updating = False
 
     def clear(self) -> None:
@@ -229,7 +233,7 @@ class ChipTagEditor(QWidget):
         self._input_active = active
         self.input.setVisible(active)
         self.add_button.setVisible(not active)
-        self.updateGeometry()
+        self._refresh_layout()
 
     def _add_from_input(self) -> None:
         raw = self.input.text().strip()
@@ -274,11 +278,18 @@ class ChipTagEditor(QWidget):
         self.flow.addWidget(self.input)
         self.flow.addWidget(self.add_button)
         self._set_input_active(self._input_active)
-        self.updateGeometry()
+        self._refresh_layout()
 
     def _emit_values_changed(self) -> None:
         if not self._updating:
             self.valuesChanged.emit()
+
+    def _refresh_layout(self) -> None:
+        self.flow.invalidate()
+        self.chip_container.updateGeometry()
+        self.chip_container.update()
+        self.updateGeometry()
+        self.update()
 
     def apply_theme_colors(self) -> None:
         if isDarkTheme():
@@ -317,15 +328,17 @@ class ChipTagEditor(QWidget):
         self.add_button.setStyleSheet(
             f"""
             PushButton {{
-                color: {CHARACTER_CARD_ACCENT};
+                color: {muted};
                 background: transparent;
                 border: 1px dashed {border};
                 border-radius: 12px;
-                padding: 0 9px;
+                padding: 0 8px;
+                font-size: 11px;
             }}
             PushButton:hover {{
                 background: {CHARACTER_CARD_ACCENT_SOFT};
                 border: 1px solid {CHARACTER_CARD_ACCENT};
+                color: {CHARACTER_CARD_ACCENT};
             }}
             """
         )

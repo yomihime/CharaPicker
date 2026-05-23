@@ -179,6 +179,7 @@
   "cards.summaryChip.source": "ソース {value}",
   "cards.summaryChip.revision": "リビジョン {value}",
   "cards.summaryChip.format": "カード形式 {value}",
+  "cards.summaryChip.formatShort": "形式 {value}",
   "cards.detail.title": "カードを編集",
   "cards.detail.identity": "基本情報",
   "cards.detail.compile": "出力設定",

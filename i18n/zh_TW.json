@@ -179,6 +179,7 @@
   "cards.summaryChip.source": "來源 {value}",
   "cards.summaryChip.revision": "修訂 {value}",
   "cards.summaryChip.format": "人物卡格式 {value}",
+  "cards.summaryChip.formatShort": "格式 {value}",
   "cards.detail.title": "編輯角色卡",
   "cards.detail.identity": "基礎資訊",
   "cards.detail.compile": "輸出設定",

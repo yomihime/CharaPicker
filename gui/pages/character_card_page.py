@@ -19,6 +19,7 @@ from qfluentwidgets import (
     ProgressBar,
     PushButton,
     SubtitleLabel,
+    isDarkTheme,
 )
 
 from core import character_card_store as store
@@ -43,6 +44,12 @@ from gui.workers.character_card_workers import (
     CharacterCardExportWorker,
     CharacterCardImportWorker,
     CharacterCardPreviewWorker,
+)
+from res.colors import (
+    CHARACTER_CARD_DARK_BACKGROUND,
+    CHARACTER_CARD_DARK_MUTED_TEXT,
+    CHARACTER_CARD_LIGHT_BACKGROUND,
+    CHARACTER_CARD_LIGHT_MUTED_TEXT,
 )
 from utils.i18n import t
 from utils.cloud_model_presets import CloudModelPreset
@@ -155,11 +162,20 @@ class CharacterCardPage(QWidget):
         self._loading_dialog: CharacterCardLoadingDialog | None = None
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(22, 18, 22, 18)
-        root.setSpacing(12)
+        root.setContentsMargins(22, 10, 22, 16)
+        root.setSpacing(8)
 
         header = QHBoxLayout()
-        header.addWidget(SubtitleLabel(t("cards.title"), self))
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(12)
+        header_text = QVBoxLayout()
+        header_text.setContentsMargins(0, 0, 0, 0)
+        header_text.setSpacing(1)
+        header_text.addWidget(SubtitleLabel(t("cards.title"), self))
+        self.project_label = CaptionLabel(t("cards.noProject"), self)
+        self.project_label.setWordWrap(True)
+        header_text.addWidget(self.project_label)
+        header.addLayout(header_text, 1)
         header.addStretch(1)
         self.import_button = PushButton(t("cards.action.import"), self)
         self.new_button = PrimaryPushButton(t("cards.action.new"), self)
@@ -167,19 +183,15 @@ class CharacterCardPage(QWidget):
         header.addWidget(self.new_button)
         root.addLayout(header)
 
-        self.project_label = BodyLabel(t("cards.noProject"), self)
-        self.project_label.setWordWrap(True)
-        root.addWidget(self.project_label)
-
         self.workbench_layout = QHBoxLayout()
         self.workbench_layout.setContentsMargins(0, 0, 0, 0)
-        self.workbench_layout.setSpacing(16)
+        self.workbench_layout.setSpacing(8)
         self.gallery = CharacterCardGallery(self)
         self.detail = CharacterCardDetailPanel(self)
         self.gallery.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self.detail.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.workbench_layout.addWidget(self.gallery, 24)
-        self.workbench_layout.addWidget(self.detail, 76)
+        self.workbench_layout.addWidget(self.gallery, 23)
+        self.workbench_layout.addWidget(self.detail, 77)
         root.addLayout(self.workbench_layout, 1)
 
         self.gallery.cardSelected.connect(self._load_card)
@@ -200,6 +212,20 @@ class CharacterCardPage(QWidget):
         self._model_preset_provider = provider
 
     def apply_theme_colors(self) -> None:
+        if isDarkTheme():
+            background = CHARACTER_CARD_DARK_BACKGROUND
+            muted = CHARACTER_CARD_DARK_MUTED_TEXT
+        else:
+            background = CHARACTER_CARD_LIGHT_BACKGROUND
+            muted = CHARACTER_CARD_LIGHT_MUTED_TEXT
+        self.setStyleSheet(
+            f"""
+            QWidget#characterCardPage {{
+                background: {background};
+            }}
+            """
+        )
+        self.project_label.setStyleSheet(f"color: {muted};")
         self.gallery.apply_theme_colors()
         self.detail.apply_theme_colors()
 

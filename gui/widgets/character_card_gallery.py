@@ -60,11 +60,13 @@ class CharacterCardGallery(QWidget):
         super().__init__(parent)
         self._cards: list[CharacterCardSummary] = []
         self._status_filter: CharacterCardStatus | None = None
+        self.setObjectName("characterCardGalleryPanel")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMinimumWidth(0)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(8)
+        root.setContentsMargins(12, 10, 12, 12)
+        root.setSpacing(7)
 
         title = StrongBodyLabel(t("cards.gallery.title"), self)
         root.addWidget(title)
@@ -85,7 +87,7 @@ class CharacterCardGallery(QWidget):
         self.filter_buttons: dict[CharacterCardStatus | None, PushButton] = {}
         filter_panel = QWidget(self)
         filter_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
-        filter_row = FlowLayout(filter_panel, spacing=6)
+        filter_row = FlowLayout(filter_panel, spacing=4)
         filter_panel.setLayout(filter_row)
         for status, label in (
             (None, t("cards.statusFilter.all")),
@@ -95,7 +97,8 @@ class CharacterCardGallery(QWidget):
         ):
             button = PushButton(label, self)
             button.setCheckable(True)
-            button.setFixedHeight(28)
+            button.setToolTip(label)
+            button.setFixedSize(_filter_chip_width(button, label), 26)
             button.setMinimumWidth(0)
             button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             button.clicked.connect(lambda _checked=False, value=status: self._set_status_filter(value))
@@ -107,7 +110,7 @@ class CharacterCardGallery(QWidget):
         self.list_widget = QListWidget(self)
         self.list_widget.setObjectName("characterCardGallery")
         self.list_widget.setMinimumWidth(0)
-        self.list_widget.setSpacing(6)
+        self.list_widget.setSpacing(5)
         self.list_widget.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         root.addWidget(self.list_widget, 1)
 
@@ -142,11 +145,13 @@ class CharacterCardGallery(QWidget):
 
     def apply_theme_colors(self) -> None:
         if isDarkTheme():
+            panel = CHARACTER_CARD_DARK_PANEL
             background = CHARACTER_CARD_DARK_PANEL_ALT
             border = CHARACTER_CARD_DARK_BORDER
             text = CHARACTER_CARD_DARK_TEXT
             muted = CHARACTER_CARD_DARK_MUTED_TEXT
         else:
+            panel = CHARACTER_CARD_LIGHT_PANEL
             background = CHARACTER_CARD_LIGHT_PANEL_ALT
             border = CHARACTER_CARD_LIGHT_BORDER
             text = CHARACTER_CARD_LIGHT_TEXT
@@ -158,7 +163,7 @@ class CharacterCardGallery(QWidget):
                 border: 1px solid {border};
                 border-radius: 8px;
                 outline: none;
-                padding: 6px;
+                padding: 5px;
             }}
             QListWidget#characterCardGallery::item {{
                 border: none;
@@ -168,11 +173,43 @@ class CharacterCardGallery(QWidget):
             QListWidget#characterCardGallery::item:selected {{
                 background: transparent;
             }}
+            QScrollBar:vertical {{
+                width: 6px;
+                background: transparent;
+                margin: 2px 0 2px 0;
+            }}
+            QScrollBar::handle:vertical {{
+                background: rgba(169, 176, 184, 0.22);
+                border-radius: 3px;
+                min-height: 28px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: rgba(169, 176, 184, 0.36);
+            }}
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical,
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {{
+                height: 0;
+                background: transparent;
+            }}
             """
         )
         self.empty_label.setStyleSheet(f"color: {muted};")
         self.count_label.setStyleSheet(f"color: {muted};")
-        self.setStyleSheet(f"QWidget {{ color: {text}; }}")
+        self.setStyleSheet(
+            f"""
+            QWidget#characterCardGalleryPanel {{
+                color: {text};
+                background: {panel};
+                border: 1px solid {border};
+                border-radius: 10px;
+            }}
+            QWidget#characterCardGalleryPanel QWidget {{
+                color: {text};
+            }}
+            """
+        )
         self._sync_filter_buttons()
         self._sync_selection_styles()
 
@@ -190,7 +227,7 @@ class CharacterCardGallery(QWidget):
             item = QListWidgetItem()
             item.setData(CARD_ID_ROLE, card.card_id)
             item.setToolTip(card.card_id)
-            item.setSizeHint(QSize(0, 92))
+            item.setSizeHint(QSize(0, 86))
             self.list_widget.addItem(item)
             self.list_widget.setItemWidget(item, PosterCardWidget(card, self.list_widget))
         self.empty_label.setVisible(self.list_widget.count() == 0)
@@ -251,9 +288,9 @@ class CharacterCardGallery(QWidget):
                         color: {CHARACTER_CARD_ACCENT};
                         border: 1px solid {CHARACTER_CARD_ACCENT};
                         background: {CHARACTER_CARD_ACCENT_SOFT};
-                        border-radius: 14px;
-                        padding: 1px 11px;
-                        font-size: 12px;
+                        border-radius: 13px;
+                        padding: 0 7px;
+                        font-size: 11px;
                     }}
                     """
                 )
@@ -264,9 +301,9 @@ class CharacterCardGallery(QWidget):
                         color: {inactive_text};
                         border: 1px solid {inactive_border};
                         background: {inactive_background};
-                        border-radius: 14px;
-                        padding: 1px 11px;
-                        font-size: 12px;
+                        border-radius: 13px;
+                        padding: 0 7px;
+                        font-size: 11px;
                     }}
                     PushButton:hover {{
                         border: 1px solid {CHARACTER_CARD_ACCENT};
@@ -284,19 +321,25 @@ class PosterCardWidget(QWidget):
         self.setObjectName("posterCard")
 
         root = QHBoxLayout(self)
-        root.setContentsMargins(8, 7, 8, 7)
-        root.setSpacing(8)
+        root.setContentsMargins(0, 6, 7, 6)
+        root.setSpacing(7)
+
+        self.selection_bar = QWidget(self)
+        self.selection_bar.setObjectName("selectionBar")
+        self.selection_bar.setFixedWidth(3)
+        root.addWidget(self.selection_bar)
 
         self.cover = CoverThumbnail(self)
         self.cover.set_cover_path(card.cover_path)
         root.addWidget(self.cover, 0)
 
         content = QVBoxLayout()
-        content.setContentsMargins(0, 1, 0, 1)
-        content.setSpacing(3)
+        content.setContentsMargins(0, 0, 0, 0)
+        content.setSpacing(2)
         name = _display_name_with_tags(card)
-        self.name_label = BodyLabel(_elide_text(name, 34), self)
-        self.name_label.setWordWrap(False)
+        self.name_label = BodyLabel(_elide_text(name, 44), self)
+        self.name_label.setWordWrap(True)
+        self.name_label.setMaximumHeight(34)
         self.name_label.setToolTip(name)
         content.addWidget(self.name_label)
 
@@ -351,6 +394,10 @@ class PosterCardWidget(QWidget):
                 border: 1px solid {selected_border};
                 border-radius: 8px;
             }}
+            QWidget#selectionBar {{
+                background: {CHARACTER_CARD_ACCENT if self._selected else "transparent"};
+                border-radius: 2px;
+            }}
             QLabel#statusBadge {{
                 color: {_status_foreground(self.card.compile_status)};
                 background: {_status_background(self.card.compile_status)};
@@ -368,7 +415,7 @@ class PosterCardWidget(QWidget):
 class CoverThumbnail(QLabel):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setFixedSize(42, 75)
+        self.setFixedSize(38, 68)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setScaledContents(False)
 
@@ -441,6 +488,10 @@ def _status_background(status: CharacterCardStatus) -> str:
 
 def _variant_text(value: str) -> str:
     return t(f"cards.compileVariant.{value}")
+
+
+def _filter_chip_width(button: PushButton, label: str) -> int:
+    return max(36, min(68, button.fontMetrics().horizontalAdvance(label) + 14))
 
 
 def _elide_text(value: str, maximum: int) -> str:

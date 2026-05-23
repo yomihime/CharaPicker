@@ -179,6 +179,7 @@
   "cards.summaryChip.source": "来源 {value}",
   "cards.summaryChip.revision": "修订 {value}",
   "cards.summaryChip.format": "人物卡格式 {value}",
+  "cards.summaryChip.formatShort": "格式 {value}",
   "cards.detail.title": "编辑角色卡",
   "cards.detail.identity": "基础信息",
   "cards.detail.compile": "输出设置",
