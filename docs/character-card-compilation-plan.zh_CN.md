@@ -1444,7 +1444,7 @@ CharacterCardPage select image
 交付：
 
 - 按发布规范将本功能阶段版本升级为 `v0.3.0-alpha`；这是分支合并前的收尾动作。
-- 同步更新构建元数据、项目元数据、用户可见版本文案和多语言文档中的当前版本号。实现时至少核对 `build.bat`、`pyproject.toml`、`scripts/build_meta.py` 默认版本、`README.md`、`docs/README.*.md`、`i18n/*` 的 about 版本文案，以及仍在硬编码版本号的 User-Agent 常量。
+- 同步更新构建元数据、项目元数据、用户可见版本文案和多语言文档中的当前版本号。实现时至少核对 `utils/app_metadata.py`、`build.bat`、`pyproject.toml`、`scripts/build_meta.py` 默认版本来源、`README.md`、`docs/README.*.md`、`i18n/*` 的 about 版本文案，以及运行时 HTTP User-Agent 是否仍由统一应用元数据生成。
 - 若发布规范文档中的示例命令被用作当前推荐命令，同步改为 `v0.3.0-alpha`；若只是历史示例，保持示例性质但避免让用户误读为当前版本。
 - 版本升级提交使用 `chore: prepare v0.3.0-alpha release`。
 

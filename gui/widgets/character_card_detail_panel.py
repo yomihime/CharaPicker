@@ -29,6 +29,7 @@ from qfluentwidgets import (
 )
 
 from core import character_card_store as store
+from core.character_card_constants import STALE_WARNING_REASONS
 from core.models import CharacterCard, CharacterCardCompileVariant, CharacterCardStatus
 from gui.widgets.chip_tag_editor import ChipTagEditor, FlowLayout
 from res.colors import (
@@ -53,7 +54,6 @@ COMPILE_VARIANTS = (
     CharacterCardCompileVariant.CHARACTER_CARD_V2,
 )
 TEXT_LIMIT = 3000
-STALE_WARNING_REASONS = {"character_name_changed", "compile_inputs_changed"}
 REVIEW_WARNING_MESSAGES = {
     "summary is empty",
     "no evidence was matched",

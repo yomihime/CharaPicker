@@ -17,6 +17,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from utils.app_metadata import HTTP_USER_AGENT
 from utils.paths import APP_ROOT
 from utils.prompt_preferences import prompt_override
 from utils.ffmpeg_tool import find_usable_ffmpeg_binary
@@ -24,7 +25,6 @@ from utils.ffmpeg_tool import find_usable_ffmpeg_binary
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_PROMPTS_PATH = APP_ROOT / "res" / "default_prompts.json"
-USER_AGENT = "CharaPicker/0.3.0-alpha"
 OUTPUT_TOKEN_GUIDANCE_TEMPLATE = (
     "Output budget: keep the final response within {max_tokens} output tokens. "
     "Use enough detail to complete the task, but do not pad the answer. "
@@ -578,7 +578,7 @@ def _call_openai_compatible(
 
     headers = {
         "Content-Type": "application/json",
-        "User-Agent": USER_AGENT,
+        "User-Agent": HTTP_USER_AGENT,
     }
     api_key = request.api_key.strip()
     if api_key:

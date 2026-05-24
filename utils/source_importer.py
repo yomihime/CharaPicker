@@ -3,35 +3,17 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-from pathlib import Path
 from collections.abc import Callable
+from pathlib import Path
 
+from utils.material_processing_events import SOURCE_PROCESSING_CANCELLED_MESSAGE
+from utils.media_types import SUPPORTED_SOURCE_SUFFIXES
 from utils.paths import ensure_project_tree, project_paths
 
 LOGGER = logging.getLogger(__name__)
 ProgressCallback = Callable[[int, int, str], None]
 CancelledCallback = Callable[[], bool]
 COPY_BUFFER_SIZE = 1024 * 1024 * 8
-
-SUPPORTED_SOURCE_SUFFIXES = {
-    ".mp4",
-    ".mkv",
-    ".mov",
-    ".avi",
-    ".webm",
-    ".flv",
-    ".wmv",
-    ".m4v",
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".webp",
-    ".bmp",
-    ".gif",
-    ".txt",
-    ".md",
-    ".json",
-}
 
 
 def import_sources_to_raw(
@@ -49,7 +31,7 @@ def import_sources_to_raw(
         progress(0, total, "")
     for index, source in enumerate(external_sources, start=1):
         if cancelled is not None and cancelled():
-            raise RuntimeError("Source processing cancelled")
+            raise RuntimeError(SOURCE_PROCESSING_CANCELLED_MESSAGE)
         target = raw_root / source.relative_target
         if _copy_source_file(source.path, target, cancelled=cancelled):
             imported_paths.append(target)
@@ -254,7 +236,7 @@ def _copy_file_interruptible(source: Path, target: Path, cancelled: CancelledCal
             if cancelled is not None and cancelled():
                 target_file.close()
                 target.unlink(missing_ok=True)
-                raise RuntimeError("Source processing cancelled")
+                raise RuntimeError(SOURCE_PROCESSING_CANCELLED_MESSAGE)
             chunk = source_file.read(COPY_BUFFER_SIZE)
             if not chunk:
                 break

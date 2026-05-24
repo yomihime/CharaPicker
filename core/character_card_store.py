@@ -8,6 +8,11 @@ from pathlib import Path
 from uuid import uuid4
 
 from core import knowledge_base as kb
+from core.character_card_constants import (
+    CHARACTER_CARD_COVER_FILE_NAME,
+    PREVIEW_CARD_ID,
+    STALE_WARNING_REASONS,
+)
 from core.models import (
     CharacterCard,
     CharacterCardCompileSource,
@@ -18,8 +23,6 @@ from core.models import (
 
 
 LOGGER = logging.getLogger(__name__)
-PREVIEW_CARD_ID = "preview_card"
-STALE_WARNING_REASONS = {"character_name_changed", "compile_inputs_changed"}
 
 
 def generate_card_id(character_name: str, *, existing_ids: set[str] | None = None) -> str:
@@ -158,7 +161,7 @@ def mark_card_stale(card: CharacterCard, reason: str = "") -> CharacterCard:
 def resolve_cover_path(project_id: str, card_id: str) -> Path:
     card_dir = kb.character_card_dir_path(project_id, card_id)
     card_dir.mkdir(parents=True, exist_ok=True)
-    return card_dir / "cover.png"
+    return card_dir / CHARACTER_CARD_COVER_FILE_NAME
 
 
 def _existing_card_ids(project_id: str) -> set[str]:

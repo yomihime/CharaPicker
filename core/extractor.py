@@ -42,7 +42,6 @@ from utils.paths import ensure_project_tree
 
 
 LOGGER = logging.getLogger(__name__)
-VIDEO_SUFFIXES = source_scanner.VIDEO_SUFFIXES
 PREVIEW_MAX_CHUNKS = 2
 PREVIEW_CHUNK_MIN_OUTPUT_TOKENS = 1024
 PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE = 512

@@ -18,7 +18,7 @@ build.bat --version=0.3.0 --stage=alpha
 build.bat --local
 ```
 
-打包脚本通过 `scripts/build_meta.py` 解析版本、阶段、平台和架构，并调用 PyInstaller。
+打包脚本通过 `scripts/build_meta.py` 解析版本、阶段、平台和架构，并调用 PyInstaller。未显式传入版本或 tag 时，默认版本和阶段来自 `utils/app_metadata.py`，与运行时 HTTP User-Agent 使用同一份应用元数据。
 
 ## 2. PyInstaller 约束
 
@@ -74,6 +74,14 @@ release/
 构建脚本只读取显式 `--tag` 或当前提交上的精确 Git tag；历史最近 tag 不应覆盖当前默认版本。
 
 使用 `--local` 或 `local` 参数时，阶段应写为 `local`。
+
+升级默认版本或阶段时，应同步核对：
+
+- `utils/app_metadata.py`：运行时应用名、版本阶段和 HTTP User-Agent。
+- `pyproject.toml`：Python 项目元数据版本。
+- `build.bat`：批处理脚本回退默认值和发布文件名默认变量。
+- `README.md`、`docs/README.*.md` 和 `i18n/*`：用户可见版本文案。
+- `scripts/build_meta.py`：确认默认值仍从 `utils.app_metadata` 读取，命令行、tag 和 `--local` 覆盖逻辑保持有效。
 
 ## 5. 文件命名
 

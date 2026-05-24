@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from core import character_card_store as store
 from core import knowledge_base as kb
+from core.character_card_constants import STALE_WARNING_REASONS
 from core.compiler import compile_character_state_by_season_episode
 from core.models import (
     CharacterCard,
@@ -38,7 +39,6 @@ EXPECTED_AI_RESPONSE_KEYS = (
     "relationships",
     "warnings",
 )
-STALE_WARNING_REASONS = {"character_name_changed", "compile_inputs_changed"}
 CompileStageCallback = Callable[[str], None]
 StreamDeltaCallback = Callable[[str], None]
 

@@ -17,6 +17,7 @@
 ## 关键文件
 
 - `models.py`：定义 `ProjectConfig`、`SourceProcessingConfig`、`InsightEvent`、`CharacterState`、`ChunkExtractionResult`、`ProjectPaths` 等 Pydantic 模型。
+- `character_card_constants.py`：集中保存角色卡固定文件名、预览卡保留 ID 和 stale warning reason 等跨模块共享常量。
 - `knowledge_base.py`：集中管理 `projects/{project_id}/knowledge_base/` 下常用产物的路径、JSON 读写和结构校验。
 - `source_scanner.py`：提供素材目录扫描、预览视频 chunk 收集和预览 chunk 标识生成。
 - `extractor.py`：定义 `Extractor`，作为 UI-facing 提取入口，负责知识库分层初始化、chunk/episode/season 内容合并和流式预览提取，并委托知识库读写与素材扫描 helper。
@@ -49,6 +50,7 @@
 - `extractor` 只做素材解析、事实提取和洞察产出。
 - `compiler` 只做角色状态迭代、长文本阅读和冲突处理。
 - 角色卡编译、存储、渲染、导入和导出分别放在 `character_card_*` 模块；页面层不直接拼接知识库路径或导出字段。
+- 角色卡固定协议值优先放在 `character_card_constants.py`，避免在 store、compiler、renderer 和 GUI 层重复硬编码。
 - `generator` 只保留旧输出兼容，不新增角色卡业务逻辑。
 - 不要在 `core` 中引入界面布局逻辑。
 - 写入知识库时保持 UTF-8 和结构化 JSON，路径结构要与 `projects/ARCHITECTURE.md` 保持一致。

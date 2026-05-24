@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.models import ProjectConfig
+from utils.media_types import SUPPORTED_SOURCE_SUFFIXES
 from utils.paths import project_paths
 from utils.source_importer import (
-    SUPPORTED_SOURCE_SUFFIXES,
     source_raw_target_pairs,
     source_raw_targets,
 )

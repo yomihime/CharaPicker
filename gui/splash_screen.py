@@ -40,6 +40,7 @@ from res.colors import (
     SPLASH_LOADER_TRACK_DARK_RGBA,
     SPLASH_LOADER_TRACK_LIGHT_RGBA,
 )
+from utils.app_metadata import APP_NAME
 from utils.i18n import t
 from utils.startup_middleware import StartupWarmupSnapshot, warmup_startup_context
 
@@ -123,7 +124,7 @@ class SplashScreen(QWidget):
         self.loader.set_dark_mode(self._dark_mode)
         layout.addWidget(self.loader, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        title = QLabel("CharaPicker", card)
+        title = QLabel(APP_NAME, card)
         title.setObjectName("splashTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)

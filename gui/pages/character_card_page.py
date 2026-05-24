@@ -21,6 +21,11 @@ from qfluentwidgets import (
 )
 
 from core import character_card_store as store
+from core.character_card_constants import (
+    CHARACTER_CARD_COVER_FILE_NAME,
+    STALE_WARNING_CHARACTER_NAME_CHANGED,
+    STALE_WARNING_COMPILE_INPUTS_CHANGED,
+)
 from core.character_card_exporter import export_astrbot_copy_markdown
 from core.models import (
     CharacterCard,
@@ -330,9 +335,9 @@ class CharacterCardPage(QWidget):
             return True
         if updated.compile_status == CharacterCardStatus.COMPILED:
             if original_name != updated.identity.character_name:
-                updated = store.mark_card_stale(updated, "character_name_changed")
+                updated = store.mark_card_stale(updated, STALE_WARNING_CHARACTER_NAME_CHANGED)
             elif compile_inputs_changed:
-                updated = store.mark_card_stale(updated, "compile_inputs_changed")
+                updated = store.mark_card_stale(updated, STALE_WARNING_COMPILE_INPUTS_CHANGED)
         store.save_card(updated)
         self._current_card = updated
         self.detail.set_card(updated)
@@ -374,7 +379,7 @@ class CharacterCardPage(QWidget):
             self._show_warning(t("cards.cover.failed.title"), t("cards.cover.failed.content"))
             return
         card = self._current_card.model_copy(deep=True)
-        card.assets.cover_path = "cover.png"
+        card.assets.cover_path = CHARACTER_CARD_COVER_FILE_NAME
         card.assets.original_cover_path = ""
         card.assets.cover_aspect_ratio = "9:16"
         card.assets.crop = CharacterCardCrop(

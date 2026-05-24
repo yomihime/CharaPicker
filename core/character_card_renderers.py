@@ -4,10 +4,8 @@ import html
 import json
 from typing import Any
 
+from core.character_card_constants import STALE_WARNING_REASONS
 from core.models import CharacterCard
-
-
-STALE_WARNING_REASONS = {"character_name_changed", "compile_inputs_changed"}
 
 
 def render_card_markdown(card: CharacterCard) -> str:

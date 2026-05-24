@@ -7,10 +7,17 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from utils.app_metadata import APP_RELEASE_STAGE, APP_VERSION  # noqa: E402
 
 
-DEFAULT_VERSION = "0.3.0"
-DEFAULT_STAGE = "alpha"
+DEFAULT_VERSION = APP_VERSION
+DEFAULT_STAGE = APP_RELEASE_STAGE
 ALLOWED_STAGES = {"alpha", "beta", "rc", "release", "local"}
 STAGE_WITH_INDEX_PATTERN = re.compile(r"^(alpha|beta|rc)\.\d+$")
 SEMVER_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")

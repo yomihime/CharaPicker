@@ -16,6 +16,9 @@
 ## 关键文件
 
 - `i18n.py`：管理语言偏好、系统语言归一化、文案加载和 `t()` 翻译函数。
+- `app_metadata.py`：集中保存应用名、组织名、当前运行时版本/阶段和 HTTP User-Agent。
+- `media_types.py`：集中保存视频、图片、文本和可导入素材的后缀集合。
+- `material_processing_events.py`：集中保存素材处理取消消息和 FFmpeg 进度事件前缀等跨层协议常量。
 - `paths.py`：定义应用根目录、项目根目录和单个项目的标准目录结构。
 - `global_store.py`：提供全局用户数据和配置选项的读写中间件，默认使用根目录 `config.yaml`。
 - `state_manager.py`：保存、读取和列出项目配置，项目配置写入 `projects/{project_id}/config.json`。
@@ -53,10 +56,12 @@
 - `source_status.py` 由 `gui/pages/project_page.py` 调用；它只计算素材状态，不负责渲染列表行、弹窗或 InfoBar。
 - `gui/pages/project_page.py` 通过 `material_processing_middleware.py` 触发素材处理和工具校验，不直接承担下层处理细节。
 - `gui/splash_screen.py` 通过 `startup_middleware.py` 在子线程预热启动数据，再交给主窗口和页面复用。
+- `main.py`、`gui/main_window.py`、`gui/splash_screen.py`、构建脚本和联网工具共享 `app_metadata.py` 中的应用名、版本和 User-Agent。
 
 ## 维护注意事项
 
 - 工具函数保持无界面依赖，除非它本身就是 Qt 适配层。
+- 跨 `utils`、`core`、`gui` 重复使用的运行时协议常量应集中在 `app_metadata.py`、`media_types.py` 或 `material_processing_events.py`，不要在页面、工具和中间件里各自硬编码。
 - 启动预热逻辑集中在 `startup_middleware.py`，避免页面构造阶段重复执行同步探测。
 - 路径相关逻辑集中放在 `paths.py`，避免各处拼接项目目录。
 - 素材导入和清理逻辑集中放在 `source_importer.py`，页面层不要直接复制、链接或删除项目素材文件。

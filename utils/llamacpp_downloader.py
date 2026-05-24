@@ -9,10 +9,10 @@ import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
+from utils.app_metadata import HTTP_USER_AGENT
 from utils.env_manager import BIN_ROOT, find_usable_llamacpp_binary
 
 LLAMACPP_LATEST_RELEASE_API = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
-USER_AGENT = "CharaPicker/0.3.0-alpha"
 
 ProgressCallback = Callable[[int, str], None]
 
@@ -35,7 +35,7 @@ def _check_cancel(cancelled: CancelCallback | None) -> None:
 
 def _request_json(url: str, cancelled: CancelCallback | None = None) -> dict:
     _check_cancel(cancelled)
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    request = urllib.request.Request(url, headers={"User-Agent": HTTP_USER_AGENT})
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             _check_cancel(cancelled)
@@ -111,7 +111,7 @@ def download_and_install_llamacpp(
     if not download_url:
         raise LlamaCppDownloadError("Selected llama.cpp asset has no download URL.")
 
-    request = urllib.request.Request(download_url, headers={"User-Agent": USER_AGENT})
+    request = urllib.request.Request(download_url, headers={"User-Agent": HTTP_USER_AGENT})
     with tempfile.TemporaryDirectory(prefix="llamacpp-", dir=bin_root) as temp_dir_name:
         temp_dir = Path(temp_dir_name)
         archive_path = temp_dir / asset_name

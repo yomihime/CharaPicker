@@ -16,14 +16,15 @@ LOGGER = logging.getLogger(__name__)
 
 
 def main() -> int:
+    from utils.app_metadata import APP_NAME, APP_ORGANIZATION_NAME
     from utils.logging_middleware import install_global_logging
 
     log_file = install_global_logging()
     LOGGER.info("Application startup begins; log_file=%s", log_file)
     _install_qt_message_filter()
     app = QApplication(sys.argv)
-    app.setApplicationName("CharaPicker")
-    app.setOrganizationName("CharaPicker")
+    app.setApplicationName(APP_NAME)
+    app.setOrganizationName(APP_ORGANIZATION_NAME)
     app.setQuitOnLastWindowClosed(False)
     _ensure_valid_application_font(app)
     _apply_application_icon(app)

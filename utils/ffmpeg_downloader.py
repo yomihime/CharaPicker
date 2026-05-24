@@ -8,11 +8,11 @@ import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
+from utils.app_metadata import HTTP_USER_AGENT
 from utils.env_manager import BIN_ROOT
 from utils.ffmpeg_tool import find_usable_ffmpeg_binary
 
 FFMPEG_WINDOWS_ESSENTIALS_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
-USER_AGENT = "CharaPicker/0.3.0-alpha"
 
 ProgressCallback = Callable[[int, str], None]
 CancelCallback = Callable[[], bool]
@@ -58,7 +58,7 @@ def download_and_install_ffmpeg(
     bin_root.mkdir(parents=True, exist_ok=True)
     request = urllib.request.Request(
         FFMPEG_WINDOWS_ESSENTIALS_URL,
-        headers={"User-Agent": USER_AGENT},
+        headers={"User-Agent": HTTP_USER_AGENT},
     )
 
     with tempfile.TemporaryDirectory(prefix="ffmpeg-", dir=bin_root) as temp_dir_name:

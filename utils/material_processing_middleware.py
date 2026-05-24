@@ -8,13 +8,13 @@ from pydantic import BaseModel, Field
 
 from core.models import ProjectConfig, SourceProcessingConfig, SourceProcessingPreset
 from utils.ffmpeg_tool import has_ffmpeg_binary, process_raw_sources_with_ffmpeg
+from utils.material_processing_events import SOURCE_PROCESSING_CANCELLED_MESSAGE
 from utils.paths import project_paths
 from utils.source_importer import import_sources_to_raw, link_raw_sources_to_materials
 from utils.state_manager import save_project_config
 
 
 LOGGER = logging.getLogger(__name__)
-SOURCE_PROCESSING_CANCELLED_MESSAGE = "Source processing cancelled"
 
 ProgressCallback = Callable[[int, int, str], None]
 CancelledCallback = Callable[[], bool]

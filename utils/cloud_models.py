@@ -5,9 +5,9 @@ import logging
 import urllib.error
 import urllib.request
 
+from utils.app_metadata import HTTP_USER_AGENT
 from utils.cloud_model_presets import cloud_model_provider
 
-USER_AGENT = "CharaPicker/0.3.0-alpha"
 LOGGER = logging.getLogger(__name__)
 
 
@@ -27,7 +27,7 @@ def _models_endpoint(base_url: str) -> str:
 def fetch_openai_compatible_models(base_url: str, api_key: str) -> list[str]:
     endpoint = _models_endpoint(base_url)
     LOGGER.info("Fetching cloud model list; endpoint=%s has_api_key=%s", endpoint, bool(api_key.strip()))
-    headers = {"User-Agent": USER_AGENT}
+    headers = {"User-Agent": HTTP_USER_AGENT}
     api_key = api_key.strip()
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"

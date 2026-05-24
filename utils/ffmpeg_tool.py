@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shutil
@@ -18,23 +19,12 @@ from utils.ffmpeg_detection import (
     detect_video_device_names as _detect_video_device_names,
     pick_device as _pick_device,
 )
+from utils.material_processing_events import FFMPEG_EVENT_PREFIX, SOURCE_PROCESSING_CANCELLED_MESSAGE
+from utils.media_types import VIDEO_SUFFIXES
 from utils.paths import ensure_project_tree
-import logging
 
 FFMPEG_CANDIDATES = ("ffmpeg.exe", "ffmpeg")
 FFMPEG_CHECK_TIMEOUT_SECONDS = 6
-VIDEO_SUFFIXES = {
-    ".mp4",
-    ".mkv",
-    ".mov",
-    ".avi",
-    ".webm",
-    ".flv",
-    ".wmv",
-    ".m4v",
-}
-FFMPEG_CANCELLED_MESSAGE = "Source processing cancelled"
-FFMPEG_EVENT_PREFIX = "__ffmpeg_event__:"
 ProgressCallback = Callable[[int, int, str], None]
 CancelledCallback = Callable[[], bool]
 FfmpegProgressCallback = Callable[[int, float], None]
@@ -685,7 +675,7 @@ def _run_ffmpeg_command(
                 process.stdout.read()
             process.wait()
             stderr_reader.join(timeout=2)
-            raise RuntimeError(FFMPEG_CANCELLED_MESSAGE)
+            raise RuntimeError(SOURCE_PROCESSING_CANCELLED_MESSAGE)
         if on_progress is not None:
             with progress_lock:
                 current_frame = int(progress_state["frame"])
@@ -783,7 +773,7 @@ def _restore_target_from_backup(target: Path, backup: Path | None) -> None:
 
 def _raise_if_cancelled(cancelled: CancelledCallback | None) -> None:
     if cancelled is not None and cancelled():
-        raise RuntimeError(FFMPEG_CANCELLED_MESSAGE)
+        raise RuntimeError(SOURCE_PROCESSING_CANCELLED_MESSAGE)
 
 
 def _mmss_to_seconds(value: str) -> float:

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-import re
 import logging
+import re
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, QRegularExpression, QSize, Qt, QThread, pyqtSignal
@@ -62,8 +62,13 @@ from utils.ffmpeg_downloader import (
     FfmpegDownloadError,
     download_and_install_ffmpeg,
 )
-from utils.ffmpeg_tool import DeviceOption, is_device_compatible_for_codec, list_available_device_options
-from utils.ffmpeg_tool import has_ffmpeg_binary
+from utils.ffmpeg_tool import (
+    DeviceOption,
+    has_ffmpeg_binary,
+    is_device_compatible_for_codec,
+    list_available_device_options,
+)
+from utils.material_processing_events import FFMPEG_EVENT_PREFIX
 from utils.material_processing_middleware import (
     MaterialProcessingError,
     SOURCE_PROCESSING_CANCELLED_MESSAGE,
@@ -102,7 +107,7 @@ PROCESSING_PRESETS = [
     SourceProcessingPreset.SEGMENT_ONLY,
     SourceProcessingPreset.TRANSCODE_ONLY,
 ]
-FFMPEG_EVENT_PREFIX = "__ffmpeg_event__:"
+
 
 class FfmpegDownloadWorker(QObject):
     progressChanged = pyqtSignal(int, str)

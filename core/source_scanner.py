@@ -3,10 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from utils.media_types import VIDEO_SUFFIXES
 from utils.paths import ensure_project_tree
 
 
-VIDEO_SUFFIXES = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".wmv", ".m4v"}
 FORMAL_VIDEO_SCHEMA_VERSION = 1
 FORMAL_VIDEO_SOURCE_KIND = "video"
 FORMAL_VIDEO_SCAN_TYPE = "formal_video"

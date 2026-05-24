@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from core.character_card_constants import CHARACTER_CARD_JSON_FILE_NAME, PREVIEW_CARD_ID
 from core.models import ChunkExtractionResult, ExtractionArtifactStage
 from utils.paths import ensure_project_tree
 
@@ -35,19 +36,19 @@ def character_card_dir_path(project_id: str, card_id: str) -> Path:
 
 
 def character_card_json_path(project_id: str, card_id: str) -> Path:
-    return character_card_dir_path(project_id, card_id) / "card.json"
+    return character_card_dir_path(project_id, card_id) / CHARACTER_CARD_JSON_FILE_NAME
 
 
 def preview_character_cards_root_path(project_id: str) -> Path:
     return root_path(project_id) / "preview_character_cards"
 
 
-def preview_character_card_dir_path(project_id: str, card_id: str = "preview_card") -> Path:
+def preview_character_card_dir_path(project_id: str, card_id: str = PREVIEW_CARD_ID) -> Path:
     return preview_character_cards_root_path(project_id) / card_id
 
 
-def preview_character_card_json_path(project_id: str, card_id: str = "preview_card") -> Path:
-    return preview_character_card_dir_path(project_id, card_id) / "card.json"
+def preview_character_card_json_path(project_id: str, card_id: str = PREVIEW_CARD_ID) -> Path:
+    return preview_character_card_dir_path(project_id, card_id) / CHARACTER_CARD_JSON_FILE_NAME
 
 
 def season_path(project_id: str, season_id: str) -> Path:

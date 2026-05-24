@@ -22,10 +22,11 @@ from gui.pages.prompt_page import PromptPage
 from gui.pages.project_page import ProjectPage
 from gui.pages.settings_page import SettingsPage
 from res import APP_ICON_PATH
+from utils.app_metadata import APP_NAME
+from utils.cloud_model_presets import CloudModelPreset
 from utils.i18n import t
 from utils.logging_middleware import apply_log_level_preference
 from utils.startup_middleware import StartupWarmupSnapshot
-from utils.cloud_model_presets import CloudModelPreset
 from utils.state_manager import save_project_config
 from utils.theme import apply_theme_preference
 
@@ -118,7 +119,7 @@ class MainWindow(FluentWindow):
     def __init__(self, startup_snapshot: StartupWarmupSnapshot | None = None) -> None:
         super().__init__()
         LOGGER.info("Main window initialization started")
-        self.setWindowTitle("CharaPicker")
+        self.setWindowTitle(APP_NAME)
         self._apply_window_icon()
         self.resize(1180, 760)
         self.setMinimumSize(QSize(980, 640))
