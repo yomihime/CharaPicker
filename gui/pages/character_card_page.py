@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import shutil
 from collections.abc import Callable
 from pathlib import Path
 
@@ -369,13 +367,7 @@ class CharacterCardPage(QWidget):
         dialog = CoverCropDialog(image_path, self)
         if not dialog.exec():
             return
-        cover_path, original_path = store.resolve_cover_paths(
-            self._project.project_id,
-            self._current_card.card_id,
-            image_path.suffix or ".png",
-        )
-        original_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(image_path, original_path)
+        cover_path = store.resolve_cover_path(self._project.project_id, self._current_card.card_id)
         image = QImage(str(image_path))
         cropped = image.copy(dialog.crop_rect)
         if cropped.isNull() or not cropped.save(str(cover_path), "PNG"):
@@ -383,7 +375,7 @@ class CharacterCardPage(QWidget):
             return
         card = self._current_card.model_copy(deep=True)
         card.assets.cover_path = "cover.png"
-        card.assets.original_cover_path = original_path.name
+        card.assets.original_cover_path = ""
         card.assets.cover_aspect_ratio = "9:16"
         card.assets.crop = CharacterCardCrop(
             source_width=image.width(),

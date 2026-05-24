@@ -1,6 +1,5 @@
 {
   "app.nav.home": "Home",
-  "app.nav.output": "Character Cards",
   "app.nav.characterCards": "Character Cards",
   "app.nav.model": "Model",
   "app.nav.prompts": "Prompts",
@@ -143,9 +142,6 @@
   "project.new.dialog.create": "Create Project",
   "project.fileDialog.files": "Select Source Files",
   "project.fileDialog.folder": "Select Source Folder",
-  "output.title": "Character Card Preview",
-  "output.exportMarkdown": "Export Markdown",
-  "output.placeholder": "Generated character cards, drafts, or knowledge-base summaries will settle in here neatly.",
   "cards.title": "Character Cards",
   "cards.noProject": "Select or create a project before managing character cards.",
   "cards.project": "Current project: {name} ({project_id})",

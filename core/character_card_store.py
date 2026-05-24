@@ -155,16 +155,10 @@ def mark_card_stale(card: CharacterCard, reason: str = "") -> CharacterCard:
     return card
 
 
-def resolve_cover_paths(project_id: str, card_id: str, original_suffix: str = ".png") -> tuple[Path, Path]:
+def resolve_cover_path(project_id: str, card_id: str) -> Path:
     card_dir = kb.character_card_dir_path(project_id, card_id)
     card_dir.mkdir(parents=True, exist_ok=True)
-    suffix = original_suffix if original_suffix.startswith(".") else f".{original_suffix}"
-    return card_dir / "cover.png", card_dir / f"original_cover{suffix.lower()}"
-
-
-def clear_original_cover_reference(card: CharacterCard) -> CharacterCard:
-    card.assets.original_cover_path = ""
-    return card
+    return card_dir / "cover.png"
 
 
 def _existing_card_ids(project_id: str) -> set[str]:

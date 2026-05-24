@@ -31,7 +31,6 @@
 - `{project_id}/knowledge_base/seasons/{season_id}/character_stage_states.json`：季内角色阶段状态。
 - `{project_id}/knowledge_base/character_cards/{card_id}/card.json`：正式 CharaPicker 角色卡母本。
 - `{project_id}/knowledge_base/character_cards/{card_id}/cover.png`：角色卡裁剪后的 9:16 封面。
-- `{project_id}/knowledge_base/character_cards/{card_id}/original_cover.{ext}`：开发阶段保留的原图副本，验收后收尾时再按计划清理。
 - `{project_id}/knowledge_base/preview_character_cards/preview_card/card.json`：隔离的角色卡预览草稿，不进入正式海报墙扫描。
 - `{project_id}/output/character_cards/`：角色卡派生导出结果，包括 Markdown、HTML、CharaPicker JSON、Character Card V2 JSON 和 AstrBot 手动复制清单。
 

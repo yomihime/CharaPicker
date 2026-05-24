@@ -1,6 +1,5 @@
 {
   "app.nav.home": "首页",
-  "app.nav.output": "角色卡",
   "app.nav.characterCards": "角色卡",
   "app.nav.model": "模型",
   "app.nav.prompts": "提示词",
@@ -143,9 +142,6 @@
   "project.new.dialog.create": "创建项目",
   "project.fileDialog.files": "选择素材文件",
   "project.fileDialog.folder": "选择素材文件夹",
-  "output.title": "角色卡预览",
-  "output.exportMarkdown": "导出 Markdown",
-  "output.placeholder": "拾卡姬整理出的角色卡、设定稿或知识库摘要，会乖乖出现在这里。",
   "cards.title": "角色卡",
   "cards.noProject": "请选择或新建一个项目后管理角色卡。",
   "cards.project": "当前项目：{name}（{project_id}）",

@@ -1,6 +1,5 @@
 {
   "app.nav.home": "ホーム",
-  "app.nav.output": "キャラクターカード",
   "app.nav.characterCards": "キャラクターカード",
   "app.nav.model": "モデル",
   "app.nav.prompts": "プロンプト",
@@ -143,9 +142,6 @@
   "project.new.dialog.create": "プロジェクト作成",
   "project.fileDialog.files": "素材ファイルを選択",
   "project.fileDialog.folder": "素材フォルダーを選択",
-  "output.title": "キャラクターカードプレビュー",
-  "output.exportMarkdown": "Markdown を出力",
-  "output.placeholder": "整理されたキャラクターカード、設定メモ、知識ベース要約がここにちょこんと表示されます。",
   "cards.title": "キャラクターカード",
   "cards.noProject": "キャラクターカードを管理するには、プロジェクトを選択または作成してください。",
   "cards.project": "現在のプロジェクト：{name}（{project_id}）",
