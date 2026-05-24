@@ -26,6 +26,7 @@
 1. [TODO List](TODO.zh_CN.md)：当前剩余任务总表，已移出完成的角色卡基础项目。
 2. [提取与角色成长编译路线](extraction-development-roadmap.zh_CN.md)：Extract Once、知识库和角色状态编译的长期目标与验收基准。
 3. [真实预览结果后续计划](preview-real-result-ingestion-plan.zh_CN.md)：文本/字幕/音频、图片/漫画/混合媒体和角色卡质量强化的后续专项计划。
+4. [Proxy 运行时网络能力计划](proxy-runtime-network-plan.zh_CN.md)：内置代理设置、全局网络中间件、连通性测试和 DashScope 代理适配的 P3 专项计划。
 
 ## 发布与维护
 

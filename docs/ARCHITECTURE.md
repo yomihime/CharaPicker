@@ -24,6 +24,7 @@
 - `preview-real-result-ingestion-plan.zh_CN.md`：面向开发者的真实预览结果后续计划，当前聚焦非视频素材接入和角色卡质量强化。
 - `product-design-guidelines.zh_CN.md`：产品定位、产品语气、UI/i18n/资源规范、InsightStreamPanel 和混合媒体成本控制规范。
 - `runtime-middleware.zh_CN.md`：全局存储、日志、弹窗、启动预热、素材处理和 AI 模型调用中间件的设计边界。
+- `proxy-runtime-network-plan.zh_CN.md`：内置代理设置、全局网络中间件、连通性测试和 DashScope 代理适配的 P3 专项计划。
 - `release-packaging.zh_CN.md`：PyInstaller、版本阶段、发布包结构和 CI 发布规范。
 - `documentation-maintenance.zh_CN.md`：README、多语言文档、ARCHITECTURE.md 和计划类文档维护规则。
 - `TODO.zh_CN.md`：仍需执行或持续跟踪的任务总表，按提取质量、素材覆盖、角色卡质量和运行时网络能力分组排序。
