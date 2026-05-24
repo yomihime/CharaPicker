@@ -3,14 +3,13 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
-import urllib.error
-import urllib.request
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
 from utils.app_metadata import HTTP_USER_AGENT
 from utils.env_manager import BIN_ROOT, find_usable_llamacpp_binary
+from utils.network_middleware import NetworkMiddlewareError, open_response, read_json, redact_sensitive_text
 
 LLAMACPP_LATEST_RELEASE_API = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
 
@@ -35,15 +34,12 @@ def _check_cancel(cancelled: CancelCallback | None) -> None:
 
 def _request_json(url: str, cancelled: CancelCallback | None = None) -> dict:
     _check_cancel(cancelled)
-    request = urllib.request.Request(url, headers={"User-Agent": HTTP_USER_AGENT})
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            _check_cancel(cancelled)
-            data = json.loads(response.read().decode("utf-8"))
-            _check_cancel(cancelled)
-            return data
-    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
-        raise LlamaCppDownloadError(str(exc)) from exc
+        data = read_json(url, headers={"User-Agent": HTTP_USER_AGENT}, timeout=30)
+        _check_cancel(cancelled)
+        return data
+    except (OSError, NetworkMiddlewareError, ValueError, json.JSONDecodeError) as exc:
+        raise LlamaCppDownloadError(redact_sensitive_text(exc)) from exc
 
 
 def _asset_score(asset_name: str) -> int:
@@ -111,7 +107,6 @@ def download_and_install_llamacpp(
     if not download_url:
         raise LlamaCppDownloadError("Selected llama.cpp asset has no download URL.")
 
-    request = urllib.request.Request(download_url, headers={"User-Agent": HTTP_USER_AGENT})
     with tempfile.TemporaryDirectory(prefix="llamacpp-", dir=bin_root) as temp_dir_name:
         temp_dir = Path(temp_dir_name)
         archive_path = temp_dir / asset_name
@@ -120,22 +115,29 @@ def download_and_install_llamacpp(
 
         emit(5, "download")
         try:
-            with urllib.request.urlopen(request, timeout=60) as response:
+            with open_response(
+                "GET",
+                download_url,
+                headers={"User-Agent": HTTP_USER_AGENT},
+                timeout=60,
+                stream=True,
+            ) as response:
                 _check_cancel(cancelled)
+                if response.status_code >= 400:
+                    raise LlamaCppDownloadError(f"HTTP {response.status_code}")
                 total_size = int(response.headers.get("Content-Length") or 0)
                 downloaded = 0
                 with archive_path.open("wb") as archive:
-                    while True:
+                    for chunk in response.iter_content(chunk_size=1024 * 256):
                         _check_cancel(cancelled)
-                        chunk = response.read(1024 * 256)
                         if not chunk:
-                            break
+                            continue
                         archive.write(chunk)
                         downloaded += len(chunk)
                         if total_size:
                             emit(5 + int(downloaded / total_size * 75), "download")
-        except (OSError, urllib.error.URLError) as exc:
-            raise LlamaCppDownloadError(str(exc)) from exc
+        except (OSError, NetworkMiddlewareError) as exc:
+            raise LlamaCppDownloadError(redact_sensitive_text(exc)) from exc
 
         emit(82, "extract")
         try:

@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
-import urllib.error
-import urllib.request
 
 from utils.app_metadata import HTTP_USER_AGENT
 from utils.cloud_model_presets import cloud_model_provider
+from utils.network_middleware import NetworkMiddlewareError, read_json, redact_sensitive_text
 
 LOGGER = logging.getLogger(__name__)
 
@@ -32,13 +31,16 @@ def fetch_openai_compatible_models(base_url: str, api_key: str) -> list[str]:
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    request = urllib.request.Request(endpoint, headers=headers)
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
-        LOGGER.warning("Cloud model list fetch failed; endpoint=%s", endpoint, exc_info=True)
-        raise CloudModelListError(str(exc)) from exc
+        payload = read_json(endpoint, headers=headers, timeout=30)
+    except (NetworkMiddlewareError, OSError, ValueError, json.JSONDecodeError) as exc:
+        LOGGER.warning(
+            "Cloud model list fetch failed; endpoint=%s error=%s",
+            endpoint,
+            redact_sensitive_text(exc),
+            exc_info=True,
+        )
+        raise CloudModelListError(redact_sensitive_text(exc)) from exc
 
     data = payload.get("data")
     if not isinstance(data, list):

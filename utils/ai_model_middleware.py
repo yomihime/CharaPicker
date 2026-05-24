@@ -8,8 +8,6 @@ import os
 import subprocess
 import sys
 import tempfile
-import urllib.error
-import urllib.request
 from pathlib import Path
 from string import Formatter
 from collections.abc import Callable
@@ -21,6 +19,12 @@ from utils.app_metadata import HTTP_USER_AGENT
 from utils.paths import APP_ROOT
 from utils.prompt_preferences import prompt_override
 from utils.ffmpeg_tool import find_usable_ffmpeg_binary
+from utils.network_middleware import (
+    NetworkMiddlewareError,
+    open_response,
+    redact_sensitive_text,
+    run_with_proxy_environment,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -50,7 +54,7 @@ class ModelCallError(ModelMiddlewareError):
 
 
 def _compact_error_text(value: object, *, max_length: int = 500) -> str:
-    text = " ".join(str(value).split())
+    text = " ".join(redact_sensitive_text(value).split())
     if not text:
         text = value.__class__.__name__
     if len(text) <= max_length:
@@ -320,7 +324,7 @@ def _call_dashscope(request: ModelCallRequest) -> ModelCallResult:
             if key in {"api_key", "model", "messages"}:
                 continue
             call_kwargs[key] = value
-        response = MultiModalConversation.call(**call_kwargs)
+        response = run_with_proxy_environment(lambda: MultiModalConversation.call(**call_kwargs))
     except Exception as exc:  # noqa: BLE001
         LOGGER.warning(
             "DashScope model call failed; purpose=%s endpoint=%s error=%s",
@@ -334,7 +338,7 @@ def _call_dashscope(request: ModelCallRequest) -> ModelCallResult:
             dashscope.base_http_api_url,
             exc_info=True,
         )
-        raise ModelCallError(str(exc)) from exc
+        raise ModelCallError(redact_sensitive_text(exc)) from exc
 
     raw = _dashscope_response_to_dict(response)
     status_code = raw.get("status_code")
@@ -594,52 +598,42 @@ def _call_openai_compatible(
         request.stream,
         bool(api_key),
     )
-    http_request = urllib.request.Request(
-        endpoint,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers=headers,
-        method="POST",
-    )
     try:
-        with urllib.request.urlopen(http_request, timeout=max(1, request.timeout_seconds)) as response:
+        with open_response(
+            "POST",
+            endpoint,
+            headers=headers,
+            json_payload=payload,
+            timeout=max(1, request.timeout_seconds),
+            stream=request.stream,
+        ) as response:
+            if response.status_code >= 400:
+                error_body = response.text.strip()
+                LOGGER.warning(
+                    "Model call failed; purpose=%s endpoint=%s status=%s body_chars=%s",
+                    request.purpose,
+                    endpoint,
+                    response.status_code,
+                    len(error_body),
+                )
+                if error_body:
+                    LOGGER.debug(
+                        "Model call HTTP error body; purpose=%s endpoint=%s status=%s body=%s",
+                        request.purpose,
+                        endpoint,
+                        response.status_code,
+                        _compact_error_text(error_body, max_length=2000),
+                    )
+                detail = f"HTTP {response.status_code} {response.reason}"
+                if error_body:
+                    detail = f"{detail}: {redact_sensitive_text(error_body)}"
+                raise ModelCallError(detail)
             if request.stream:
                 return _read_streamed_response(response, request, on_stream_delta=on_stream_delta)
-            raw = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        error_body = ""
-        try:
-            payload = exc.read()
-            if payload:
-                error_body = payload.decode("utf-8", errors="replace").strip()
-        except OSError:
-            error_body = ""
-        LOGGER.warning(
-            "Model call failed; purpose=%s endpoint=%s status=%s body_chars=%s",
-            request.purpose,
-            endpoint,
-            exc.code,
-            len(error_body),
-        )
-        if error_body:
-            LOGGER.debug(
-                "Model call HTTP error body; purpose=%s endpoint=%s status=%s body=%s",
-                request.purpose,
-                endpoint,
-                exc.code,
-                _compact_error_text(error_body, max_length=2000),
-            )
-        LOGGER.debug(
-            "Model call HTTP traceback; purpose=%s endpoint=%s status=%s",
-            request.purpose,
-            endpoint,
-            exc.code,
-            exc_info=True,
-        )
-        detail = f"HTTP {exc.code} {exc.reason}"
-        if error_body:
-            detail = f"{detail}: {error_body}"
-        raise ModelCallError(detail) from exc
-    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+            raw = response.json()
+    except ModelCallError:
+        raise
+    except (NetworkMiddlewareError, OSError, ValueError, json.JSONDecodeError) as exc:
         LOGGER.warning(
             "Model call failed; purpose=%s endpoint=%s error=%s",
             request.purpose,
@@ -652,7 +646,7 @@ def _call_openai_compatible(
             endpoint,
             exc_info=True,
         )
-        raise ModelCallError(str(exc)) from exc
+        raise ModelCallError(redact_sensitive_text(exc)) from exc
 
     content = _extract_message_content(raw)
     usage = _extract_token_usage(raw)
@@ -679,8 +673,12 @@ def _read_streamed_response(
 ) -> ModelCallResult:
     chunks: list[dict[str, Any]] = []
     text_parts: list[str] = []
-    for raw_line in response:
-        line = raw_line.decode("utf-8", errors="replace").strip()
+    line_iterable = response.iter_lines() if hasattr(response, "iter_lines") else response
+    for raw_line in line_iterable:
+        if isinstance(raw_line, bytes):
+            line = raw_line.decode("utf-8", errors="replace").strip()
+        else:
+            line = str(raw_line).strip()
         if not line or not line.startswith("data:"):
             continue
         payload_text = line[5:].strip()
