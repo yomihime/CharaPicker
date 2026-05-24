@@ -7,7 +7,7 @@ import urllib.request
 
 from utils.cloud_model_presets import cloud_model_provider
 
-USER_AGENT = "CharaPicker/0.1"
+USER_AGENT = "CharaPicker/0.3.0-alpha"
 LOGGER = logging.getLogger(__name__)
 
 

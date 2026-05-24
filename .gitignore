@@ -7,12 +7,18 @@
 
 # Generated/runtime assets
 config.yaml
+build/
+dist/
+release/
 bin/*
 !bin/ARCHITECTURE.md
 models/*
 !models/ARCHITECTURE.md
 projects/*
 !projects/ARCHITECTURE.md
+.ruff_cache/
+.pytest_cache/
+.tmp_*/
 
 # Local notes and logs
 *.txt

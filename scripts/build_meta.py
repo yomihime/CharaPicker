@@ -9,8 +9,8 @@ import sys
 from dataclasses import dataclass
 
 
-DEFAULT_VERSION = "0.1.0"
-DEFAULT_STAGE = "release"
+DEFAULT_VERSION = "0.3.0"
+DEFAULT_STAGE = "alpha"
 ALLOWED_STAGES = {"alpha", "beta", "rc", "release", "local"}
 STAGE_WITH_INDEX_PATTERN = re.compile(r"^(alpha|beta|rc)\.\d+$")
 SEMVER_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
@@ -98,11 +98,6 @@ def _build_meta(ns: argparse.Namespace) -> Meta:
         if exact:
             raw_tag = exact
             tag_source = "exact"
-        else:
-            nearest = _run_git_describe(["--tags", "--abbrev=0"])
-            if nearest:
-                raw_tag = nearest
-                tag_source = "nearest"
 
     version = DEFAULT_VERSION
     stage = DEFAULT_STAGE
