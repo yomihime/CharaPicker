@@ -131,7 +131,7 @@
 
 - 设置页只负责读写偏好、触发测试和展示结果，不直接发起底层网络请求。
 - 由系统浏览器或其他外部程序打开的链接不纳入内置代理管理。
-- 代理开启但主机或端口无效时，联网请求应 fail closed，不得静默直连。
+- 代理主机或端口留空时使用默认值 `127.0.0.1:7890`；代理开启但端口存在且无效时，联网请求应 fail closed，不得静默直连。
 - 自有 HTTP(S) 请求使用 `requests` 并显式传入 `proxies`；代理开启时不依赖进程环境变量或系统环境代理。
 - DashScope 调用只在 `run_with_proxy_environment()` 的锁保护范围内临时设置 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY` 及小写变体，调用结束后必须恢复原值。
 - 新增程序内联网入口时必须复用 `network_middleware.py` 或已接入它的语义化封装，不得直接调用 `urllib.request.urlopen`、`requests` 或其他 HTTP 客户端绕过代理偏好。

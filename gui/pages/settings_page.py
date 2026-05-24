@@ -322,6 +322,7 @@ class SettingsPage(QWidget):
         if self._loading_proxy:
             return
         save_proxy_settings(self._collect_proxy_settings())
+        self._load_proxy_options()
         if show_feedback:
             self.proxyChanged.emit()
 
