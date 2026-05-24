@@ -40,7 +40,7 @@
 - 页面层不要散落原始 key，应优先调用 `theme_preference()`、`set_log_level_preference()` 等封装。
 - 写入敏感信息时避免日志输出明文值。
 
-当前已接入全局存储的配置包括语言、主题、云模型预设、日志等级和用户 prompt 覆盖。
+当前已接入全局存储的配置包括语言、主题、云模型预设、日志等级、用户 prompt 覆盖和内置代理偏好。
 
 ## 3. 日志中间件
 
@@ -116,7 +116,35 @@
 - 使用原素材方案时，`materials/` 通常指向或复制 `raw/` 中对应素材。
 - 清理 `raw/` 时必须以 `materials/` 中已有可用素材为前置条件，并写回项目配置中的清理标记。
 
-## 7. AI 模型调用中间件
+## 7. 网络与代理中间件
+
+当前应用内联网请求统一通过 `utils/network_middleware.py` 管理，代理偏好通过 `utils/proxy_preferences.py` 读写。
+
+定位：
+
+- 为模型请求、模型列表、运行时下载和设置页连通性测试提供统一 HTTP(S) 执行入口。
+- 从根目录 `config.yaml` 中读取内置代理配置，并支持 HTTP、HTTPS、SOCKS5 和 SOCKS5 远程 DNS。
+- 提供代理 URL、错误文本和授权信息脱敏，避免日志或 UI 错误摘要泄露代理账号、密码或 API Key。
+- 为 DashScope SDK 这类不能完整按请求传入代理的第三方调用提供受锁保护的临时代理环境。
+
+边界：
+
+- 设置页只负责读写偏好、触发测试和展示结果，不直接发起底层网络请求。
+- 由系统浏览器或其他外部程序打开的链接不纳入内置代理管理。
+- 代理开启但主机或端口无效时，联网请求应 fail closed，不得静默直连。
+- 自有 HTTP(S) 请求使用 `requests` 并显式传入 `proxies`；代理开启时不依赖进程环境变量或系统环境代理。
+- DashScope 调用只在 `run_with_proxy_environment()` 的锁保护范围内临时设置 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY` 及小写变体，调用结束后必须恢复原值。
+- 新增程序内联网入口时必须复用 `network_middleware.py` 或已接入它的语义化封装，不得直接调用 `urllib.request.urlopen`、`requests` 或其他 HTTP 客户端绕过代理偏好。
+
+使用规则：
+
+- 读取 JSON 响应优先使用 `read_json()`。
+- 下载或流式响应优先使用 `open_response(..., stream=True)`。
+- 需要第三方 SDK 暂时读取代理环境变量时，使用 `run_with_proxy_environment()`，并确保长耗时调用不在 UI 线程执行。
+- 展示或记录网络异常前，使用 `redact_sensitive_text()` 或通过中间件抛出的脱敏异常。
+- 设置页连通性测试只作为用户判断参考，不替用户决定代理是否可用。
+
+## 8. AI 模型调用中间件
 
 当前 AI 模型调用统一通过 `utils/ai_model_middleware.py` 管理。
 
