@@ -1,12 +1,14 @@
 # 提取与角色成长编译开发路线（zh_CN）
 
-本文面向项目开发者，用于拆分后续实现任务。开发时保持现有架构，不引入新技术栈，每次只实现一个小功能。
+最近核对日期：2026-05-24。
+
+本文面向项目开发者，保留 Extract Once、知识库和角色成长编译的长期目标与验收基准。它不是当前剩余任务清单；正式视频提取 MVP 与角色卡最终编译基础生命周期已完成，当前队列以 [TODO List](TODO.zh_CN.md) 和 [真实预览结果后续计划](preview-real-result-ingestion-plan.zh_CN.md) 为准。实施前必须重新核对当前代码。
 
 ## 1. 开发原则
 
 - `extractor` 负责素材解析、chunk 提取、集级合并、季级合并和摘要生成。
-- `compiler` 负责按季、按集更新 `CharacterState`，处理成长、冲突和关系变化。
-- `generator` 负责最终格式组织，不重新提取素材，不承担角色状态推理。
+- `compiler` 与 `character_card_compiler` 负责按季、按集聚合角色状态，并把正式知识库结果写入角色卡编译链路。
+- `core.character_card_*` 模块负责角色卡母本、渲染、导入、导出和外部格式映射；`generator.py` 只保留旧输出兼容渲染能力。
 - `utils/ai_model_middleware.py` 继续作为唯一模型调用入口。
 - 所有知识库产物写入 `projects/{project_id}/knowledge_base/`。
 - 所有结构化结果使用 UTF-8 JSON。
@@ -81,7 +83,8 @@ knowledge_base/
 │       ├── character_stage_states.json
 │       └── episodes/
 └── character_cards/
-    └── {character_id}.json
+    └── {card_id}/
+        └── card.json
 ```
 
 落盘要求：
@@ -90,7 +93,7 @@ knowledge_base/
 - 每集完成后写入 `episode_content.json` 和 `episode_summary.json`。
 - 每季完成后写入 `season_content.json` 和 `season_summary.json`。
 - 每季角色阶段状态写入 `character_stage_states.json`。
-- 最终角色卡写入 `character_cards/{character_id}.json`。
+- 角色卡 CharaPicker JSON 母本写入 `character_cards/{card_id}/card.json`。
 
 ## 4. 数据产物结构
 
