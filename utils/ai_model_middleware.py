@@ -24,7 +24,7 @@ from utils.ffmpeg_tool import find_usable_ffmpeg_binary
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_PROMPTS_PATH = APP_ROOT / "res" / "default_prompts.json"
-USER_AGENT = "CharaPicker/0.1"
+USER_AGENT = "CharaPicker/0.3.0-alpha"
 OUTPUT_TOKEN_GUIDANCE_TEMPLATE = (
     "Output budget: keep the final response within {max_tokens} output tokens. "
     "Use enough detail to complete the task, but do not pad the answer. "

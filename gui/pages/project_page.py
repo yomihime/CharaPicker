@@ -436,6 +436,7 @@ class SourceListRow(QWidget):
 class ProjectPage(QWidget):
     extractionRequested = pyqtSignal(ProjectConfig)
     configSaved = pyqtSignal(ProjectConfig)
+    projectChanged = pyqtSignal(object)
 
     def __init__(
         self,
@@ -488,9 +489,6 @@ class ProjectPage(QWidget):
         project_row.addWidget(self.project_combo, 1)
         project_row.addWidget(self.new_project_button)
         project_row.addWidget(self.delete_project_button)
-
-        self.targets_edit = LineEdit(form_card)
-        self.targets_edit.setPlaceholderText(t("project.character.placeholder"))
 
         source_panel = QVBoxLayout()
         source_panel.setSpacing(10)
@@ -650,17 +648,15 @@ class ProjectPage(QWidget):
 
         form.addWidget(BodyLabel(t("project.field.project"), form_card), 0, 0)
         form.addLayout(project_row, 0, 1)
-        form.addWidget(BodyLabel(t("project.field.characters"), form_card), 1, 0)
-        form.addWidget(self.targets_edit, 1, 1)
-        form.addWidget(BodyLabel(t("project.field.sources"), form_card), 2, 0, alignment=Qt.AlignmentFlag.AlignTop)
-        form.addLayout(source_panel, 2, 1)
-        form.addLayout(processing_block, 3, 0, 1, 2)
+        form.addWidget(BodyLabel(t("project.field.sources"), form_card), 1, 0, alignment=Qt.AlignmentFlag.AlignTop)
+        form.addLayout(source_panel, 1, 1)
+        form.addLayout(processing_block, 2, 0, 1, 2)
         form_spacer = QWidget(form_card)
         form_spacer.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
-        form.addWidget(form_spacer, 4, 0, 1, 2)
-        form.setRowStretch(2, 1)
+        form.addWidget(form_spacer, 3, 0, 1, 2)
+        form.setRowStretch(1, 1)
+        form.setRowStretch(2, 0)
         form.setRowStretch(3, 0)
-        form.setRowStretch(4, 0)
         form.setColumnStretch(1, 1)
         content.addWidget(form_card, 3)
 
@@ -760,11 +756,6 @@ class ProjectPage(QWidget):
         project = self._selected_project()
         if project is None:
             raise RuntimeError("No project selected")
-        targets = [
-            target.strip()
-            for target in self.targets_edit.text().replace("，", ",").split(",")
-            if target.strip()
-        ]
         sources = [
             self.sources_list.item(index).data(SOURCE_PATH_ROLE) or self.sources_list.item(index).text()
             for index in range(self.sources_list.count())
@@ -774,7 +765,7 @@ class ProjectPage(QWidget):
         return ProjectConfig(
             project_id=project.project_id,
             name=project.name,
-            target_characters=targets,
+            target_characters=list(project.target_characters),
             extraction_mode=mode,
             source_paths=sources,
             source_processing=self._current_processing_config(),
@@ -876,6 +867,7 @@ class ProjectPage(QWidget):
         config = self.current_config()
         self._upsert_project(config)
         self.configSaved.emit(config)
+        self.projectChanged.emit(config)
 
     def _emit_extraction(self) -> None:
         if not self._has_project() or self._extraction_running:
@@ -1268,6 +1260,9 @@ class ProjectPage(QWidget):
             return self.projects[index]
         return None
 
+    def current_project(self) -> ProjectConfig | None:
+        return self._selected_project()
+
     def _has_project(self) -> bool:
         return bool(self.projects)
 
@@ -1275,7 +1270,6 @@ class ProjectPage(QWidget):
         has_project = self._has_project()
         self.project_combo.setEnabled(has_project)
         self.delete_project_button.setEnabled(has_project)
-        self.targets_edit.setEnabled(has_project)
         extraction_controls_enabled = has_project and not self._extraction_running
         self.mode_combo.setEnabled(extraction_controls_enabled)
         self.skip_provider_rejected_chunk_check.setEnabled(extraction_controls_enabled)
@@ -1298,11 +1292,10 @@ class ProjectPage(QWidget):
             return
         project = self._selected_project()
         if project is None:
-            self.targets_edit.clear()
             self.sources_list.clear()
             self.clear_events()
+            self.projectChanged.emit(None)
             return
-        self.targets_edit.setText(", ".join(project.target_characters))
         self.mode_combo.setCurrentIndex(0 if project.extraction_mode == ExtractionMode.PREVIEW else 1)
         self.skip_provider_rejected_chunk_check.setChecked(project.allow_provider_rejected_chunk_skip)
         self._apply_processing_config(project.source_processing)
@@ -1312,6 +1305,7 @@ class ProjectPage(QWidget):
             self._add_source_item(source_path, SOURCE_KIND_EXTERNAL)
         self._refresh_project_sources(project.project_id)
         self.clear_events()
+        self.projectChanged.emit(project)
 
     def _add_project(self) -> None:
         default_name = self._next_project_name()
@@ -1349,6 +1343,8 @@ class ProjectPage(QWidget):
         self._refresh_project_combo()
         if self.projects:
             self.project_combo.setCurrentIndex(min(index, len(self.projects) - 1))
+        else:
+            self._load_selected_project()
         InfoBar.success(
             title=t("project.delete.success.title"),
             content=t("project.delete.success.content", name=project.name),

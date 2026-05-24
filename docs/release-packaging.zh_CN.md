@@ -13,8 +13,8 @@ build.bat
 常用参数：
 
 ```powershell
-build.bat --tag=v0.2.0-alpha.1
-build.bat --version=0.2.0 --stage=alpha.1
+build.bat --tag=v0.3.0-alpha
+build.bat --version=0.3.0 --stage=alpha
 build.bat --local
 ```
 
@@ -63,13 +63,15 @@ release/
 
 当前构建脚本也支持 `alpha.N`、`beta.N`、`rc.N` 形式。这里的 `N` 是 build 版本号，用于同一 `x.y.z` 与同一阶段下的 rebuild；它可以包含不影响主要功能的 bug 修正或构建修正，但主旨是重新构建，不表达新的功能阶段。
 
-在 `1.0.0` 之前，公开构建必须使用 `alpha` 或 `beta` 阶段；不要把 `0.x.y` 标记为 `release` 或 `rc`。当一次开发带来明确功能阶段推进时，应提升 `y`，例如从 `0.1.0-alpha.N` 进入 `0.2.0-alpha.1`；bug 修正集或极小补充可以提升 `z`；只为同一版本重新打包、修正构建元数据或补很小的非核心问题时，优先提升 `alpha.N` / `beta.N` 的 build 版本号。
+在 `1.0.0` 之前，公开构建必须使用 `alpha` 或 `beta` 阶段；不要把 `0.x.y` 标记为 `release` 或 `rc`。当一次开发带来明确功能阶段推进时，应提升 `y`，例如从 `0.2.0-alpha.N` 进入 `0.3.0-alpha`；bug 修正集或极小补充可以提升 `z`；只为同一版本重新打包、修正构建元数据或补很小的非核心问题时，优先提升 `alpha.N` / `beta.N` 的 build 版本号。
 
 允许通过 Git tag 指示版本与阶段：
 
-- `v0.2.0-alpha` -> `version=0.2.0`，`stage=alpha`
-- `v0.2.0-alpha.1` -> `version=0.2.0`，`stage=alpha.1`
+- `v0.3.0-alpha` -> `version=0.3.0`，`stage=alpha`
+- `v0.3.0-alpha.1` -> `version=0.3.0`，`stage=alpha.1`
 - `v1.0.0` -> `version=1.0.0`，`stage=release`
+
+构建脚本只读取显式 `--tag` 或当前提交上的精确 Git tag；历史最近 tag 不应覆盖当前默认版本。
 
 使用 `--local` 或 `local` 参数时，阶段应写为 `local`。
 
@@ -84,7 +86,7 @@ CharaPicker-v<version>-<stage>-<platform>-<arch>.zip
 示例：
 
 ```text
-CharaPicker-v0.2.0-alpha.1-windows-x64.zip
+CharaPicker-v0.3.0-alpha-windows-x64.zip
 CharaPicker-v1.0.0-release-windows-x64.zip
 ```
 

@@ -12,7 +12,7 @@ from pathlib import Path
 from utils.env_manager import BIN_ROOT, find_usable_llamacpp_binary
 
 LLAMACPP_LATEST_RELEASE_API = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
-USER_AGENT = "CharaPicker/0.1"
+USER_AGENT = "CharaPicker/0.3.0-alpha"
 
 ProgressCallback = Callable[[int, str], None]
 

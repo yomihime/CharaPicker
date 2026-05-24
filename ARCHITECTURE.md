@@ -43,14 +43,15 @@
 1. `main.py` 安装全局日志和 Qt 消息过滤器，创建 `QApplication`，应用主题偏好，并进入启动流程。
 2. `gui/splash_screen.py` 通过 `utils/startup_middleware.py` 在线程中预热工具状态、项目配置和云模型预设。
 3. `gui/main_window.py` 组装项目页、输出页、模型页、提示词页、关于页和设置页，并连接信号。
-4. `gui/pages/project_page.py` 收集项目名、目标角色、提取模式、素材路径和素材处理配置。
+4. `gui/pages/project_page.py` 收集项目名、提取模式、素材路径和素材处理配置；目标角色不再由主页编辑。
 5. `utils/material_processing_middleware.py` 调度素材导入、工具校验和 ffmpeg 处理；`utils/source_importer.py` 维护 `raw/` 与 `materials/`。
 6. `utils/state_manager.py` 将项目配置保存到 `projects/{project_id}/config.json`。
 7. `gui/main_window.py` 使用 `PreviewWorker` 在线程中调用 `core/extractor.py` 的流式预览。
 8. `core/extractor.py` 通过 `utils/ai_model_middleware.py` 调用模型，写入知识库分层 JSON，并产出结构化洞察事件与 token 用量。
 9. 洞察事件以 `dict` 形式通过 Qt Signal 推送到 `InsightStreamPanel`。
-10. `core/compiler.py` 可按季/集聚合知识库，生成阶段性角色状态；主窗口当前仍使用简化角色状态生成输出预览。
-11. `core/generator.py` 将角色状态渲染为 Markdown，并交给输出页展示。
+10. `core/compiler.py` 可按季/集聚合知识库，生成阶段性角色状态。
+11. `gui/pages/character_card_page.py` 通过 `core.character_card_*` 模块管理 CharaPicker 角色卡母本、预览草稿、编译、导入和导出。
+12. 角色卡派生产物从 CharaPicker JSON 生成，并写入 `projects/{project_id}/output/character_cards/`。
 
 ## 维护注意事项
 

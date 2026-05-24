@@ -29,6 +29,16 @@ PROMPT_VARIABLES = {
     "preview_video_chunk_extraction": ("source_path",),
     "formal_video_chunk_extraction": ("chunk_id", "source_path"),
     "character_compile": ("character", "current_state", "evidence_chunk"),
+    "character_card_compile": (
+        "character",
+        "current_card",
+        "knowledge_summary",
+        "extra_requirements",
+        "compile_variant",
+        "compile_variant_instruction",
+        "extra_dialogue_count",
+        "response_schema",
+    ),
     "final_polish": ("character", "character_state"),
 }
 

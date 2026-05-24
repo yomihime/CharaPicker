@@ -14,29 +14,30 @@ CharaPicker is a desktop tool that extracts character-focused information from a
 
 ## Current Status
 
-- Version: `v0.2.0-alpha.1` (in development)
-- Document updated: `2026-05-13`
+- Version: `v0.3.0-alpha` (in development)
+- Document updated: `2026-05-24`
 
 ## Implemented
 
 - Startup and warmup flow: splash, theme apply, basic environment checks.
-- Main UI skeleton: project, output, model, prompt, settings, and about pages.
+- Main UI skeleton: project, character cards, model, prompt, settings, and about pages.
 - Project config management: save/load and recent project listing.
 - Material processing flow: import into `raw/`, link/process into `materials/`, FFmpeg split/transcode options.
 - Insight UI: InsightStreamPanel card timeline with streaming updates.
 - Cloud model integration: unified OpenAI-compatible middleware with token usage logging.
-- Preview pipeline connected: `project -> extractor -> insight stream -> compiler -> output`.
+- Preview pipeline connected: `project -> extractor -> insight stream -> preview knowledge base`.
+- Character card page: project-scoped card gallery, search, create, edit, cover crop, preview, compile, import, and export.
 
 ## Progress
 
 - Done: runnable UI skeleton and preview main path.
 - In progress: generating higher-quality reusable structured insights from real materials.
-- Next focus: knowledge-base persistence, iterative compilation state updates, conflict handling, output quality.
+- Next focus: knowledge-base quality, iterative compilation state updates, conflict handling, and character card quality.
 
 ## Not Yet Implemented
 
 - Real-material preview has started using video chunks from `materials/` and cloud models, while text, subtitles, manga/image, and other complete real-material consumption paths are still being improved.
-- Compilation is still placeholder-level, without full iterative compile and conflict resolution.
+- Character card compilation can generate CharaPicker JSON from the formal knowledge base, while full conflict resolution and quality evaluation still need refinement.
 - Stable automatic write-back loop to `facts.json` and `targeted_insights.json` is not complete.
 
 ## Requirements
@@ -58,9 +59,9 @@ python main.py
 ## Feature Overview
 
 - Project-scoped material management (`projects/{project_id}`)
-- Target character and processing mode configuration
+- Character card management with CharaPicker JSON as the source of truth
 - Insight event stream during extraction (Insight Stream)
-- Character-state compilation and structured output (iterating)
+- Character card Markdown, HTML, Character Card V2 JSON, and AstrBot copy-list export (iterating)
 
 ## Screenshots
 
