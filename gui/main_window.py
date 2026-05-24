@@ -181,6 +181,7 @@ class MainWindow(FluentWindow):
         self.settings_page.languageChanged.connect(self.show_language_changed)
         self.settings_page.themeChanged.connect(self.apply_theme_changed)
         self.settings_page.logLevelChanged.connect(self.apply_log_level_changed)
+        self.settings_page.proxyChanged.connect(self.show_proxy_changed)
         self.character_card_page.set_model_preset_provider(self.model_page.current_cloud_video_preset)
         self.character_card_page.set_project(self.project_page.current_project())
 
@@ -373,3 +374,13 @@ class MainWindow(FluentWindow):
     def apply_log_level_changed(self, level: str) -> None:
         apply_log_level_preference()
         LOGGER.info("Log level preference changed; level=%s", level)
+
+    def show_proxy_changed(self) -> None:
+        LOGGER.info("Proxy preference changed from settings page")
+        InfoBar.info(
+            title=t("settings.proxy.changed.title"),
+            content=t("settings.proxy.changed.content"),
+            parent=self,
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=3500,
+        )

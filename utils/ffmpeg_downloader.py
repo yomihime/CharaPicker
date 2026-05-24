@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import shutil
 import tempfile
-import urllib.error
-import urllib.request
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
@@ -11,6 +9,7 @@ from pathlib import Path
 from utils.app_metadata import HTTP_USER_AGENT
 from utils.env_manager import BIN_ROOT
 from utils.ffmpeg_tool import find_usable_ffmpeg_binary
+from utils.network_middleware import NetworkMiddlewareError, open_response, redact_sensitive_text
 
 FFMPEG_WINDOWS_ESSENTIALS_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
 
@@ -56,10 +55,6 @@ def download_and_install_ffmpeg(
             progress(value, message)
 
     bin_root.mkdir(parents=True, exist_ok=True)
-    request = urllib.request.Request(
-        FFMPEG_WINDOWS_ESSENTIALS_URL,
-        headers={"User-Agent": HTTP_USER_AGENT},
-    )
 
     with tempfile.TemporaryDirectory(prefix="ffmpeg-", dir=bin_root) as temp_dir_name:
         temp_dir = Path(temp_dir_name)
@@ -69,22 +64,29 @@ def download_and_install_ffmpeg(
 
         emit(5, "download")
         try:
-            with urllib.request.urlopen(request, timeout=60) as response:
+            with open_response(
+                "GET",
+                FFMPEG_WINDOWS_ESSENTIALS_URL,
+                headers={"User-Agent": HTTP_USER_AGENT},
+                timeout=60,
+                stream=True,
+            ) as response:
                 _check_cancel(cancelled)
+                if response.status_code >= 400:
+                    raise FfmpegDownloadError(f"HTTP {response.status_code}")
                 total_size = int(response.headers.get("Content-Length") or 0)
                 downloaded = 0
                 with archive_path.open("wb") as archive:
-                    while True:
+                    for chunk in response.iter_content(chunk_size=1024 * 256):
                         _check_cancel(cancelled)
-                        chunk = response.read(1024 * 256)
                         if not chunk:
-                            break
+                            continue
                         archive.write(chunk)
                         downloaded += len(chunk)
                         if total_size:
                             emit(5 + int(downloaded / total_size * 75), "download")
-        except (OSError, urllib.error.URLError) as exc:
-            raise FfmpegDownloadError(str(exc)) from exc
+        except (OSError, NetworkMiddlewareError) as exc:
+            raise FfmpegDownloadError(redact_sensitive_text(exc)) from exc
 
         emit(82, "extract")
         try:

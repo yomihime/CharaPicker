@@ -21,6 +21,7 @@
 - `material_processing_events.py`：集中保存素材处理取消消息和 FFmpeg 进度事件前缀等跨层协议常量。
 - `paths.py`：定义应用根目录、项目根目录和单个项目的标准目录结构。
 - `global_store.py`：提供全局用户数据和配置选项的读写中间件，默认使用根目录 `config.yaml`。
+- `proxy_preferences.py`：封装内置代理设置的默认值、归一化、读写和代理 URL 构造。
 - `state_manager.py`：保存、读取和列出项目配置，项目配置写入 `projects/{project_id}/config.json`。
 - `theme.py`：管理主题偏好，并调用 qfluentwidgets 应用亮色、暗色或系统主题。
 - `chunker.py`：预留文本或素材分块工具。
@@ -29,6 +30,7 @@
 - `ffmpeg_detection.py`：封装 FFmpeg 设备/CPU 探测相关 helper，供 `ffmpeg_tool.py` 复用。
 - `cloud_model_presets.py`：保存和读取云端模型配置预设，维护云端服务类型到模型调用后端的映射，并提供视频输出 Token / 分钟到单次请求上限的换算工具。
 - `cloud_models.py`：按云端服务类型路由并拉取模型列表，当前底层复用 OpenAI-compatible 模型列表接口。
+- `network_middleware.py`：统一应用内 HTTP(S) 请求、代理读取、连通性测试、错误脱敏和 DashScope 临时代理环境。
 - `llamacpp_downloader.py`：下载并安装 llama.cpp 运行时到 `bin/`。
 - `ffmpeg_downloader.py`：下载并安装 ffmpeg 运行时到 `bin/`。
 - `source_importer.py`：把外部原始素材按项目目录规则复制到 `projects/{project_id}/raw`，计算外部路径对应的 raw 目标，准备 `materials`，并支持 raw 清理和素材移除。
@@ -49,9 +51,10 @@
 - `core` 的 AI 请求必须通过 `ai_model_middleware.py` 构造和执行，不能直接访问下层模型接口。
 - `ai_model_middleware.py` 从 `res/default_prompts.json` 加载默认提示词资源，并通过 `prompt_preferences.py` 读取非空用户覆盖。
 - `ai_model_middleware.py` 是默认 prompt 的唯一加载与渲染入口；上层模块只传 purpose、变量、metadata 和多模态素材 part，不在业务代码中硬编码 prompt 正文。
-- `i18n.py`、`theme.py`、`logging_preferences.py`、`prompt_preferences.py` 和 `cloud_model_presets.py` 通过 `global_store.py` 管理全局用户偏好。
+- `i18n.py`、`theme.py`、`logging_preferences.py`、`prompt_preferences.py`、`cloud_model_presets.py` 和 `proxy_preferences.py` 通过 `global_store.py` 管理全局用户偏好。
 - `state_manager.py` 使用 `core.models.ProjectConfig` 进行结构校验。
 - `paths.py` 统一指向 `projects/` 下的工程目录。
+- 应用内联网请求必须通过 `network_middleware.py` 或已接入它的上层封装执行；外部浏览器链接不属于内置代理管理范围。
 - `source_importer.py` 由 `gui/pages/project_page.py` 调用；它只处理文件系统操作，不负责弹窗、按钮状态或用户提示。
 - `source_status.py` 由 `gui/pages/project_page.py` 调用；它只计算素材状态，不负责渲染列表行、弹窗或 InfoBar。
 - `gui/pages/project_page.py` 通过 `material_processing_middleware.py` 触发素材处理和工具校验，不直接承担下层处理细节。
@@ -68,6 +71,7 @@
 - raw/materials 状态判断集中放在 `source_status.py`，页面层只负责展示和触发操作。
 - 全局用户数据和配置选项统一通过 `global_store.py` 读写。
 - 项目配置读写保持 UTF-8 和结构化 JSON；全局配置读写保持 UTF-8 和结构化 YAML。
+- 新增程序内联网入口时应复用 `network_middleware.py`，避免绕过代理偏好、网络锁和敏感信息脱敏规则。
 - 模型执行必须通过 `call_text_model()`、`call_image_model()` 或 `call_video_model()` 进入后端。
 - 新增模型任务时，默认 prompt 正文放入 `res/default_prompts.json`；业务代码不得为了临时修复而复制、拼接或长期硬编码 prompt 指令文本。
 - 日志不得输出 API Key、完整密钥、隐私文本或大型原始素材内容。
