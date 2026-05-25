@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import logging
 import subprocess
 from dataclasses import dataclass
+from collections.abc import Iterable
 from pathlib import Path
 
 from utils.global_store import get_global_value, set_global_value
 from utils.paths import APP_ROOT
 
+LOGGER = logging.getLogger(__name__)
 CONDA_ENV_NAME = "CharaPicker"
 BIN_ROOT = APP_ROOT / "bin"
 MODELS_ROOT = APP_ROOT / "models"
@@ -34,6 +37,29 @@ WHISPERCPP_CANDIDATES = (
 WHISPERCPP_CHECK_TIMEOUT_SECONDS = 6
 
 
+def _path_is_file(path: Path) -> bool:
+    try:
+        return path.is_file()
+    except OSError as exc:
+        LOGGER.warning("File probe failed; path=%s error=%s", path, exc)
+        return False
+
+
+def _path_exists(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError as exc:
+        LOGGER.warning("Path existence probe failed; path=%s error=%s", path, exc)
+        return False
+
+
+def _safe_rglob(root: Path, pattern: str) -> Iterable[Path]:
+    try:
+        yield from root.rglob(pattern)
+    except OSError as exc:
+        LOGGER.warning("Recursive path scan failed; root=%s pattern=%s error=%s", root, pattern, exc)
+
+
 @dataclass(frozen=True, slots=True)
 class WhisperStatus:
     runtime_path: Path | None
@@ -53,11 +79,11 @@ def conda_run_prefix() -> list[str]:
 def find_llamacpp_binary(bin_root: Path = BIN_ROOT) -> Path | None:
     for file_name in LLAMACPP_CANDIDATES:
         candidate = bin_root / file_name
-        if candidate.is_file():
+        if _path_is_file(candidate):
             return candidate
     for file_name in LLAMACPP_CANDIDATES:
-        for candidate in bin_root.rglob(file_name):
-            if candidate.is_file():
+        for candidate in _safe_rglob(bin_root, file_name):
+            if _path_is_file(candidate):
                 return candidate
     return None
 
@@ -80,11 +106,11 @@ def is_llamacpp_binary_usable(binary_path: Path) -> bool:
 def find_usable_llamacpp_binary(bin_root: Path = BIN_ROOT) -> Path | None:
     for file_name in LLAMACPP_CANDIDATES:
         candidate = bin_root / file_name
-        if candidate.is_file() and is_llamacpp_binary_usable(candidate):
+        if _path_is_file(candidate) and is_llamacpp_binary_usable(candidate):
             return candidate
     for file_name in LLAMACPP_CANDIDATES:
-        for candidate in bin_root.rglob(file_name):
-            if candidate.is_file() and is_llamacpp_binary_usable(candidate):
+        for candidate in _safe_rglob(bin_root, file_name):
+            if _path_is_file(candidate) and is_llamacpp_binary_usable(candidate):
                 return candidate
     return None
 
@@ -125,22 +151,22 @@ def clear_preferred_whisper_model_name() -> None:
 
 def find_whisper_runtime_binary(bin_root: Path = BIN_ROOT) -> Path | None:
     custom_path = custom_whisper_runtime_path()
-    if bin_root == BIN_ROOT and custom_path is not None and custom_path.is_file():
+    if bin_root == BIN_ROOT and custom_path is not None and _path_is_file(custom_path):
         return custom_path
 
     search_roots = [WHISPERCPP_ROOT if bin_root == BIN_ROOT else bin_root / "whisper.cpp", bin_root]
     for search_root in search_roots:
         for file_name in WHISPERCPP_CANDIDATES:
             candidate = search_root / file_name
-            if candidate.is_file():
+            if _path_is_file(candidate):
                 return candidate
 
     for search_root in search_roots:
-        if not search_root.exists():
+        if not _path_exists(search_root):
             continue
         for file_name in WHISPERCPP_CANDIDATES:
-            for candidate in search_root.rglob(file_name):
-                if candidate.is_file():
+            for candidate in _safe_rglob(search_root, file_name):
+                if _path_is_file(candidate):
                     return candidate
     return None
 
@@ -166,7 +192,7 @@ def find_usable_whisper_runtime_binary(bin_root: Path = BIN_ROOT) -> Path | None
     if (
         bin_root == BIN_ROOT
         and custom_path is not None
-        and custom_path.is_file()
+        and _path_is_file(custom_path)
         and is_whisper_runtime_usable(custom_path)
     ):
         return custom_path
@@ -175,15 +201,15 @@ def find_usable_whisper_runtime_binary(bin_root: Path = BIN_ROOT) -> Path | None
     for search_root in search_roots:
         for file_name in WHISPERCPP_CANDIDATES:
             candidate = search_root / file_name
-            if candidate.is_file() and is_whisper_runtime_usable(candidate):
+            if _path_is_file(candidate) and is_whisper_runtime_usable(candidate):
                 return candidate
 
     for search_root in search_roots:
-        if not search_root.exists():
+        if not _path_exists(search_root):
             continue
         for file_name in WHISPERCPP_CANDIDATES:
-            for candidate in search_root.rglob(file_name):
-                if candidate.is_file() and is_whisper_runtime_usable(candidate):
+            for candidate in _safe_rglob(search_root, file_name):
+                if _path_is_file(candidate) and is_whisper_runtime_usable(candidate):
                     return candidate
     return None
 
@@ -193,12 +219,12 @@ def has_whisper_runtime(bin_root: Path = BIN_ROOT) -> bool:
 
 
 def list_whisper_model_files(model_root: Path = WHISPER_MODEL_ROOT) -> list[Path]:
-    if not model_root.exists():
+    if not _path_exists(model_root):
         return []
     model_files = [
         path
-        for path in model_root.rglob("*.bin")
-        if path.is_file() and path.name.lower().startswith("ggml-")
+        for path in _safe_rglob(model_root, "*.bin")
+        if _path_is_file(path) and path.name.lower().startswith("ggml-")
     ]
     return sorted(model_files, key=lambda path: path.name.lower())
 
@@ -210,7 +236,7 @@ def find_whisper_model_file(
     if model_root == WHISPER_MODEL_ROOT:
         preferred_name = preferred_whisper_model_name() or preferred_name
     preferred = model_root / preferred_name
-    if preferred.is_file():
+    if _path_is_file(preferred):
         return preferred
     model_files = list_whisper_model_files(model_root)
     return model_files[0] if model_files else None
