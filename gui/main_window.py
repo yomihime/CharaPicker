@@ -134,6 +134,7 @@ class MainWindow(FluentWindow):
             initial_projects=startup_snapshot.project_configs if startup_snapshot else None,
             initial_encoder_options=startup_snapshot.encoder_options if startup_snapshot else None,
             initial_ffmpeg_ready=startup_snapshot.ffmpeg_ready if startup_snapshot else None,
+            initial_whisper_status=startup_snapshot.whisper_status if startup_snapshot else None,
         )
         self.character_card_page = CharacterCardPage(self)
         self.model_page = ModelPage(

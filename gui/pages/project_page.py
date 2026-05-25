@@ -68,6 +68,13 @@ from utils.ffmpeg_tool import (
     is_device_compatible_for_codec,
     list_available_device_options,
 )
+from utils.env_manager import (
+    WhisperStatus,
+    clear_custom_whisper_runtime_path,
+    is_whisper_runtime_usable,
+    set_custom_whisper_runtime_path,
+    whisper_status,
+)
 from utils.material_processing_events import FFMPEG_EVENT_PREFIX
 from utils.material_processing_middleware import (
     MaterialProcessingError,
@@ -94,6 +101,16 @@ from utils.source_status import (
     source_status,
 )
 from utils.state_manager import create_project_config, delete_project_config, list_project_configs, save_project_config
+from utils.whispercpp_downloader import (
+    DEFAULT_WHISPER_MODEL_ID,
+    DEFAULT_WHISPER_RUNTIME_PACKAGE_ID,
+    WhisperCppDownloadCancelled,
+    WhisperCppDownloadError,
+    download_and_install_whisper,
+    remove_installed_whisper,
+    whisper_model_packages,
+    whisper_runtime_packages,
+)
 
 LOGGER = logging.getLogger(__name__)
 MM_SS_VALIDATOR = QRegularExpressionValidator(QRegularExpression(r"[0-5]\d:[0-5]\d"))
@@ -107,6 +124,18 @@ PROCESSING_PRESETS = [
     SourceProcessingPreset.SEGMENT_ONLY,
     SourceProcessingPreset.TRANSCODE_ONLY,
 ]
+
+
+def _format_whisper_status_text(status: WhisperStatus) -> str:
+    runtime_path = str(status.runtime_path) if status.runtime_path is not None else ""
+    model_path = str(status.model_path) if status.model_path is not None else ""
+    if status.ready:
+        return t("project.whisper.status.ready", runtime=runtime_path, model=model_path)
+    if not status.runtime_ready and not status.model_ready:
+        return t("project.whisper.status.missing")
+    if not status.runtime_ready:
+        return t("project.whisper.status.missingRuntime", model=model_path)
+    return t("project.whisper.status.missingModel", runtime=runtime_path)
 
 
 class FfmpegDownloadWorker(QObject):
@@ -191,6 +220,195 @@ class FfmpegDownloadDialog(FluentDialog):
             super().reject()
             return
         self.request_cancel()
+
+
+class WhisperDownloadWorker(QObject):
+    progressChanged = pyqtSignal(int, str)
+    succeeded = pyqtSignal(str, str)
+    failed = pyqtSignal(str)
+    cancelled = pyqtSignal()
+    finished = pyqtSignal()
+
+    def __init__(self, runtime_package_id: str, model_id: str) -> None:
+        super().__init__()
+        self.runtime_package_id = runtime_package_id
+        self.model_id = model_id
+        self._cancel_requested = False
+
+    def cancel(self) -> None:
+        self._cancel_requested = True
+
+    def run(self) -> None:
+        LOGGER.info(
+            "whisper.cpp download worker started; runtime=%s model=%s",
+            self.runtime_package_id,
+            self.model_id,
+        )
+        try:
+            runtime_path, model_path = download_and_install_whisper(
+                runtime_package_id=self.runtime_package_id,
+                model_id=self.model_id,
+                progress=lambda value, step: self.progressChanged.emit(value, step),
+                cancelled=lambda: self._cancel_requested,
+            )
+        except WhisperCppDownloadCancelled:
+            LOGGER.info("whisper.cpp download cancelled")
+            self.cancelled.emit()
+        except WhisperCppDownloadError as exc:
+            LOGGER.warning("whisper.cpp download failed", exc_info=True)
+            self.failed.emit(str(exc))
+        else:
+            LOGGER.info("whisper.cpp download succeeded; runtime=%s model=%s", runtime_path, model_path)
+            self.succeeded.emit(str(runtime_path), str(model_path))
+        finally:
+            self.finished.emit()
+
+
+class WhisperDownloadDialog(FluentDialog):
+    cancelRequested = pyqtSignal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(
+            t("project.whisper.download.title"),
+            parent,
+            width=540,
+            height=230,
+            close_rejects=False,
+        )
+        self._finished = False
+        self._cancel_requested = False
+
+        self.status_label = BodyLabel(t("project.whisper.download.progress.release"), self.dialog_card)
+        self.status_label.setWordWrap(True)
+        self.content_layout.addWidget(self.status_label)
+
+        self.progress_bar = ProgressBar(self.dialog_card)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.content_layout.addWidget(self.progress_bar)
+
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        self.cancel_button = PushButton(t("project.whisper.download.cancel"), self.dialog_card)
+        actions.addWidget(self.cancel_button)
+        self.content_layout.addLayout(actions)
+
+        self.cancel_button.clicked.connect(self.request_cancel)
+        self.close_button.clicked.connect(self.request_cancel)
+
+    def set_progress(self, value: int, message: str) -> None:
+        self.status_label.setText(message)
+        self.progress_bar.setValue(value)
+
+    def request_cancel(self) -> None:
+        if self._cancel_requested or self._finished:
+            return
+        LOGGER.info("whisper.cpp download dialog cancel clicked")
+        self._cancel_requested = True
+        self.cancel_button.setEnabled(False)
+        self.close_button.setEnabled(False)
+        self.status_label.setText(t("project.whisper.download.progress.canceling"))
+        self.cancelRequested.emit()
+
+    def mark_finished(self) -> None:
+        self._finished = True
+
+    def reject(self) -> None:
+        if self._finished:
+            super().reject()
+            return
+        self.request_cancel()
+
+
+class WhisperSetupDialog(FluentDialog):
+    downloadRequested = pyqtSignal(str, str)
+    localRuntimeSelected = pyqtSignal(str)
+    redetectRequested = pyqtSignal()
+    deleteRequested = pyqtSignal()
+
+    def __init__(self, status: WhisperStatus, parent: QWidget | None = None) -> None:
+        super().__init__(t("project.whisper.advanced.title"), parent, width=620, height=390)
+
+        description = BodyLabel(t("project.whisper.advanced.description"), self.dialog_card)
+        description.setWordWrap(True)
+        self.content_layout.addWidget(description)
+
+        self.status_label = BodyLabel("", self.dialog_card)
+        self.status_label.setWordWrap(True)
+        self.content_layout.addWidget(self.status_label)
+
+        runtime_row = QHBoxLayout()
+        runtime_row.setSpacing(8)
+        runtime_row.addWidget(BodyLabel(t("project.whisper.advanced.runtime"), self.dialog_card))
+        self.runtime_combo = ComboBox(self.dialog_card)
+        for package in whisper_runtime_packages():
+            self.runtime_combo.addItem(t(package.label_key), userData=package.package_id)
+        runtime_row.addWidget(self.runtime_combo, 1)
+        self.content_layout.addLayout(runtime_row)
+
+        model_row = QHBoxLayout()
+        model_row.setSpacing(8)
+        model_row.addWidget(BodyLabel(t("project.whisper.advanced.model"), self.dialog_card))
+        self.model_combo = ComboBox(self.dialog_card)
+        for package in whisper_model_packages():
+            self.model_combo.addItem(
+                t(package.label_key, size=package.size_label),
+                userData=package.model_id,
+            )
+        model_row.addWidget(self.model_combo, 1)
+        self.content_layout.addLayout(model_row)
+
+        self.default_note = CaptionLabel(t("project.whisper.advanced.defaultNote"), self.dialog_card)
+        self.default_note.setWordWrap(True)
+        self.content_layout.addWidget(self.default_note)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        self.download_button = PrimaryPushButton(t("project.whisper.advanced.download"), self.dialog_card)
+        self.local_button = PushButton(t("project.whisper.advanced.localRuntime"), self.dialog_card)
+        self.redetect_button = PushButton(t("project.whisper.advanced.redetect"), self.dialog_card)
+        self.delete_button = PushButton(t("project.whisper.advanced.delete"), self.dialog_card)
+        actions.addWidget(self.download_button)
+        actions.addWidget(self.local_button)
+        actions.addWidget(self.redetect_button)
+        actions.addWidget(self.delete_button)
+        actions.addStretch(1)
+        self.content_layout.addLayout(actions)
+
+        self.set_status(status)
+        self.download_button.clicked.connect(self._emit_download)
+        self.local_button.clicked.connect(self._select_local_runtime)
+        self.redetect_button.clicked.connect(self.redetectRequested.emit)
+        self.delete_button.clicked.connect(self.deleteRequested.emit)
+
+    def set_status(self, status: WhisperStatus) -> None:
+        self.status_label.setText(_format_whisper_status_text(status))
+
+    def set_busy(self, busy: bool) -> None:
+        for widget in (
+            self.runtime_combo,
+            self.model_combo,
+            self.download_button,
+            self.local_button,
+            self.redetect_button,
+            self.delete_button,
+        ):
+            widget.setEnabled(not busy)
+
+    def _emit_download(self) -> None:
+        runtime_package_id = str(self.runtime_combo.currentData() or DEFAULT_WHISPER_RUNTIME_PACKAGE_ID)
+        model_id = str(self.model_combo.currentData() or DEFAULT_WHISPER_MODEL_ID)
+        self.downloadRequested.emit(runtime_package_id, model_id)
+
+    def _select_local_runtime(self) -> None:
+        path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            t("project.whisper.localRuntime.dialog.title"),
+            "",
+            t("project.whisper.localRuntime.fileFilter"),
+        )
+        if path:
+            self.localRuntimeSelected.emit(path)
 
 
 class SourceProcessingWorker(QObject):
@@ -450,6 +668,7 @@ class ProjectPage(QWidget):
         initial_projects: list[ProjectConfig] | None = None,
         initial_encoder_options: list[DeviceOption] | None = None,
         initial_ffmpeg_ready: bool | None = None,
+        initial_whisper_status: WhisperStatus | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("projectPage")
@@ -458,11 +677,16 @@ class ProjectPage(QWidget):
         self._ffmpeg_download_thread: QThread | None = None
         self._ffmpeg_download_worker: FfmpegDownloadWorker | None = None
         self._ffmpeg_download_dialog: FfmpegDownloadDialog | None = None
+        self._whisper_download_thread: QThread | None = None
+        self._whisper_download_worker: WhisperDownloadWorker | None = None
+        self._whisper_download_dialog: WhisperDownloadDialog | None = None
+        self._whisper_setup_dialog: WhisperSetupDialog | None = None
         self._source_processing_thread: QThread | None = None
         self._source_processing_worker: SourceProcessingWorker | None = None
         self._source_processing_dialog: SourceProcessingDialog | None = None
         self._encoder_options: list[DeviceOption] = list(initial_encoder_options) if initial_encoder_options else []
         self._ffmpeg_ready_cache = initial_ffmpeg_ready
+        self._whisper_status_cache = initial_whisper_status
         self._use_preloaded_encoder_options = initial_encoder_options is not None
         self._extraction_running = False
 
@@ -538,8 +762,12 @@ class ProjectPage(QWidget):
         processing_title.setMinimumWidth(88)
         self.ffmpeg_status_label = BodyLabel("", processing_panel)
         self.ffmpeg_status_label.setWordWrap(True)
+        self.whisper_status_label = BodyLabel("", processing_panel)
+        self.whisper_status_label.setWordWrap(True)
+        self.whisper_status_label.setMinimumWidth(220)
         processing_layout.addWidget(processing_title, 0, 0)
         processing_layout.addWidget(self.ffmpeg_status_label, 0, 1)
+        processing_layout.addWidget(self.whisper_status_label, 0, 2)
 
         processing_layout.addWidget(BodyLabel(t("project.processing.preset"), processing_panel), 1, 0)
         self.processing_preset_combo = ComboBox(processing_panel)
@@ -560,11 +788,17 @@ class ProjectPage(QWidget):
         self.download_ffmpeg_button = PushButton(t("project.ffmpeg.download.button"), processing_panel)
         self.download_ffmpeg_button.setMinimumWidth(128)
         self.download_ffmpeg_button.setVisible(False)
+        self.download_whisper_button = PushButton(t("project.whisper.download.button"), processing_panel)
+        self.download_whisper_button.setMinimumWidth(136)
+        self.whisper_advanced_button = PushButton(t("project.whisper.advanced.button"), processing_panel)
+        self.whisper_advanced_button.setMinimumWidth(112)
         self.process_sources_button = PrimaryPushButton(t("project.processing.start"), processing_panel)
         self.process_sources_button.setMinimumWidth(112)
         process_actions = QHBoxLayout()
         process_actions.setSpacing(8)
         process_actions.addWidget(self.download_ffmpeg_button)
+        process_actions.addWidget(self.download_whisper_button)
+        process_actions.addWidget(self.whisper_advanced_button)
         process_actions.addWidget(self.process_sources_button)
         processing_layout.addLayout(process_actions, 1, 2)
         processing_layout.setColumnStretch(1, 1)
@@ -745,6 +979,8 @@ class ProjectPage(QWidget):
         self.preview_button.clicked.connect(self._emit_extraction)
         self.mode_combo.currentIndexChanged.connect(self._sync_extraction_button_text)
         self.download_ffmpeg_button.clicked.connect(self._download_ffmpeg)
+        self.download_whisper_button.clicked.connect(self._download_default_whisper)
+        self.whisper_advanced_button.clicked.connect(self._open_whisper_setup_dialog)
         self.process_sources_button.clicked.connect(self._start_source_processing)
         self.processing_preset_combo.currentIndexChanged.connect(self._sync_processing_options)
         self.segment_mode_combo.currentIndexChanged.connect(self._sync_segment_mode)
@@ -753,6 +989,7 @@ class ProjectPage(QWidget):
         self._refresh_project_combo()
         self._sync_extraction_button_text()
         self._refresh_ffmpeg_state(force_probe=self._ffmpeg_ready_cache is None)
+        self._refresh_whisper_state(force_probe=self._whisper_status_cache is None)
         self._sync_processing_options()
         self._sync_segment_mode()
         self.apply_theme_colors()
@@ -898,6 +1135,15 @@ class ProjectPage(QWidget):
             else t("project.ffmpeg.status.missing")
         )
         self.download_ffmpeg_button.setVisible(requires_ffmpeg and not self._ffmpeg_ready_cache)
+
+    def _refresh_whisper_state(self, *, force_probe: bool = False) -> WhisperStatus:
+        if force_probe or self._whisper_status_cache is None:
+            self._whisper_status_cache = whisper_status()
+        self.whisper_status_label.setText(_format_whisper_status_text(self._whisper_status_cache))
+        self.download_whisper_button.setVisible(not self._whisper_status_cache.ready)
+        if self._whisper_setup_dialog is not None:
+            self._whisper_setup_dialog.set_status(self._whisper_status_cache)
+        return self._whisper_status_cache
 
     def _uses_original_sources(self) -> bool:
         return self.processing_preset_combo.currentIndex() == 0
@@ -1177,6 +1423,189 @@ class ProjectPage(QWidget):
         self._ffmpeg_download_worker = None
         self._ffmpeg_download_dialog = None
 
+    def _download_default_whisper(self) -> None:
+        self._download_whisper(DEFAULT_WHISPER_RUNTIME_PACKAGE_ID, DEFAULT_WHISPER_MODEL_ID)
+
+    def _download_whisper(self, runtime_package_id: str, model_id: str) -> None:
+        if self._whisper_download_thread is not None:
+            LOGGER.info("whisper.cpp download ignored because a download is already running")
+            return
+
+        LOGGER.info("whisper.cpp download requested; runtime=%s model=%s", runtime_package_id, model_id)
+        if self._whisper_setup_dialog is not None:
+            self._whisper_setup_dialog.set_busy(True)
+        self._whisper_download_dialog = WhisperDownloadDialog(self)
+        self._whisper_download_dialog.show()
+
+        self.download_whisper_button.setEnabled(False)
+        self.whisper_advanced_button.setEnabled(False)
+        self._whisper_download_thread = QThread(self)
+        self._whisper_download_worker = WhisperDownloadWorker(runtime_package_id, model_id)
+        self._whisper_download_worker.moveToThread(self._whisper_download_thread)
+        self._whisper_download_thread.started.connect(self._whisper_download_worker.run)
+        self._whisper_download_dialog.cancelRequested.connect(
+            self._whisper_download_worker.cancel,
+            Qt.ConnectionType.DirectConnection,
+        )
+        self._whisper_download_worker.progressChanged.connect(self._update_whisper_download_progress)
+        self._whisper_download_worker.succeeded.connect(self._finish_whisper_download_success)
+        self._whisper_download_worker.failed.connect(self._finish_whisper_download_failure)
+        self._whisper_download_worker.cancelled.connect(self._finish_whisper_download_cancelled)
+        self._whisper_download_worker.finished.connect(self._whisper_download_thread.quit)
+        self._whisper_download_worker.finished.connect(self._whisper_download_worker.deleteLater)
+        self._whisper_download_thread.finished.connect(self._whisper_download_thread.deleteLater)
+        self._whisper_download_thread.finished.connect(self._clear_whisper_download_worker)
+        self._whisper_download_thread.start()
+
+    def _update_whisper_download_progress(self, value: int, step: str) -> None:
+        if self._whisper_download_dialog is None:
+            return
+        self._whisper_download_dialog.set_progress(
+            value,
+            t(f"project.whisper.download.progress.{step}"),
+        )
+
+    def _finish_whisper_download_success(self, runtime_path: str, model_path: str) -> None:
+        if self._whisper_download_dialog is not None:
+            self._whisper_download_dialog.mark_finished()
+            self._whisper_download_dialog.set_progress(100, t("project.whisper.download.progress.done"))
+            self._whisper_download_dialog.close()
+        self._whisper_status_cache = whisper_status()
+        self._refresh_whisper_state()
+        InfoBar.success(
+            title=t("project.whisper.download.success.title"),
+            content=t(
+                "project.whisper.download.success.content",
+                runtime=runtime_path,
+                model=model_path,
+            ),
+            parent=self.window(),
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=5500,
+        )
+
+    def _finish_whisper_download_failure(self, error: str) -> None:
+        if self._whisper_download_dialog is not None:
+            self._whisper_download_dialog.mark_finished()
+            self._whisper_download_dialog.close()
+        InfoBar.warning(
+            title=t("project.whisper.download.failure.title"),
+            content=t("project.whisper.download.failure.content", error=self._short_error(error)),
+            parent=self.window(),
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=7000,
+        )
+
+    def _finish_whisper_download_cancelled(self) -> None:
+        if self._whisper_download_dialog is not None:
+            self._whisper_download_dialog.mark_finished()
+            self._whisper_download_dialog.close()
+        InfoBar.info(
+            title=t("project.whisper.download.cancelled.title"),
+            content=t("project.whisper.download.cancelled.content"),
+            parent=self.window(),
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=3500,
+        )
+
+    def _clear_whisper_download_worker(self) -> None:
+        self._whisper_download_thread = None
+        self._whisper_download_worker = None
+        self._whisper_download_dialog = None
+        self.download_whisper_button.setEnabled(True)
+        self.whisper_advanced_button.setEnabled(True)
+        if self._whisper_setup_dialog is not None:
+            self._whisper_setup_dialog.set_busy(False)
+        self._refresh_whisper_state(force_probe=True)
+        self._sync_project_actions()
+
+    def _open_whisper_setup_dialog(self) -> None:
+        if self._whisper_setup_dialog is not None:
+            self._whisper_setup_dialog.show()
+            self._whisper_setup_dialog.raise_()
+            self._whisper_setup_dialog.activateWindow()
+            return
+
+        status = self._refresh_whisper_state(force_probe=True)
+        self._whisper_setup_dialog = WhisperSetupDialog(status, self)
+        self._whisper_setup_dialog.downloadRequested.connect(self._download_whisper)
+        self._whisper_setup_dialog.localRuntimeSelected.connect(self._set_local_whisper_runtime)
+        self._whisper_setup_dialog.redetectRequested.connect(self._redetect_whisper)
+        self._whisper_setup_dialog.deleteRequested.connect(self._delete_installed_whisper)
+        self._whisper_setup_dialog.finished.connect(self._clear_whisper_setup_dialog)
+        self._whisper_setup_dialog.show()
+
+    def _clear_whisper_setup_dialog(self, _result: int = 0) -> None:
+        self._whisper_setup_dialog = None
+
+    def _set_local_whisper_runtime(self, path: str) -> None:
+        runtime_path = Path(path)
+        if not runtime_path.is_file() or not is_whisper_runtime_usable(runtime_path):
+            InfoBar.warning(
+                title=t("project.whisper.localRuntime.failure.title"),
+                content=t("project.whisper.localRuntime.failure.content"),
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=5500,
+            )
+            return
+
+        set_custom_whisper_runtime_path(runtime_path)
+        status = self._refresh_whisper_state(force_probe=True)
+        title_key = (
+            "project.whisper.localRuntime.success.ready.title"
+            if status.ready
+            else "project.whisper.localRuntime.success.runtimeOnly.title"
+        )
+        content_key = (
+            "project.whisper.localRuntime.success.ready.content"
+            if status.ready
+            else "project.whisper.localRuntime.success.runtimeOnly.content"
+        )
+        InfoBar.success(
+            title=t(title_key),
+            content=t(content_key, path=str(runtime_path)),
+            parent=self.window(),
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=5000,
+        )
+
+    def _redetect_whisper(self) -> None:
+        self._refresh_whisper_state(force_probe=True)
+
+    def _delete_installed_whisper(self) -> None:
+        dialog = MessageBox(
+            t("project.whisper.delete.dialog.title"),
+            t("project.whisper.delete.dialog.content"),
+            self.window(),
+        )
+        dialog.yesButton.setText(t("project.whisper.delete.dialog.confirm"))
+        dialog.cancelButton.setText(t("project.whisper.delete.dialog.cancel"))
+        if not dialog.exec():
+            return
+
+        try:
+            remove_installed_whisper()
+            clear_custom_whisper_runtime_path()
+        except WhisperCppDownloadError as exc:
+            InfoBar.warning(
+                title=t("project.whisper.delete.failure.title"),
+                content=t("project.whisper.delete.failure.content", error=self._short_error(str(exc))),
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=6500,
+            )
+            return
+
+        self._refresh_whisper_state(force_probe=True)
+        InfoBar.success(
+            title=t("project.whisper.delete.success.title"),
+            content=t("project.whisper.delete.success.content"),
+            parent=self.window(),
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=3500,
+        )
+
     def _short_error(self, error: str) -> str:
         error = " ".join(error.split())
         max_length = 120
@@ -1288,6 +1717,8 @@ class ProjectPage(QWidget):
         self.transcode_check.setEnabled(has_project)
         self.segment_check.setEnabled(has_project)
         self.process_sources_button.setEnabled(has_project)
+        self.download_whisper_button.setEnabled(self._whisper_download_thread is None)
+        self.whisper_advanced_button.setEnabled(self._whisper_download_thread is None)
         self.save_button.setEnabled(has_project)
         self.preview_button.setEnabled(has_project and not self._extraction_running)
         self._sync_processing_options()

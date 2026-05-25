@@ -25,18 +25,19 @@
 - `state_manager.py`：保存、读取和列出项目配置，项目配置写入 `projects/{project_id}/config.json`。
 - `theme.py`：管理主题偏好，并调用 qfluentwidgets 应用亮色、暗色或系统主题。
 - `chunker.py`：预留文本或素材分块工具。
-- `env_manager.py`：提供 conda 命令前缀、llama.cpp 二进制发现和可用性检测。
+- `env_manager.py`：提供 conda 命令前缀、llama.cpp/whisper.cpp 二进制发现和可用性检测。
 - `ffmpeg_tool.py`：封装 ffmpeg 工具可用性校验与素材转码/分段执行。
 - `ffmpeg_detection.py`：封装 FFmpeg 设备/CPU 探测相关 helper，供 `ffmpeg_tool.py` 复用。
 - `cloud_model_presets.py`：保存和读取云端模型配置预设，维护云端服务类型到模型调用后端的映射，并提供视频输出 Token / 分钟到单次请求上限的换算工具。
 - `cloud_models.py`：按云端服务类型路由并拉取模型列表，当前底层复用 OpenAI-compatible 模型列表接口。
 - `network_middleware.py`：统一应用内 HTTP(S) 请求、代理读取、连通性测试、错误脱敏和 DashScope 临时代理环境。
 - `llamacpp_downloader.py`：下载并安装 llama.cpp 运行时到 `bin/`。
+- `whispercpp_downloader.py`：下载并安装 whisper.cpp 运行时到 `bin/whisper.cpp/`，下载 Whisper 模型到 `models/whisper/`。
 - `ffmpeg_downloader.py`：下载并安装 ffmpeg 运行时到 `bin/`。
 - `source_importer.py`：把外部原始素材按项目目录规则复制到 `projects/{project_id}/raw`，计算外部路径对应的 raw 目标，准备 `materials`，并支持 raw 清理和素材移除。
 - `source_status.py`：计算项目页需要的素材显示名、raw/materials 映射、项目内素材列表和素材状态。
 - `material_processing_middleware.py`：统一接收上层的素材处理请求与工具可用性校验请求，桥接 `source_importer.py` 和 `ffmpeg_tool.py`。
-- `startup_middleware.py`：启动阶段预加载中间件，集中探测 FFmpeg/llama.cpp、预取项目配置和云模型预设，供启动页线程复用。
+- `startup_middleware.py`：启动阶段预加载中间件，集中探测 FFmpeg/llama.cpp/whisper.cpp、预取项目配置和云模型预设，供启动页线程复用。
 - `logging_preferences.py`：管理日志等级偏好。
 - `logging_middleware.py`：安装全局日志中间件，日志只写入文件。
 - `ai_model_middleware.py`：统一模型调用入口，负责加载默认提示词、构造标准消息、携带按请求设置的超时/结构化输出/后端专用参数、屏蔽敏感日志并路由下层模型后端。
