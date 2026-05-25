@@ -4,7 +4,7 @@
   <img src="res/app_icon.png" alt="CharaPicker logo" width="96">
 </p>
 
-[繁體中文](docs/README.zh_TW.md) | [日本語](docs/README.ja_JP.md) | [English](docs/README.en_US.md)
+[繁體中文](docs/readme/README.zh_TW.md) | [日本語](docs/readme/README.ja_JP.md) | [English](docs/readme/README.en_US.md)
 
 ## 项目简介
 
@@ -90,9 +90,9 @@ build.bat
 
 ## 文档导航
 
-- [繁體中文 README](docs/README.zh_TW.md)
-- [日本語 README](docs/README.ja_JP.md)
-- [English README](docs/README.en_US.md)
+- [繁體中文 README](docs/readme/README.zh_TW.md)
+- [日本語 README](docs/readme/README.ja_JP.md)
+- [English README](docs/readme/README.en_US.md)
 - [Codex 长期项目指导](AGENTS.md)
 - [根目录架构说明](ARCHITECTURE.md)
 - [项目文档索引](docs/README.md)

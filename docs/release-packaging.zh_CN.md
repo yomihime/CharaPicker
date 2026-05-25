@@ -80,7 +80,7 @@ release/
 - `utils/app_metadata.py`：运行时应用名、版本阶段和 HTTP User-Agent。
 - `pyproject.toml`：Python 项目元数据版本。
 - `build.bat`：批处理脚本回退默认值和发布文件名默认变量。
-- `README.md`、`docs/README.*.md` 和 `i18n/*`：用户可见版本文案。
+- `README.md`、`docs/readme/README.*.md` 和 `i18n/*`：用户可见版本文案。
 - `scripts/build_meta.py`：确认默认值仍从 `utils.app_metadata` 读取，命令行、tag 和 `--local` 覆盖逻辑保持有效。
 
 ## 5. 文件命名

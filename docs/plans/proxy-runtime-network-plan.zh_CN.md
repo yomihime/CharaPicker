@@ -244,7 +244,7 @@ network:
 
 - 运行可用的静态检查或导入检查。
 - 更新运行时中间件文档和 utils 架构说明。
-- 根据完成情况更新 `docs/TODO.zh_CN.md`。
+- 根据完成情况更新 `docs/plans/TODO.zh_CN.md`。
 
 验收：
 

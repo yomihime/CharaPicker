@@ -1,6 +1,6 @@
 ﻿# CharaPicker (English)
 
-[简体中文](../README.md) | [繁體中文](README.zh_TW.md) | [日本語](README.ja_JP.md)
+[简体中文](../../README.md) | [繁體中文](README.zh_TW.md) | [日本語](README.ja_JP.md)
 
 ## Overview
 
@@ -69,11 +69,11 @@ python main.py
 
 ## Documentation
 
-- [简体中文 README](../README.md)
+- [简体中文 README](../../README.md)
 - [繁體中文 README](README.zh_TW.md)
 - [日本語 README](README.ja_JP.md)
-- [docs Architecture](ARCHITECTURE.md)
-- [Root Architecture](../ARCHITECTURE.md)
+- [docs Architecture](../ARCHITECTURE.md)
+- [Root Architecture](../../ARCHITECTURE.md)
 
 ## Development Notes
 
