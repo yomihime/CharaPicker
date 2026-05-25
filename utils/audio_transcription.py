@@ -120,6 +120,7 @@ def transcribe_episode_audio(
         status.model_path.name,
     )
     segments: list[TranscriptSegment] = []
+    material_time_ranges: list[dict[str, Any]] = []
     offset_seconds = 0.0
 
     with tempfile.TemporaryDirectory(prefix="transcription-", dir=paths.cache) as temp_dir_name:
@@ -158,8 +159,16 @@ def transcribe_episode_audio(
                         text=source_plain_text.strip(),
                     )
                 ]
+            range_start = offset_seconds
             segments.extend(_offset_segments(source_segments, offset_seconds))
             offset_seconds += _segment_duration_guess(source_segments)
+            material_time_ranges.append(
+                {
+                    "material_path": str(source),
+                    "start_seconds": range_start,
+                    "end_seconds": offset_seconds,
+                }
+            )
 
     plain_text = "\n".join(segment.text.strip() for segment in segments if segment.text.strip())
     transcript = EpisodeTranscript(
@@ -167,6 +176,7 @@ def transcribe_episode_audio(
         source=TranscriptSource(
             material_path=str(sources[0]),
             material_paths=[str(source) for source in sources],
+            material_time_ranges=material_time_ranges,
             source_fingerprint=source_fingerprint,
             season_id=season_id,
             episode_id=episode_id,
@@ -237,6 +247,34 @@ def transcript_segments_for_range(
     if len(output) <= max_chars:
         return output
     return output[: max(max_chars - 3, 0)].rstrip() + "..."
+
+
+def transcript_segments_for_material(
+    transcript: EpisodeTranscript,
+    material_path: Path | str,
+    *,
+    max_chars: int = 4000,
+) -> str:
+    target = _path_identity(material_path)
+    for item in transcript.source.material_time_ranges:
+        if not isinstance(item, dict):
+            continue
+        item_path = item.get("material_path")
+        if not isinstance(item_path, str) or _path_identity(item_path) != target:
+            continue
+        start_seconds = _coerce_float(item.get("start_seconds"))
+        end_seconds = _coerce_float(item.get("end_seconds"))
+        return transcript_segments_for_range(
+            transcript,
+            start_seconds,
+            end_seconds,
+            max_chars=max_chars,
+        )
+
+    material_paths = {_path_identity(path) for path in transcript.source.material_paths}
+    if target in material_paths:
+        return _clamp_text(transcript.plain_text, max_chars)
+    return ""
 
 
 def _normalize_material_paths(material_paths: Path | str | Sequence[Path | str]) -> list[Path]:
@@ -532,6 +570,23 @@ def _normalize_language(language: str) -> str:
 def _format_seconds(value: float) -> str:
     whole = max(int(value), 0)
     return f"{whole // 60:02d}:{whole % 60:02d}"
+
+
+def _path_identity(path: Path | str) -> str:
+    return str(Path(path).expanduser().resolve()).lower()
+
+
+def _coerce_float(value: object) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _clamp_text(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[: max(max_chars - 3, 0)].rstrip() + "..."
 
 
 def _check_cancel(cancelled: CancelCallback | None) -> None:

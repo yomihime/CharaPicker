@@ -1857,21 +1857,28 @@ class ModelPage(QWidget):
         self.cloud_video_fps_slider.setToolTip(tooltip)
 
     def _sync_cloud_video_input_mode_availability(self) -> None:
+        video_input_mode = self._current_cloud_video_input_mode()
         unsupported = _video_mode_support_status(
             self._current_cloud_provider_id(),
-            self._current_cloud_video_input_mode(),
+            video_input_mode,
+        )
+        transcript_notice = (
+            t("model.cloud.videoInputMode.transcriptNotice")
+            if video_input_mode in {"frame_sampling_with_transcript", "audio_transcript_only"}
+            else ""
         )
         if unsupported is None:
-            self.cloud_video_input_mode_combo.setToolTip(t("model.cloud.videoInputMode.supported"))
+            tooltip = t("model.cloud.videoInputMode.supported")
         else:
             status, message = unsupported
-            self.cloud_video_input_mode_combo.setToolTip(
-                t(
-                    "model.cloud.videoInputMode.unsupported",
-                    status=t(f"model.cloud.test.status.{status}"),
-                    reason=message,
-                )
+            tooltip = t(
+                "model.cloud.videoInputMode.unsupported",
+                status=t(f"model.cloud.test.status.{status}"),
+                reason=message,
             )
+        if transcript_notice:
+            tooltip = f"{tooltip}\n{transcript_notice}"
+        self.cloud_video_input_mode_combo.setToolTip(tooltip)
         self._sync_cloud_video_fps_availability()
 
     def _test_cloud_model(self) -> None:

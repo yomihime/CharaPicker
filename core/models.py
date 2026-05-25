@@ -379,6 +379,7 @@ class ChunkExtractionResult(BaseModel):
 class TranscriptSource(BaseModel):
     material_path: str = ""
     material_paths: list[str] = Field(default_factory=list)
+    material_time_ranges: list[dict[str, Any]] = Field(default_factory=list)
     source_fingerprint: str = ""
     season_id: str = ""
     episode_id: str = ""

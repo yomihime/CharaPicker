@@ -32,8 +32,10 @@ from utils.cloud_model_presets import (
     CLOUD_MAX_OUTPUT_TOKENS_MAX,
     CLOUD_MAX_OUTPUT_TOKENS_STEP,
     CloudModelPreset,
+    VideoInputMode,
     cloud_model_provider,
     load_cloud_model_presets,
+    normalize_video_input_mode,
     provider_requires_aliyun_extra_body,
     scale_cloud_max_output_tokens_for_video_duration,
 )
@@ -41,6 +43,7 @@ from utils.audio_transcription import (
     AudioTranscriptionError,
     TranscriptionOptions,
     transcribe_episode_audio as run_episode_audio_transcription,
+    transcript_segments_for_material,
 )
 from utils.ffmpeg_tool import FfmpegProcessError, probe_video_duration_seconds
 from utils.i18n import t
@@ -735,6 +738,21 @@ class Extractor(QObject):
             return preset
         return next((item for item in presets if item.base_url.strip() and item.model_name.strip()), None)
 
+    def _backend_for_video_input_mode(
+        self,
+        preset: CloudModelPreset,
+        video_input_mode: VideoInputMode,
+    ) -> ModelBackend:
+        provider = cloud_model_provider(preset.provider)
+        if video_input_mode == "audio_transcript_only":
+            return provider.backend_for("text")  # type: ignore[return-value]
+        if video_input_mode in {"frame_sampling", "frame_sampling_with_transcript"}:
+            return provider.backend_for("image")  # type: ignore[return-value]
+        return provider.backend_for("video")  # type: ignore[return-value]
+
+    def _video_mode_requires_transcript(self, video_input_mode: VideoInputMode) -> bool:
+        return video_input_mode in {"frame_sampling_with_transcript", "audio_transcript_only"}
+
     def _collect_formal_video_chunk_inputs(
         self,
         project_id: str,
@@ -997,6 +1015,7 @@ class Extractor(QObject):
         api_key: str,
         video_fps: float,
         max_output_tokens: int,
+        video_input_mode: VideoInputMode,
         emit_token_usage: Callable[[dict[str, int]], None] | None = None,
         emit_event: Callable[[dict], None] | None = None,
         emit_progress: Callable[[int], None] | None = None,
@@ -1011,6 +1030,22 @@ class Extractor(QObject):
         usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         extracted_chunks: list[ChunkExtractionResult] = []
         total_chunks = len(chunk_inputs)
+        transcripts_by_episode: dict[tuple[str, str], EpisodeTranscript] = {}
+        if self._video_mode_requires_transcript(video_input_mode):
+            transcripts = self.ensure_episode_transcripts_from_manifest(
+                config.project_id,
+                manifest,
+                emit_event=emit_event,
+            )
+            transcripts_by_episode = {
+                (transcript.source.season_id, transcript.source.episode_id): transcript
+                for transcript in transcripts
+            }
+            if not transcripts_by_episode:
+                message = t("extractor.transcript.requiredUnavailable")
+                self._emit_full_warning(emit_event, message)
+                raise ValueError(message)
+
         for index, chunk_input in enumerate(chunk_inputs, start=1):
             video_path = chunk_input["video_path"]
             source_path = chunk_input["source_path"]
@@ -1075,6 +1110,28 @@ class Extractor(QObject):
                         ).model_dump(mode="json")
                     )
 
+                transcript_context = ""
+                if self._video_mode_requires_transcript(video_input_mode):
+                    transcript = transcripts_by_episode.get(
+                        (chunk_input["season_id"], chunk_input["episode_id"])
+                    )
+                    if transcript is not None:
+                        transcript_context = transcript_segments_for_material(
+                            transcript,
+                            video_path,
+                            max_chars=4000,
+                        )
+                    if not transcript_context.strip():
+                        self._emit_full_warning(
+                            emit_event,
+                            t(
+                                "extractor.transcript.chunkMissing",
+                                episode=chunk_input["episode_id"],
+                                chunk=chunk_input["chunk_id"],
+                            ),
+                        )
+                        continue
+
                 request = self._build_full_video_chunk_request(
                     config,
                     chunk_input=chunk_input,
@@ -1085,6 +1142,8 @@ class Extractor(QObject):
                     api_key=api_key,
                     video_fps=video_fps,
                     request_max_output_tokens=request_max_output_tokens,
+                    video_input_mode=video_input_mode,
+                    transcript_context=transcript_context,
                 )
                 result = call_video_model(request)
                 token_usage = result.metadata.get("token_usage")
@@ -1255,6 +1314,8 @@ class Extractor(QObject):
         api_key: str,
         video_fps: float,
         request_max_output_tokens: int,
+        video_input_mode: VideoInputMode,
+        transcript_context: str = "",
     ) -> ModelCallRequest:
         video_path = chunk_input["video_path"]
         chunk_ref = (
@@ -1265,8 +1326,15 @@ class Extractor(QObject):
             variables={
                 "chunk_id": chunk_ref,
                 "source_path": chunk_input["source_path"],
+                "transcript_section": self._format_transcript_prompt_section(
+                    video_input_mode,
+                    transcript_context,
+                ),
             },
         )
+        content_parts: list[dict[str, Any]] = [{"type": "text", "text": user_text}]
+        if video_input_mode != "audio_transcript_only":
+            content_parts.append(self._build_video_chunk_part(video_path, video_fps))
         return ModelCallRequest(
             purpose="formal_video_chunk_extraction",
             backend=backend,
@@ -1280,10 +1348,7 @@ class Extractor(QObject):
                 ),
                 ModelMessage(
                     role="user",
-                    content=[
-                        {"type": "text", "text": user_text},
-                        self._build_video_chunk_part(video_path, video_fps),
-                    ],
+                    content=content_parts,
                 ),
             ],
             temperature=0.2,
@@ -1299,8 +1364,23 @@ class Extractor(QObject):
                 "episode_id": chunk_input["episode_id"],
                 "chunk_id": chunk_input["chunk_id"],
                 "source_path": chunk_input["source_path"],
+                "video_input_mode": video_input_mode,
             },
         )
+
+    def _format_transcript_prompt_section(
+        self,
+        video_input_mode: VideoInputMode,
+        transcript_context: str,
+    ) -> str:
+        if not self._video_mode_requires_transcript(video_input_mode):
+            return ""
+        context = transcript_context.strip() or t("extractor.transcript.context.empty")
+        if video_input_mode == "audio_transcript_only":
+            note = t("extractor.transcript.prompt.audioOnly")
+        else:
+            note = t("extractor.transcript.prompt.withFrames")
+        return f"[TRANSCRIPT_CONTEXT]\n{context}\n\n{note}"
 
     def _emit_full_warning(self, emit_event: Callable[[dict], None] | None, description: str) -> None:
         if emit_event is None:
@@ -1754,17 +1834,19 @@ class Extractor(QObject):
             LOGGER.warning("Full extraction stopped because no usable cloud preset was found")
             raise ValueError(message)
 
+        video_input_mode = normalize_video_input_mode(preset.video_input_mode, preset.provider)
         created_count, extraction_usage, extracted_chunks = self._extract_full_chunk_json_from_manifest(
             config,
             manifest,
             chunk_inputs=chunk_inputs,
-            backend=cloud_model_provider(preset.provider).backend_for("video"),
+            backend=self._backend_for_video_input_mode(preset, video_input_mode),
             provider=preset.provider,
             model_name=preset.model_name,
             base_url=preset.base_url,
             api_key=preset.api_key,
             video_fps=preset.video_fps,
             max_output_tokens=preset.max_output_tokens,
+            video_input_mode=video_input_mode,
             emit_token_usage=emit_token_usage,
             emit_event=emit_event,
             emit_progress=emit_progress,
