@@ -138,6 +138,16 @@ def _format_whisper_status_text(status: WhisperStatus) -> str:
     return t("project.whisper.status.missingModel", runtime=runtime_path)
 
 
+def _format_whisper_status_short(status: WhisperStatus) -> str:
+    if status.ready:
+        return t("project.whisper.status.readyShort")
+    if not status.runtime_ready and not status.model_ready:
+        return t("project.whisper.status.missingShort")
+    if not status.runtime_ready:
+        return t("project.whisper.status.missingRuntimeShort")
+    return t("project.whisper.status.missingModelShort")
+
+
 class FfmpegDownloadWorker(QObject):
     progressChanged = pyqtSignal(int, str)
     succeeded = pyqtSignal(str)
@@ -1139,7 +1149,8 @@ class ProjectPage(QWidget):
     def _refresh_whisper_state(self, *, force_probe: bool = False) -> WhisperStatus:
         if force_probe or self._whisper_status_cache is None:
             self._whisper_status_cache = whisper_status()
-        self.whisper_status_label.setText(_format_whisper_status_text(self._whisper_status_cache))
+        self.whisper_status_label.setText(_format_whisper_status_short(self._whisper_status_cache))
+        self.whisper_status_label.setToolTip(_format_whisper_status_text(self._whisper_status_cache))
         self.download_whisper_button.setVisible(not self._whisper_status_cache.ready)
         if self._whisper_setup_dialog is not None:
             self._whisper_setup_dialog.set_status(self._whisper_status_cache)

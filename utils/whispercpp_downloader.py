@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import tempfile
 import zipfile
@@ -150,44 +151,24 @@ def download_and_install_whisper(
     release = _request_json(WHISPERCPP_LATEST_RELEASE_API, cancelled)
     _check_cancel(cancelled)
     tag_name = str(release.get("tag_name") or "latest").strip() or "latest"
-    asset = select_runtime_asset(release, runtime_package)
-    asset_name = str(asset.get("name", "whisper.cpp.zip"))
-    download_url = str(asset.get("browser_download_url", ""))
-    if not download_url:
-        raise WhisperCppDownloadError("Selected whisper.cpp asset has no download URL.")
-
     with tempfile.TemporaryDirectory(prefix="whispercpp-", dir=bin_root) as temp_dir_name:
         temp_dir = Path(temp_dir_name)
-        archive_path = temp_dir / asset_name
-        extract_dir = temp_dir / "extract"
-        staged_runtime_dir = temp_dir / "runtime"
-        staged_runtime_dir.mkdir()
-        extract_dir.mkdir()
         staged_model_path = temp_dir / model_package.file_name
 
-        emit(5, "download")
-        _download_file(download_url, archive_path, 5, 54, "download", emit, cancelled)
-
-        emit(56, "extract")
-        try:
-            _extract_zip_safely(archive_path, extract_dir, cancelled)
-        except (OSError, zipfile.BadZipFile) as exc:
-            raise WhisperCppDownloadError(str(exc)) from exc
-
-        emit(64, "stageRuntime")
-        _copy_tree_contents(extract_dir, staged_runtime_dir, cancelled)
-        runtime_binary = find_usable_whisper_runtime_binary(staged_runtime_dir)
-        if runtime_binary is None:
-            raise WhisperCppDownloadError(
-                "Downloaded archive does not include a usable whisper.cpp runtime."
-            )
+        staged_runtime_dir, installed_runtime_package = _download_and_stage_runtime(
+            release,
+            runtime_package,
+            temp_dir,
+            emit,
+            cancelled,
+        )
 
         emit(68, "downloadModel")
         model_url = WHISPER_MODEL_BASE_URL.format(file_name=model_package.file_name)
         _download_file(model_url, staged_model_path, 68, 92, "downloadModel", emit, cancelled)
 
         emit(94, "install")
-        runtime_target = _runtime_install_dir(bin_root, tag_name, runtime_package.package_id)
+        runtime_target = _runtime_install_dir(bin_root, tag_name, installed_runtime_package.package_id)
         _replace_directory(staged_runtime_dir, runtime_target)
         model_target = model_root / model_package.file_name
         staged_model_path.replace(model_target)
@@ -223,6 +204,53 @@ def select_runtime_asset(release: dict, package: WhisperRuntimePackage) -> dict:
     if not candidates:
         raise WhisperCppDownloadError(f"No matching whisper.cpp asset found for {package.package_id}.")
     return max(candidates, key=lambda asset: _runtime_asset_score(str(asset.get("name", "")), package))
+
+
+def _download_and_stage_runtime(
+    release: dict,
+    package: WhisperRuntimePackage,
+    temp_dir: Path,
+    emit: ProgressCallback,
+    cancelled: CancelCallback | None,
+) -> tuple[Path, WhisperRuntimePackage]:
+    packages = [package]
+    fallback_package = whisper_runtime_package(DEFAULT_WHISPER_RUNTIME_PACKAGE_ID)
+    if package.package_id != fallback_package.package_id:
+        packages.append(fallback_package)
+
+    failed_packages: list[str] = []
+    for candidate_package in packages:
+        stage_dir = temp_dir / f"runtime-{_safe_segment(candidate_package.package_id)}"
+        extract_dir = temp_dir / f"extract-{_safe_segment(candidate_package.package_id)}"
+        stage_dir.mkdir()
+        extract_dir.mkdir()
+        asset = select_runtime_asset(release, candidate_package)
+        asset_name = str(asset.get("name", "whisper.cpp.zip"))
+        download_url = str(asset.get("browser_download_url", ""))
+        if not download_url:
+            raise WhisperCppDownloadError("Selected whisper.cpp asset has no download URL.")
+
+        archive_path = temp_dir / asset_name
+        emit(5, "download")
+        _download_file(download_url, archive_path, 5, 54, "download", emit, cancelled)
+
+        emit(56, "extract")
+        try:
+            _extract_zip_safely(archive_path, extract_dir, cancelled)
+        except (OSError, zipfile.BadZipFile) as exc:
+            raise WhisperCppDownloadError(str(exc)) from exc
+
+        emit(64, "stageRuntime")
+        _copy_tree_contents(extract_dir, stage_dir, cancelled)
+        runtime_binary = find_usable_whisper_runtime_binary(stage_dir)
+        if runtime_binary is not None:
+            return stage_dir, candidate_package
+        failed_packages.append(candidate_package.package_id)
+
+    raise WhisperCppDownloadError(
+        "Downloaded archive does not include a usable whisper.cpp runtime: "
+        + ", ".join(failed_packages)
+    )
 
 
 def _check_cancel(cancelled: CancelCallback | None) -> None:
@@ -264,6 +292,11 @@ def _runtime_asset_score(asset_name: str, package: WhisperRuntimePackage) -> int
         score -= 3
     if package.package_id == "win-x64-cuda" and any(token in name for token in ("cuda", "cublas", "cu12", "cu13")):
         score += 40
+        version_match = re.search(r"(?:cuda|cublas|cu)(?:[-_]?)(\d+)(?:[._-](\d+))?", name)
+        if version_match:
+            major = int(version_match.group(1))
+            minor = int(version_match.group(2) or 0)
+            score += major * 10 + minor
     return score
 
 
