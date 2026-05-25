@@ -5,10 +5,11 @@ from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QEvent, QObject, QSignalBlocker, QSize, Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
+    QLabel,
     QVBoxLayout,
     QWidget,
 )
@@ -1163,6 +1164,14 @@ class ModelPage(QWidget):
                 icon = QIcon(str(icon_path))
                 if not icon.isNull():
                     self.cloud_provider_combo.setItemIcon(item_index, icon)
+        self.cloud_provider_icon = QLabel(self.cloud_card)
+        self.cloud_provider_icon.setFixedSize(24, 24)
+        self.cloud_provider_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        provider_row = QHBoxLayout()
+        provider_row.setContentsMargins(0, 0, 0, 0)
+        provider_row.setSpacing(8)
+        provider_row.addWidget(self.cloud_provider_icon)
+        provider_row.addWidget(self.cloud_provider_combo, 1)
 
         self.cloud_endpoint_combo = ComboBox(self.cloud_card)
 
@@ -1188,17 +1197,22 @@ class ModelPage(QWidget):
         model_name_row.addWidget(self.fetch_cloud_models_button)
 
         video_fps_row = QHBoxLayout()
-        video_fps_row.setSpacing(8)
+        video_fps_row.setContentsMargins(0, 0, 0, 0)
+        video_fps_row.setSpacing(10)
+        self.cloud_video_fps_label = BodyLabel(t("model.cloud.videoFps"), self.cloud_card)
         self.cloud_video_fps_slider = Slider(Qt.Orientation.Horizontal, self.cloud_card)
         self.cloud_video_fps_slider.setRange(1, 100)
         self.cloud_video_fps_slider.setValue(int(DEFAULT_CLOUD_VIDEO_FPS * 10))
+        self.cloud_video_fps_slider.setMinimumWidth(160)
         self.cloud_video_fps_slider.setMaximumWidth(220)
         self.cloud_video_fps = LineEdit(self.cloud_card)
         self.cloud_video_fps.setPlaceholderText(f"{DEFAULT_CLOUD_VIDEO_FPS:.1f}")
         self.cloud_video_fps.setText(f"{DEFAULT_CLOUD_VIDEO_FPS:.1f}")
         self.cloud_video_fps.setMaximumWidth(72)
-        video_fps_row.addWidget(self.cloud_video_fps_slider, 1)
+        video_fps_row.addWidget(self.cloud_video_fps_label)
+        video_fps_row.addWidget(self.cloud_video_fps_slider)
         video_fps_row.addWidget(self.cloud_video_fps)
+        video_fps_row.addStretch(1)
 
         self.cloud_video_input_mode_combo = ComboBox(self.cloud_card)
         for mode_id in VIDEO_INPUT_MODE_IDS:
@@ -1249,7 +1263,7 @@ class ModelPage(QWidget):
         connection_grid.addLayout(preset_actions, 0, 4)
 
         connection_grid.addWidget(BodyLabel(t("model.cloud.provider"), self.cloud_card), 1, 0)
-        connection_grid.addWidget(self.cloud_provider_combo, 1, 1)
+        connection_grid.addLayout(provider_row, 1, 1)
         connection_grid.addWidget(BodyLabel(t("model.cloud.modelName"), self.cloud_card), 1, 2)
         connection_grid.addLayout(model_name_row, 1, 3, 1, 2)
 
@@ -1265,8 +1279,7 @@ class ModelPage(QWidget):
 
         connection_grid.addWidget(BodyLabel(t("model.cloud.videoInputMode"), self.cloud_card), 5, 0)
         connection_grid.addWidget(self.cloud_video_input_mode_combo, 5, 1)
-        connection_grid.addWidget(BodyLabel(t("model.cloud.videoFps"), self.cloud_card), 5, 2)
-        connection_grid.addLayout(video_fps_row, 5, 3, 1, 2)
+        connection_grid.addLayout(video_fps_row, 5, 2, 1, 3)
 
         connection_grid.addWidget(BodyLabel(t("model.cloud.maxOutputTokens"), self.cloud_card), 6, 0)
         connection_grid.addLayout(max_output_tokens_row, 6, 1)
@@ -1345,6 +1358,7 @@ class ModelPage(QWidget):
                 selected_name=last_cloud_preset_name(),
                 preloaded_presets=preloaded_presets,
             )
+            self._sync_cloud_provider_icon()
             self._sync_cloud_video_fps_availability()
             cloud_enabled = last_model_page_mode() == "cloud"
             blocker = QSignalBlocker(self.cloud_mode_switch)
@@ -1637,6 +1651,25 @@ class ModelPage(QWidget):
     def _current_cloud_provider_id(self) -> str:
         return normalize_cloud_provider(str(self.cloud_provider_combo.currentData() or ""))
 
+    def _sync_cloud_provider_icon(self) -> None:
+        provider = cloud_model_provider(self._current_cloud_provider_id())
+        icon_path = provider_icon_path(provider.icon_id)
+        if icon_path is None:
+            self.cloud_provider_icon.clear()
+            return
+        pixmap = QPixmap(str(icon_path))
+        if pixmap.isNull():
+            self.cloud_provider_icon.clear()
+            return
+        self.cloud_provider_icon.setPixmap(
+            pixmap.scaled(
+                self.cloud_provider_icon.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+        self.cloud_provider_icon.setToolTip(self.cloud_provider_combo.currentText())
+
     def _current_cloud_endpoint_id(self) -> str:
         return normalize_cloud_endpoint_id(
             self._current_cloud_provider_id(),
@@ -1726,6 +1759,7 @@ class ModelPage(QWidget):
             self.cloud_base_url.clear()
 
     def _on_cloud_provider_changed(self) -> None:
+        self._sync_cloud_provider_icon()
         provider = cloud_model_provider(self._current_cloud_provider_id())
         self._sync_cloud_endpoint_options(provider.default_endpoint_id)
         self._set_cloud_api_schema(provider.default_api_schema)
@@ -2754,6 +2788,7 @@ class ModelPage(QWidget):
             if not self._restoring_model_selection:
                 set_last_cloud_preset_name("")
             self.cloud_preset_name.clear()
+            self._sync_cloud_provider_icon()
             self._sync_cloud_endpoint_options(base_url=self.cloud_base_url.text().strip())
             self._apply_cloud_endpoint_to_base_url(preserve_existing=True)
             self._set_cloud_api_schema(DEFAULT_CLOUD_API_SCHEMA)
@@ -2773,6 +2808,7 @@ class ModelPage(QWidget):
             provider_index = 0
         with QSignalBlocker(self.cloud_provider_combo):
             self.cloud_provider_combo.setCurrentIndex(provider_index)
+        self._sync_cloud_provider_icon()
         self._sync_cloud_endpoint_options(preset.endpoint_id, preset.base_url)
         self._set_cloud_api_schema(preset.api_schema)
         self._set_cloud_video_input_mode(preset.video_input_mode)
