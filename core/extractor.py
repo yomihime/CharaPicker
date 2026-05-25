@@ -13,6 +13,7 @@ from core import knowledge_base as kb
 from core import source_scanner
 from core.models import (
     ChunkExtractionResult,
+    EpisodeTranscript,
     ExtractionArtifactStage,
     InsightEvent,
     InsightStatus,
@@ -35,6 +36,11 @@ from utils.cloud_model_presets import (
     load_cloud_model_presets,
     provider_requires_aliyun_extra_body,
     scale_cloud_max_output_tokens_for_video_duration,
+)
+from utils.audio_transcription import (
+    AudioTranscriptionError,
+    TranscriptionOptions,
+    transcribe_episode_audio as run_episode_audio_transcription,
 )
 from utils.ffmpeg_tool import FfmpegProcessError, probe_video_duration_seconds
 from utils.i18n import t
@@ -783,6 +789,149 @@ class Extractor(QObject):
                     seen.add(key)
                     episode_ids.append(key)
         return episode_ids
+
+    def transcribe_episode_audio(
+        self,
+        project_id: str,
+        season_id: str,
+        episode_id: str,
+        material_paths: Path | str | list[Path | str],
+        *,
+        language: str = "auto",
+        force_rebuild: bool = False,
+    ) -> EpisodeTranscript:
+        return run_episode_audio_transcription(
+            project_id,
+            season_id,
+            episode_id,
+            material_paths,
+            options=TranscriptionOptions(language=language, force_rebuild=force_rebuild),
+        )
+
+    def ensure_episode_transcripts_from_manifest(
+        self,
+        project_id: str,
+        manifest: dict[str, Any],
+        *,
+        language: str = "auto",
+        force_rebuild: bool = False,
+        emit_event: Callable[[dict], None] | None = None,
+    ) -> list[EpisodeTranscript]:
+        transcripts: list[EpisodeTranscript] = []
+        episode_inputs = self._collect_formal_episode_transcript_inputs(project_id, manifest)
+        total = len(episode_inputs)
+        for index, episode_input in enumerate(episode_inputs, start=1):
+            season_id = episode_input["season_id"]
+            episode_id = episode_input["episode_id"]
+            material_paths = episode_input["material_paths"]
+            if emit_event is not None:
+                emit_event(
+                    InsightEvent(
+                        title=t("extractor.transcript.title"),
+                        description=t(
+                            "extractor.transcript.transcribing",
+                            current=index,
+                            total=total,
+                            episode=episode_id,
+                        ),
+                        status=InsightStatus.RUNNING,
+                    ).model_dump(mode="json")
+                )
+            try:
+                transcript = run_episode_audio_transcription(
+                    project_id,
+                    season_id,
+                    episode_id,
+                    material_paths,
+                    options=TranscriptionOptions(
+                        language=language,
+                        force_rebuild=force_rebuild,
+                    ),
+                )
+            except AudioTranscriptionError as exc:
+                LOGGER.warning(
+                    "Episode transcription failed; project_id=%s season_id=%s episode_id=%s error=%s",
+                    project_id,
+                    season_id,
+                    episode_id,
+                    self._compact_exception_message(exc),
+                )
+                if emit_event is not None:
+                    emit_event(
+                        InsightEvent(
+                            title=t("extractor.transcript.title"),
+                            description=t(
+                                "extractor.transcript.failed",
+                                episode=episode_id,
+                                error=self._compact_exception_message(exc),
+                            ),
+                            status=InsightStatus.WARNING,
+                        ).model_dump(mode="json")
+                    )
+                continue
+            transcripts.append(transcript)
+            if emit_event is not None:
+                emit_event(
+                    InsightEvent(
+                        title=t("extractor.transcript.title"),
+                        description=t(
+                            "extractor.transcript.ready",
+                            episode=episode_id,
+                            count=len(transcript.segments),
+                        ),
+                        status=InsightStatus.DONE,
+                    ).model_dump(mode="json")
+                )
+        return transcripts
+
+    def _collect_formal_episode_transcript_inputs(
+        self,
+        project_id: str,
+        manifest: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        episode_inputs: list[dict[str, Any]] = []
+        for season in manifest.get("seasons", []):
+            if not isinstance(season, dict):
+                continue
+            season_id = self._manifest_string(season.get("season_id"))
+            if not season_id:
+                continue
+            for episode in season.get("episodes", []):
+                if not isinstance(episode, dict):
+                    continue
+                episode_id = self._manifest_string(episode.get("episode_id"))
+                if not episode_id:
+                    continue
+                material_paths = self._episode_material_paths(project_id, episode)
+                if material_paths:
+                    episode_inputs.append(
+                        {
+                            "season_id": season_id,
+                            "episode_id": episode_id,
+                            "material_paths": material_paths,
+                        }
+                    )
+        return episode_inputs
+
+    def _episode_material_paths(self, project_id: str, episode: dict[str, Any]) -> list[Path]:
+        material_paths: list[Path] = []
+        for chunk in episode.get("chunks", []):
+            if not isinstance(chunk, dict):
+                continue
+            source_path = self._manifest_string(chunk.get("source_path"))
+            if not source_path:
+                continue
+            material_path = self._formal_material_video_path(project_id, source_path)
+            if material_path.is_file():
+                material_paths.append(material_path)
+        if material_paths:
+            return material_paths
+
+        source_path = self._manifest_string(episode.get("source_path"))
+        if not source_path:
+            return []
+        material_path = self._formal_material_video_path(project_id, source_path)
+        return [material_path] if material_path.is_file() else []
 
     def _collect_formal_season_ids_from_manifest(self, manifest: dict[str, Any]) -> list[str]:
         season_ids: list[str] = []

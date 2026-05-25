@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from core.character_card_constants import CHARACTER_CARD_JSON_FILE_NAME, PREVIEW_CARD_ID
-from core.models import ChunkExtractionResult, ExtractionArtifactStage
+from core.models import ChunkExtractionResult, EpisodeTranscript, ExtractionArtifactStage
 from utils.paths import ensure_project_tree
 
 
@@ -98,6 +98,10 @@ def preview_episode_content_path(project_id: str, season_id: str, episode_id: st
 
 def episode_summary_path(project_id: str, season_id: str, episode_id: str) -> Path:
     return episode_path(project_id, season_id, episode_id) / "episode_summary.json"
+
+
+def episode_transcript_path(project_id: str, season_id: str, episode_id: str) -> Path:
+    return episode_path(project_id, season_id, episode_id) / "episode_transcript.json"
 
 
 def season_content_path(project_id: str, season_id: str) -> Path:
@@ -279,6 +283,23 @@ def save_episode_summary(
 
 def load_episode_summary(project_id: str, season_id: str, episode_id: str) -> dict[str, Any]:
     return read_json_object(episode_summary_path(project_id, season_id, episode_id))
+
+
+def save_episode_transcript(project_id: str, transcript: EpisodeTranscript) -> Path:
+    return write_json(
+        episode_transcript_path(
+            project_id,
+            transcript.source.season_id,
+            transcript.source.episode_id,
+        ),
+        transcript.model_dump(mode="json"),
+    )
+
+
+def load_episode_transcript(project_id: str, season_id: str, episode_id: str) -> EpisodeTranscript:
+    return EpisodeTranscript.model_validate(
+        read_json_object(episode_transcript_path(project_id, season_id, episode_id))
+    )
 
 
 def save_season_content(project_id: str, season_id: str, payload: dict[str, Any]) -> Path:

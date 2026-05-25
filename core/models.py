@@ -376,6 +376,40 @@ class ChunkExtractionResult(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list)
 
 
+class TranscriptSource(BaseModel):
+    material_path: str = ""
+    material_paths: list[str] = Field(default_factory=list)
+    source_fingerprint: str = ""
+    season_id: str = ""
+    episode_id: str = ""
+
+
+class TranscriptMetadata(BaseModel):
+    backend: str = "whisper.cpp"
+    runtime_version: str = ""
+    runtime_package: str = ""
+    runtime_path: str = ""
+    model_file: str = ""
+    model_path: str = ""
+    language: str = "auto"
+    generated_at: datetime = Field(default_factory=datetime.now)
+    cache_key: str = ""
+
+
+class TranscriptSegment(BaseModel):
+    start_seconds: float = 0.0
+    end_seconds: float = 0.0
+    text: str = ""
+
+
+class EpisodeTranscript(BaseModel):
+    schema_version: int = 1
+    source: TranscriptSource = Field(default_factory=TranscriptSource)
+    transcription: TranscriptMetadata = Field(default_factory=TranscriptMetadata)
+    segments: list[TranscriptSegment] = Field(default_factory=list)
+    plain_text: str = ""
+
+
 class ProjectPaths(BaseModel):
     root: Path
     raw: Path
