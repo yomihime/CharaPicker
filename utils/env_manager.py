@@ -13,6 +13,7 @@ MODELS_ROOT = APP_ROOT / "models"
 WHISPERCPP_ROOT = BIN_ROOT / "whisper.cpp"
 WHISPER_MODEL_ROOT = MODELS_ROOT / "whisper"
 WHISPER_RUNTIME_PATH_KEY = "tools/whispercpp/runtimePath"
+WHISPER_MODEL_NAME_KEY = "tools/whispercpp/modelName"
 LLAMACPP_CANDIDATES = (
     "llama-cli.exe",
     "llama-cli",
@@ -107,6 +108,21 @@ def clear_custom_whisper_runtime_path() -> None:
     set_global_value(WHISPER_RUNTIME_PATH_KEY, "")
 
 
+def preferred_whisper_model_name() -> str:
+    stored_value = get_global_value(WHISPER_MODEL_NAME_KEY, "")
+    if not isinstance(stored_value, str):
+        return ""
+    return stored_value.strip()
+
+
+def set_preferred_whisper_model_name(file_name: str) -> None:
+    set_global_value(WHISPER_MODEL_NAME_KEY, Path(file_name).name)
+
+
+def clear_preferred_whisper_model_name() -> None:
+    set_global_value(WHISPER_MODEL_NAME_KEY, "")
+
+
 def find_whisper_runtime_binary(bin_root: Path = BIN_ROOT) -> Path | None:
     custom_path = custom_whisper_runtime_path()
     if bin_root == BIN_ROOT and custom_path is not None and custom_path.is_file():
@@ -191,6 +207,8 @@ def find_whisper_model_file(
     preferred_name: str = "ggml-tiny.bin",
     model_root: Path = WHISPER_MODEL_ROOT,
 ) -> Path | None:
+    if model_root == WHISPER_MODEL_ROOT:
+        preferred_name = preferred_whisper_model_name() or preferred_name
     preferred = model_root / preferred_name
     if preferred.is_file():
         return preferred

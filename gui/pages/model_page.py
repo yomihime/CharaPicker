@@ -1693,6 +1693,15 @@ class ModelPage(QWidget):
         requires_custom_url = cloud_endpoint_requires_custom_base_url(provider_id, endpoint_id)
         self.cloud_base_url.setReadOnly(not requires_custom_url)
         self.cloud_base_url.setPlaceholderText(endpoint.base_url or t("model.cloud.baseUrl.placeholder"))
+        if endpoint.has_placeholder:
+            self.cloud_base_url.setToolTip(
+                t(
+                    "model.cloud.baseUrl.workspaceTooltip",
+                    token=endpoint.placeholder_token,
+                )
+            )
+        else:
+            self.cloud_base_url.setToolTip("")
         if endpoint.base_url and (not preserve_existing or not self.cloud_base_url.text().strip()):
             self.cloud_base_url.setText(endpoint.base_url)
         elif not endpoint.base_url and not preserve_existing:
@@ -1727,7 +1736,7 @@ class ModelPage(QWidget):
             LOGGER.warning("Cloud action blocked because base URL contains an unresolved placeholder")
             InfoBar.warning(
                 title=title,
-                content=t("model.cloud.models.baseUrlPlaceholder"),
+                content=t("model.cloud.models.baseUrlPlaceholder", token="{WorkspaceId}"),
                 parent=self.window(),
                 position=InfoBarPosition.TOP_RIGHT,
                 duration=5000,

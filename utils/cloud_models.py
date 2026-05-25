@@ -7,7 +7,6 @@ from utils.app_metadata import HTTP_USER_AGENT
 from utils.cloud_model_presets import (
     base_url_has_unresolved_placeholder,
     cloud_model_provider,
-    normalize_cloud_api_schema,
 )
 from utils.network_middleware import NetworkMiddlewareError, read_json, redact_sensitive_text
 
@@ -71,13 +70,13 @@ def fetch_cloud_models(
     api_schema: str = "",
 ) -> list[str]:
     provider_config = cloud_model_provider(provider)
-    normalized_schema = normalize_cloud_api_schema(api_schema, provider_config.provider_id)
     if base_url_has_unresolved_placeholder(base_url):
         raise CloudModelListError("API address still contains an unresolved placeholder.")
-    if normalized_schema != "openai_chat_completions":
-        raise CloudModelListError(
-            f"Model list is not supported for API schema: {normalized_schema}"
-        )
     if provider_config.model_list_kind == "openai_compatible":
+        LOGGER.info(
+            "Using OpenAI-compatible model-list endpoint; provider=%s api_schema=%s",
+            provider_config.provider_id,
+            api_schema or "",
+        )
         return fetch_openai_compatible_models(base_url, api_key)
     raise CloudModelListError(f"Unsupported cloud model list kind: {provider_config.model_list_kind}")

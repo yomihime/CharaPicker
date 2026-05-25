@@ -5,7 +5,7 @@ import logging
 import re
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, QRegularExpression, QSize, Qt, QThread, pyqtSignal
+from PyQt6.QtCore import QObject, QRegularExpression, QSignalBlocker, QSize, Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFontMetrics, QKeySequence, QRegularExpressionValidator, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -71,8 +71,10 @@ from utils.ffmpeg_tool import (
 from utils.env_manager import (
     WhisperStatus,
     clear_custom_whisper_runtime_path,
+    clear_preferred_whisper_model_name,
     is_whisper_runtime_usable,
     set_custom_whisper_runtime_path,
+    set_preferred_whisper_model_name,
     whisper_status,
 )
 from utils.material_processing_events import FFMPEG_EVENT_PREFIX
@@ -107,6 +109,8 @@ from utils.whispercpp_downloader import (
     WhisperCppDownloadCancelled,
     WhisperCppDownloadError,
     download_and_install_whisper,
+    installed_whisper_model_ids,
+    installed_whisper_runtime_package_ids,
     remove_installed_whisper,
     whisper_model_packages,
     whisper_runtime_packages,
@@ -146,6 +150,33 @@ def _format_whisper_status_short(status: WhisperStatus) -> str:
     if not status.runtime_ready:
         return t("project.whisper.status.missingRuntimeShort")
     return t("project.whisper.status.missingModelShort")
+
+
+def _whisper_runtime_package_id_from_path(runtime_path: Path | None) -> str:
+    if runtime_path is None:
+        return ""
+    path_parts = set(runtime_path.parts)
+    for package in whisper_runtime_packages():
+        if package.package_id in path_parts:
+            return package.package_id
+    normalized_path = runtime_path.as_posix().lower()
+    if any(token in normalized_path for token in ("cuda", "cublas", "cu12", "cu13")):
+        return "win-x64-cuda"
+    if "blas" in normalized_path:
+        return "win-x64-blas"
+    if "whisper" in normalized_path and "x64" in normalized_path:
+        return "win-x64-cpu"
+    return ""
+
+
+def _whisper_model_id_from_path(model_path: Path | None) -> str:
+    if model_path is None:
+        return ""
+    file_name = model_path.name.lower()
+    for package in whisper_model_packages():
+        if package.file_name.lower() == file_name:
+            return package.model_id
+    return ""
 
 
 class FfmpegDownloadWorker(QObject):
@@ -233,7 +264,7 @@ class FfmpegDownloadDialog(FluentDialog):
 
 
 class WhisperDownloadWorker(QObject):
-    progressChanged = pyqtSignal(int, str)
+    progressChanged = pyqtSignal(int, str, str)
     succeeded = pyqtSignal(str, str)
     failed = pyqtSignal(str)
     cancelled = pyqtSignal()
@@ -258,7 +289,7 @@ class WhisperDownloadWorker(QObject):
             runtime_path, model_path = download_and_install_whisper(
                 runtime_package_id=self.runtime_package_id,
                 model_id=self.model_id,
-                progress=lambda value, step: self.progressChanged.emit(value, step),
+                progress=lambda value, step, detail: self.progressChanged.emit(value, step, detail),
                 cancelled=lambda: self._cancel_requested,
             )
         except WhisperCppDownloadCancelled:
@@ -351,8 +382,6 @@ class WhisperSetupDialog(FluentDialog):
         runtime_row.setSpacing(8)
         runtime_row.addWidget(BodyLabel(t("project.whisper.advanced.runtime"), self.dialog_card))
         self.runtime_combo = ComboBox(self.dialog_card)
-        for package in whisper_runtime_packages():
-            self.runtime_combo.addItem(t(package.label_key), userData=package.package_id)
         runtime_row.addWidget(self.runtime_combo, 1)
         self.content_layout.addLayout(runtime_row)
 
@@ -360,11 +389,6 @@ class WhisperSetupDialog(FluentDialog):
         model_row.setSpacing(8)
         model_row.addWidget(BodyLabel(t("project.whisper.advanced.model"), self.dialog_card))
         self.model_combo = ComboBox(self.dialog_card)
-        for package in whisper_model_packages():
-            self.model_combo.addItem(
-                t(package.label_key, size=package.size_label),
-                userData=package.model_id,
-            )
         model_row.addWidget(self.model_combo, 1)
         self.content_layout.addLayout(model_row)
 
@@ -393,6 +417,39 @@ class WhisperSetupDialog(FluentDialog):
 
     def set_status(self, status: WhisperStatus) -> None:
         self.status_label.setText(_format_whisper_status_text(status))
+        self._refresh_option_labels(status)
+
+    def _refresh_option_labels(self, status: WhisperStatus) -> None:
+        runtime_selection = str(self.runtime_combo.currentData() or "")
+        model_selection = str(self.model_combo.currentData() or "")
+        current_runtime_package_id = _whisper_runtime_package_id_from_path(status.runtime_path)
+        current_model_id = _whisper_model_id_from_path(status.model_path)
+        installed_runtime_ids = installed_whisper_runtime_package_ids()
+        installed_model_ids = installed_whisper_model_ids()
+
+        with QSignalBlocker(self.runtime_combo):
+            self.runtime_combo.clear()
+            for package in whisper_runtime_packages():
+                label = t(package.label_key)
+                if package.package_id in installed_runtime_ids:
+                    label = t("project.whisper.option.downloaded", label=label)
+                self.runtime_combo.addItem(label, userData=package.package_id)
+            runtime_target = runtime_selection or current_runtime_package_id or DEFAULT_WHISPER_RUNTIME_PACKAGE_ID
+            runtime_index = self.runtime_combo.findData(runtime_target)
+            if runtime_index >= 0:
+                self.runtime_combo.setCurrentIndex(runtime_index)
+
+        with QSignalBlocker(self.model_combo):
+            self.model_combo.clear()
+            for package in whisper_model_packages():
+                label = t(package.label_key, size=package.size_label)
+                if package.model_id in installed_model_ids:
+                    label = t("project.whisper.option.downloaded", label=label)
+                self.model_combo.addItem(label, userData=package.model_id)
+            model_target = model_selection or current_model_id or DEFAULT_WHISPER_MODEL_ID
+            model_index = self.model_combo.findData(model_target)
+            if model_index >= 0:
+                self.model_combo.setCurrentIndex(model_index)
 
     def set_busy(self, busy: bool) -> None:
         for widget in (
@@ -1468,12 +1525,15 @@ class ProjectPage(QWidget):
         self._whisper_download_thread.finished.connect(self._clear_whisper_download_worker)
         self._whisper_download_thread.start()
 
-    def _update_whisper_download_progress(self, value: int, step: str) -> None:
+    def _update_whisper_download_progress(self, value: int, step: str, detail: str) -> None:
         if self._whisper_download_dialog is None:
             return
+        message = t(f"project.whisper.download.progress.{step}")
+        if detail:
+            message = t("project.whisper.download.progress.detail", message=message, detail=detail)
         self._whisper_download_dialog.set_progress(
             value,
-            t(f"project.whisper.download.progress.{step}"),
+            message,
         )
 
     def _finish_whisper_download_success(self, runtime_path: str, model_path: str) -> None:
@@ -1481,6 +1541,8 @@ class ProjectPage(QWidget):
             self._whisper_download_dialog.mark_finished()
             self._whisper_download_dialog.set_progress(100, t("project.whisper.download.progress.done"))
             self._whisper_download_dialog.close()
+        set_custom_whisper_runtime_path(runtime_path)
+        set_preferred_whisper_model_name(Path(model_path).name)
         self._whisper_status_cache = whisper_status()
         self._refresh_whisper_state()
         InfoBar.success(
@@ -1598,6 +1660,7 @@ class ProjectPage(QWidget):
         try:
             remove_installed_whisper()
             clear_custom_whisper_runtime_path()
+            clear_preferred_whisper_model_name()
         except WhisperCppDownloadError as exc:
             InfoBar.warning(
                 title=t("project.whisper.delete.failure.title"),
