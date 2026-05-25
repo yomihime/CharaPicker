@@ -1,6 +1,6 @@
 # CharaPicker 文档索引
 
-最近整理日期：2026-05-24。
+最近整理日期：2026-05-25。
 
 `docs/` 是 CharaPicker 的正式专题文档目录。根目录 `README.md` 负责项目首页说明；根目录和各主要代码目录中的 `ARCHITECTURE.md` 负责就近说明目录职责。已完成的一次性开发计划默认移入 `archive/`，主目录只保留稳定说明、仍有效路线和当前后续队列。
 
@@ -18,6 +18,7 @@
 - [抽出ワークフロー説明](extraction-workflow.ja_JP.md)
 - [产品与设计规范](product-design-guidelines.zh_CN.md)
 - [运行时中间件设计说明](runtime-middleware.zh_CN.md)
+- [素材来源与授权声明](asset-material-declaration.zh_CN.md)
 
 ## 剩余项目队列
 
@@ -27,6 +28,7 @@
 2. [提取与角色成长编译路线](extraction-development-roadmap.zh_CN.md)：Extract Once、知识库和角色状态编译的长期目标与验收基准。
 3. [真实预览结果后续计划](preview-real-result-ingestion-plan.zh_CN.md)：文本/字幕/音频、图片/漫画/混合媒体和角色卡质量强化的后续专项计划。
 4. [Proxy 运行时网络能力计划](proxy-runtime-network-plan.zh_CN.md)：内置代理设置、全局网络中间件、连通性测试和 DashScope 代理适配的 P3 专项计划。
+5. [多供应商与多 API 规范接入计划](multi-provider-api-support-plan.zh_CN.md)：供应商 endpoint 预设、API 规范、视频输入方式、供应商图标和音频转写的后续接入计划。
 
 ## 发布与维护
 
