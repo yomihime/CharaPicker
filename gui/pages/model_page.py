@@ -4,7 +4,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QEvent, QObject, QSignalBlocker, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QSignalBlocker, QSize, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -29,8 +30,6 @@ from qfluentwidgets import (
     SwitchButton,
 )
 
-from gui.widgets.dialog_middleware import FluentDialog
-from gui.widgets.streaming_text_session import StreamingTextSession
 from gui.pages.model_test_helpers import (
     build_data_url as _build_data_url,
     format_token_usage_line as _format_token_usage_line,
@@ -40,6 +39,9 @@ from gui.pages.model_test_helpers import (
     token_usage_from_metadata as _token_usage_from_metadata,
     token_usage_log_fields as _token_usage_log_fields,
 )
+from gui.widgets.dialog_middleware import FluentDialog
+from gui.widgets.streaming_text_session import StreamingTextSession
+from res.provider_icons import provider_icon_path
 from utils.cloud_models import CloudModelListError, fetch_cloud_models
 from utils.cloud_model_presets import (
     CLOUD_MAX_OUTPUT_TOKENS_MAX,
@@ -1110,9 +1112,16 @@ class ModelPage(QWidget):
         preset_actions.addWidget(self.delete_cloud_preset_button)
 
         self.cloud_provider_combo = ComboBox(self.cloud_card)
+        self.cloud_provider_combo.setIconSize(QSize(20, 20))
         for provider_id in CLOUD_PROVIDER_IDS:
             provider = cloud_model_provider(provider_id)
+            item_index = self.cloud_provider_combo.count()
             self.cloud_provider_combo.addItem(t(provider.label_key), provider.provider_id)
+            icon_path = provider_icon_path(provider.icon_id)
+            if icon_path is not None:
+                icon = QIcon(str(icon_path))
+                if not icon.isNull():
+                    self.cloud_provider_combo.setItemIcon(item_index, icon)
 
         self.cloud_endpoint_combo = ComboBox(self.cloud_card)
 
