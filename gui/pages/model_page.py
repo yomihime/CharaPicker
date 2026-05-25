@@ -1059,11 +1059,11 @@ class ModelPage(QWidget):
 
         self.test_local_model_button = PushButton(t("model.local.test"), self.local_card)
         self.local_test_type_combo = ComboBox(self.local_card)
-        self.local_test_type_combo.addItem(t("model.test.type.all"), "all")
-        self.local_test_type_combo.addItem(t("model.test.type.text"), "text")
-        self.local_test_type_combo.addItem(t("model.test.type.image"), "image")
-        self.local_test_type_combo.addItem(t("model.test.type.audio"), "audio")
-        self.local_test_type_combo.addItem(t("model.test.type.video"), "video")
+        self.local_test_type_combo.addItem(t("model.test.type.all"), userData="all")
+        self.local_test_type_combo.addItem(t("model.test.type.text"), userData="text")
+        self.local_test_type_combo.addItem(t("model.test.type.image"), userData="image")
+        self.local_test_type_combo.addItem(t("model.test.type.audio"), userData="audio")
+        self.local_test_type_combo.addItem(t("model.test.type.video"), userData="video")
         self.local_test_result = PlainTextEdit(self.local_card)
         self.local_test_result.setPlaceholderText(t("model.local.test.placeholder"))
         self.local_test_result.setReadOnly(True)
@@ -1116,7 +1116,7 @@ class ModelPage(QWidget):
         for provider_id in CLOUD_PROVIDER_IDS:
             provider = cloud_model_provider(provider_id)
             item_index = self.cloud_provider_combo.count()
-            self.cloud_provider_combo.addItem(t(provider.label_key), provider.provider_id)
+            self.cloud_provider_combo.addItem(t(provider.label_key), userData=provider.provider_id)
             icon_path = provider_icon_path(provider.icon_id)
             if icon_path is not None:
                 icon = QIcon(str(icon_path))
@@ -1130,7 +1130,10 @@ class ModelPage(QWidget):
 
         self.cloud_api_schema_combo = ComboBox(self.cloud_card)
         for schema_id in API_SCHEMA_IDS:
-            self.cloud_api_schema_combo.addItem(t(f"model.cloud.apiSchema.{schema_id}"), schema_id)
+            self.cloud_api_schema_combo.addItem(
+                t(f"model.cloud.apiSchema.{schema_id}"),
+                userData=schema_id,
+            )
 
         self.cloud_api_key = PasswordLineEdit(self.cloud_card)
         self.cloud_api_key.setPlaceholderText(t("model.cloud.apiKey.placeholder"))
@@ -1160,7 +1163,7 @@ class ModelPage(QWidget):
         for mode_id in VIDEO_INPUT_MODE_IDS:
             self.cloud_video_input_mode_combo.addItem(
                 t(f"model.cloud.videoInputMode.{mode_id}"),
-                mode_id,
+                userData=mode_id,
             )
 
         max_output_tokens_row = QHBoxLayout()
@@ -1184,11 +1187,11 @@ class ModelPage(QWidget):
         self.test_cloud_model_button = PushButton(t("model.cloud.test"), self.cloud_card)
         self.cloud_test_action_label = SecretTapLabel(t("model.cloud.test.action"), self.cloud_card)
         self.cloud_test_type_combo = ComboBox(self.cloud_card)
-        self.cloud_test_type_combo.addItem(t("model.test.type.all"), "all")
-        self.cloud_test_type_combo.addItem(t("model.test.type.text"), "text")
-        self.cloud_test_type_combo.addItem(t("model.test.type.image"), "image")
-        self.cloud_test_type_combo.addItem(t("model.test.type.audio"), "audio")
-        self.cloud_test_type_combo.addItem(t("model.test.type.video"), "video")
+        self.cloud_test_type_combo.addItem(t("model.test.type.all"), userData="all")
+        self.cloud_test_type_combo.addItem(t("model.test.type.text"), userData="text")
+        self.cloud_test_type_combo.addItem(t("model.test.type.image"), userData="image")
+        self.cloud_test_type_combo.addItem(t("model.test.type.audio"), userData="audio")
+        self.cloud_test_type_combo.addItem(t("model.test.type.video"), userData="video")
         self.cloud_test_result = PlainTextEdit(self.cloud_card)
         self.cloud_test_result.setPlaceholderText(t("model.cloud.test.placeholder"))
         self.cloud_test_result.setReadOnly(True)
@@ -1477,7 +1480,7 @@ class ModelPage(QWidget):
         try:
             self.local_model_combo.clear()
             if not candidates:
-                self.local_model_combo.addItem(t("model.local.models.empty"), "")
+                self.local_model_combo.addItem(t("model.local.models.empty"), userData="")
                 self.test_local_model_button.setEnabled(False)
                 return
 
@@ -1485,7 +1488,7 @@ class ModelPage(QWidget):
             selected_index = 0
             for index, model_path in enumerate(candidates):
                 display_path = model_path.as_posix()
-                self.local_model_combo.addItem(display_path, display_path)
+                self.local_model_combo.addItem(display_path, userData=display_path)
                 if display_path == selected_path:
                     selected_index = index
             self.local_model_combo.setCurrentIndex(selected_index)
@@ -1648,7 +1651,10 @@ class ModelPage(QWidget):
             with QSignalBlocker(self.cloud_endpoint_combo):
                 self.cloud_endpoint_combo.clear()
                 for endpoint in cloud_provider_endpoints(provider_id):
-                    self.cloud_endpoint_combo.addItem(t(endpoint.label_key), endpoint.endpoint_id)
+                    self.cloud_endpoint_combo.addItem(
+                        t(endpoint.label_key),
+                        userData=endpoint.endpoint_id,
+                    )
                 index = self.cloud_endpoint_combo.findData(endpoint_id)
                 if index < 0:
                     index = 0
