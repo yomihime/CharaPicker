@@ -120,7 +120,7 @@ the main targets for planned cleanup.
   probing, command construction, execution, progress parsing, and rollback helpers.
   It is important but can be handled after the knowledge-base and extraction path.
 - Some documentation is ahead of or behind code. For example,
-  `docs/preview-real-result-ingestion-plan.zh_CN.md` contains a status note that
+  `docs/plans/preview-real-result-ingestion-plan.zh_CN.md` contains a status note that
   says parts of the plan were superseded, while later text still describes preview
   as placeholder-based. Future implementation must re-check current code before
   treating that document as factual.

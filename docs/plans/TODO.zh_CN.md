@@ -15,7 +15,7 @@
 
 | 顺序 | 待办 | 优先级 | 规模 | 主要验收点 |
 | --- | --- | --- | --- | --- |
-| 3 | 文本、字幕与音频转写接入 | 高 | 大 | 没有视频 chunk 但存在可读文本、字幕或转写结果时，预览能生成真实 `ChunkExtractionResult`，来源路径和证据可追溯。详见 [真实预览结果后续计划](../preview-real-result-ingestion-plan.zh_CN.md)。 |
+| 3 | 文本、字幕与音频转写接入 | 高 | 大 | 没有视频 chunk 但存在可读文本、字幕或转写结果时，预览能生成真实 `ChunkExtractionResult`，来源路径和证据可追溯。详见 [真实预览结果后续计划](preview-real-result-ingestion-plan.zh_CN.md)。 |
 | 4 | 图片、漫画与混合媒体接入 | 中 | 大 | 图片、漫画页组和混合媒体能映射到稳定 season/episode/chunk，并通过 `utils.ai_model_middleware` 生成与视频/text 一致结构的知识库结果。 |
 
 ## P2：角色卡质量后续

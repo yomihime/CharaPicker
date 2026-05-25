@@ -97,12 +97,12 @@ build.bat
 - [根目录架构说明](ARCHITECTURE.md)
 - [项目文档索引](docs/README.md)
 - [docs 架构说明](docs/ARCHITECTURE.md)
-- [提取工作流说明](docs/extraction-workflow.zh_CN.md)
-- [提取与角色成长编译路线](docs/extraction-development-roadmap.zh_CN.md)
-- [产品与设计规范](docs/product-design-guidelines.zh_CN.md)
-- [运行时中间件设计说明](docs/runtime-middleware.zh_CN.md)
-- [打包与发布规范](docs/release-packaging.zh_CN.md)
-- [文档维护规范](docs/documentation-maintenance.zh_CN.md)
+- [提取工作流说明](docs/reference/extraction-workflow.zh_CN.md)
+- [提取与角色成长编译路线](docs/plans/extraction-development-roadmap.zh_CN.md)
+- [产品与设计规范](docs/reference/product-design-guidelines.zh_CN.md)
+- [运行时中间件设计说明](docs/reference/runtime-middleware.zh_CN.md)
+- [打包与发布规范](docs/reference/release-packaging.zh_CN.md)
+- [文档维护规范](docs/reference/documentation-maintenance.zh_CN.md)
 
 ## 开发说明
 

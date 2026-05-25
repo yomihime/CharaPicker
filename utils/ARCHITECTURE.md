@@ -78,4 +78,4 @@
 - 模型执行必须通过 `call_text_model()`、`call_image_model()` 或 `call_video_model()` 进入后端。
 - 新增模型任务时，默认 prompt 正文放入 `res/default_prompts.json`；业务代码不得为了临时修复而复制、拼接或长期硬编码 prompt 指令文本。
 - 日志不得输出 API Key、完整密钥、隐私文本或大型原始素材内容。
-- 运行时中间件的详细职责边界见 [`../docs/runtime-middleware.zh_CN.md`](../docs/runtime-middleware.zh_CN.md)。
+- 运行时中间件的详细职责边界见 [`../docs/reference/runtime-middleware.zh_CN.md`](../docs/reference/runtime-middleware.zh_CN.md)。

@@ -2,7 +2,7 @@
 
 最近核对日期：2026-05-24。
 
-本文面向项目开发者，保留 Extract Once、知识库和角色成长编译的长期目标与验收基准。它不是当前剩余任务清单；正式视频提取 MVP 与角色卡最终编译基础生命周期已完成，当前队列以 [TODO List](plans/TODO.zh_CN.md) 和 [真实预览结果后续计划](preview-real-result-ingestion-plan.zh_CN.md) 为准。实施前必须重新核对当前代码。
+本文面向项目开发者，保留 Extract Once、知识库和角色成长编译的长期目标与验收基准。它不是当前剩余任务清单；正式视频提取 MVP 与角色卡最终编译基础生命周期已完成，当前队列以 [TODO List](TODO.zh_CN.md) 和 [真实预览结果后续计划](preview-real-result-ingestion-plan.zh_CN.md) 为准。实施前必须重新核对当前代码。
 
 ## 1. 开发原则
 

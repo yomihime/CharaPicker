@@ -52,4 +52,4 @@
 - 写入 JSON 时保持 UTF-8 和结构化格式。
 - 正式角色卡、预览草稿和导出产物路径必须隔离：正式卡只在 `knowledge_base/character_cards/`，预览草稿只在 `knowledge_base/preview_character_cards/`，导出只在 `output/character_cards/`。
 - 后续新增项目子目录时，同步更新本说明和路径工具。
-- 修改知识库结构时，同步核对 `docs/extraction-workflow.zh_CN.md` 和 `docs/extraction-development-roadmap.zh_CN.md`，避免把 roadmap 当成已实现事实。
+- 修改知识库结构时，同步核对 `docs/reference/extraction-workflow.zh_CN.md` 和 `docs/plans/extraction-development-roadmap.zh_CN.md`，避免把 roadmap 当成已实现事实。

@@ -127,7 +127,7 @@ network:
 - `utils/llamacpp_downloader.py`：release 查询和下载改走 `network_middleware`。
 - `gui/pages/settings_page.py`：新增代理设置控件和保存信号。
 - `gui/pages/settings_page.py` 或专用 worker：连通性测试必须通过 `network_middleware` 发起请求，保持与真实联网入口一致的代理规则。
-- `utils/ARCHITECTURE.md`、`docs/runtime-middleware.zh_CN.md`：功能落地后补充网络中间件职责边界。
+- `utils/ARCHITECTURE.md`、`docs/reference/runtime-middleware.zh_CN.md`：功能落地后补充网络中间件职责边界。
 
 ## 8. 里程碑
 
