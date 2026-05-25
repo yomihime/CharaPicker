@@ -256,11 +256,10 @@ def call_audio_model(
     *,
     on_stream_delta: Callable[[str], None] | None = None,
 ) -> ModelCallResult:
+    if request.backend == "dashscope":
+        return _call_model(request.model_copy(update={"stream": False}))
     if request.backend != "openai_compatible":
-        raise ModelCallError(
-            "Audio input is only supported through OpenAI-compatible Chat Completions "
-            "in this build."
-        )
+        raise ModelCallError("Audio input is not supported by the selected model backend.")
     extra_body = dict(request.extra_body)
     extra_body.setdefault("modalities", ["text"])
     return _call_model(
@@ -407,6 +406,22 @@ def _to_dashscope_message(message: ModelMessage) -> dict[str, Any]:
                 if isinstance(fps, (int, float)):
                     video_part["fps"] = fps
                 content.append(video_part)
+            continue
+        if "audio" in item:
+            audio = item.get("audio")
+            if isinstance(audio, str):
+                content.append({"audio": _to_dashscope_file_reference(audio)})
+            continue
+        if item_type == "audio_url":
+            audio_url = item.get("audio_url")
+            if isinstance(audio_url, dict) and isinstance(audio_url.get("url"), str):
+                content.append({"audio": _to_dashscope_file_reference(audio_url["url"])})
+            continue
+        if item_type == "input_audio":
+            input_audio = item.get("input_audio")
+            if isinstance(input_audio, dict) and isinstance(input_audio.get("data"), str):
+                content.append({"audio": _to_dashscope_file_reference(input_audio["data"])})
+            continue
     return {"role": message.role, "content": content}
 
 

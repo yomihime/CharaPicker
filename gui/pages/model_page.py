@@ -180,6 +180,14 @@ def _model_supports_audio_understanding(provider: str, model_name: str) -> bool:
     return True
 
 
+def _audio_backend_for_request(provider: str, api_schema: str) -> str:
+    provider_id = normalize_cloud_provider(provider)
+    normalized_schema = normalize_cloud_api_schema(api_schema, provider_id)
+    if provider_id == CLOUD_PROVIDER_ALIYUN_BAILIAN and normalized_schema == "dashscope_native":
+        return "dashscope"
+    return cloud_model_provider(provider_id).backend_for("audio")
+
+
 def _audio_input_support_status(
     provider: str,
     api_schema: str,
@@ -190,12 +198,12 @@ def _audio_input_support_status(
     if model_name and not _model_supports_audio_understanding(provider, model_name):
         return ("model_unsupported", t("model.cloud.test.unsupported.audioModel"))
     normalized_schema = normalize_cloud_api_schema(api_schema, provider)
-    if (
-        normalized_schema != "openai_chat_completions"
-        or cloud_model_provider(provider).backend_for("audio") != "openai_compatible"
-    ):
-        return ("api_unsupported", t("model.cloud.test.unsupported.audioApi"))
-    return None
+    backend = _audio_backend_for_request(provider, normalized_schema)
+    if normalized_schema == "openai_chat_completions" and backend == "openai_compatible":
+        return None
+    if normalized_schema == "dashscope_native" and backend == "dashscope":
+        return None
+    return ("api_unsupported", t("model.cloud.test.unsupported.audioApi"))
 
 
 EASTER_PROMPT_OVERRIDE = (
@@ -471,7 +479,7 @@ class CloudAudioTestWorker(QObject):
                 raise ModelMiddlewareError(f"{t(f'model.cloud.test.status.{status}')}: {message}")
             request = ModelCallRequest(
                 purpose="connectivity_test_audio",
-                backend=cloud_model_provider(self.provider).backend_for("audio"),
+                backend=_audio_backend_for_request(self.provider, self.api_schema),
                 model_name=self.model_name,
                 base_url=self.base_url,
                 api_key=self.api_key,
@@ -794,7 +802,7 @@ class CloudAllTestWorker(QObject):
             return self._unsupported_section("audio", status, message)
         request = ModelCallRequest(
             purpose="connectivity_test_audio",
-            backend=cloud_model_provider(self.provider).backend_for("audio"),
+            backend=_audio_backend_for_request(self.provider, self.api_schema),
             model_name=self.model_name,
             base_url=self.base_url,
             api_key=self.api_key,
