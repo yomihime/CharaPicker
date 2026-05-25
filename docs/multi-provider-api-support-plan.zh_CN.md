@@ -858,6 +858,17 @@ python -m ruff check utils gui core
 - 需要 transcript 的流程在 Whisper 缺失时给出明确选择。
 - episode transcript 可复用，不重复转写同一素材。
 
+执行记录（2026-05-25）：
+
+- 已全量搜索 Python 源码中的中文文案；除 `utils/i18n.py` 语言名和模型页固定测试 prompt 外，新增用户可见文案均已进入四个 `i18n/*.json`。
+- 已搜索 `dashscope.aliyuncs.com`、`dashscope-intl`、`dashscope-us`、`cn-hongkong` 和 `maas.aliyuncs`；相关字符串保留在 endpoint 预设和 DashScope URL 归一化中，`gui/` 与 `core/` 不再用旧域名字符串判断阿里行为。
+- 已搜索 `Whisper` / `whisper`；下载、检测、安装、删除、转写和 transcript 缓存逻辑位于 `utils/`，页面层只负责状态展示、用户触发和 Qt worker 桥接。
+- 已抽查模型调用、下载器、转写和页面 worker 日志；日志只记录 endpoint、模型名、状态、路径、计数、token usage 或脱敏错误，不输出完整 API Key、完整 transcript、完整请求体或大型素材内容。
+- `docs/asset-material-declaration.zh_CN.md` 已记录新增的 `res/provider_icons/*.svg` 随包资源；`core/`、`utils/`、`projects/`、`res/` 的架构说明已随对应里程碑更新。
+- 已运行：`python -m compileall utils gui core`、`conda run -n CharaPicker python -m compileall utils gui core`、`python -m ruff check utils gui core`、对四个 `i18n/*.json` 分别执行 `python -m json.tool`、`python -m json.tool res\default_prompts.json`、`git diff --check`。
+- 已做轻量冒烟：旧 `openaiCompatible` 预设可归一化；阿里 `cn/intl/us/hk/eu/custom` endpoints 可枚举；模型页能力状态 helper 在 `CharaPicker` conda 环境可导入并返回预期状态。
+- 未执行真实联网 API 与完整 GUI 人工验收；这些需要有效供应商 API Key、可用模型和用户侧交互试用。
+
 建议提交：`test: verify multi-provider and audio workflows`
 
 ## 17. 实施顺序和提交分组
