@@ -90,6 +90,7 @@ from utils.ai_model_middleware import (
     ModelMiddlewareError,
     ModelCallRequest,
     ModelMessage,
+    call_audio_model,
     call_image_model,
     call_text_model,
     call_video_model,
@@ -98,6 +99,7 @@ from utils.ai_model_middleware import (
 
 TEST_MEDIA_ROOT = APP_ROOT / "res" / "test_media"
 IMAGE_TEST_ASSET = TEST_MEDIA_ROOT / "model_test_input.jpg"
+AUDIO_TEST_ASSET = TEST_MEDIA_ROOT / "model_test_input.wav"
 VIDEO_TEST_ASSET = TEST_MEDIA_ROOT / "model_test_input.mp4"
 API_SCHEMA_IDS = ("openai_chat_completions", "dashscope_native")
 VIDEO_INPUT_MODE_IDS = (
@@ -165,6 +167,18 @@ def _video_mode_support_status(provider: str, video_input_mode: str) -> tuple[st
     if mode in {"frame_sampling_with_transcript", "audio_transcript_only"}:
         return ("skipped", t("model.cloud.test.unsupported.transcriptMode"))
     return ("api_unsupported", t("model.cloud.test.unsupported.video"))
+
+
+def _audio_input_support_status(provider: str, api_schema: str) -> tuple[str, str] | None:
+    if not provider_supports_capability(provider, "audio_understanding"):
+        return ("model_unsupported", t("model.cloud.test.unsupported.audio"))
+    normalized_schema = normalize_cloud_api_schema(api_schema, provider)
+    if (
+        normalized_schema != "openai_chat_completions"
+        or cloud_model_provider(provider).backend_for("audio") != "openai_compatible"
+    ):
+        return ("api_unsupported", t("model.cloud.test.unsupported.audioApi"))
+    return None
 
 
 EASTER_PROMPT_OVERRIDE = (
@@ -394,6 +408,99 @@ class CloudImageTestWorker(QObject):
             self.finished.emit()
 
 
+class CloudAudioTestWorker(QObject):
+    progressChanged = pyqtSignal(str)
+    succeeded = pyqtSignal(dict)
+    failed = pyqtSignal(str)
+    finished = pyqtSignal()
+
+    def __init__(
+        self,
+        *,
+        provider: str,
+        api_schema: str,
+        base_url: str,
+        api_key: str,
+        model_name: str,
+        audio_path: Path,
+        max_output_tokens: int,
+        locale: str,
+    ) -> None:
+        super().__init__()
+        self.provider = provider
+        self.api_schema = api_schema
+        self.base_url = base_url
+        self.api_key = api_key
+        self.model_name = model_name
+        self.audio_path = audio_path
+        self.max_output_tokens = max_output_tokens
+        self.locale = locale
+
+    def run(self) -> None:
+        LOGGER.info(
+            "Cloud audio understanding test started; base_url=%s model=%s audio=%s",
+            self.base_url,
+            self.model_name,
+            self.audio_path,
+        )
+        try:
+            unsupported = _audio_input_support_status(self.provider, self.api_schema)
+            if unsupported is not None:
+                status, message = unsupported
+                raise ModelMiddlewareError(f"{t(f'model.cloud.test.status.{status}')}: {message}")
+            request = ModelCallRequest(
+                purpose="connectivity_test_audio",
+                backend=cloud_model_provider(self.provider).backend_for("audio"),
+                model_name=self.model_name,
+                base_url=self.base_url,
+                api_key=self.api_key,
+                temperature=0,
+                max_tokens=self.max_output_tokens,
+                stream=True,
+                extra_body=_cloud_request_extra_body(self.provider),
+                messages=[
+                    ModelMessage(role="system", content="You are an audio connectivity test assistant."),
+                    ModelMessage(
+                        role="user",
+                        content=[
+                            {
+                                "type": "text",
+                                "text": (
+                                    f"{_response_language_instruction(self.locale)} "
+                                    "Listen to the uploaded audio. Say briefly what you heard. "
+                                    "Start with CHARA_AUDIO_OK: "
+                                ),
+                            },
+                            {
+                                "type": "audio",
+                                "audio": str(self.audio_path.resolve()),
+                                "format": "wav",
+                            },
+                        ],
+                    ),
+                ],
+                metadata={"scene": "model_page_audio_test", "api_schema": self.api_schema},
+            )
+            result = call_audio_model(
+                request,
+                on_stream_delta=lambda delta: self.progressChanged.emit(delta),
+            )
+        except (ModelMiddlewareError, OSError, ValueError) as exc:
+            LOGGER.warning("Cloud audio understanding test failed", exc_info=True)
+            self.failed.emit(str(exc))
+        else:
+            prompt_tokens, completion_tokens, total_tokens = _token_usage_log_fields(result.metadata)
+            LOGGER.info(
+                "Cloud audio understanding test succeeded; prompt_tokens=%s completion_tokens=%s total_tokens=%s",
+                prompt_tokens,
+                completion_tokens,
+                total_tokens,
+            )
+            self.succeeded.emit({"content": result.content, "token_usage": _token_usage_from_metadata(result.metadata)})
+        finally:
+            self.finished.emit()
+
+
 class CloudVideoTestWorker(QObject):
     progressChanged = pyqtSignal(str)
     succeeded = pyqtSignal(dict)
@@ -502,7 +609,9 @@ class CloudAllTestWorker(QObject):
         api_key: str,
         model_name: str,
         image_path: Path,
+        audio_path: Path,
         video_path: Path,
+        api_schema: str,
         video_fps: float,
         video_input_mode: str,
         max_output_tokens: int,
@@ -515,7 +624,9 @@ class CloudAllTestWorker(QObject):
         self.api_key = api_key
         self.model_name = model_name
         self.image_path = image_path
+        self.audio_path = audio_path
         self.video_path = video_path
+        self.api_schema = api_schema
         self.video_fps = video_fps
         self.video_input_mode = video_input_mode
         self.max_output_tokens = max_output_tokens
@@ -528,6 +639,7 @@ class CloudAllTestWorker(QObject):
             results = {
                 "text": self._run_text_test(),
                 "image": self._run_image_test(),
+                "audio": self._run_audio_test(),
                 "video": self._run_video_test(),
             }
             self.succeeded.emit(results)
@@ -542,6 +654,11 @@ class CloudAllTestWorker(QObject):
         try:
             if section == "image":
                 result = call_image_model(
+                    request,
+                    on_stream_delta=lambda delta: self.progressChanged.emit(section, delta),
+                )
+            elif section == "audio":
+                result = call_audio_model(
                     request,
                     on_stream_delta=lambda delta: self.progressChanged.emit(section, delta),
                 )
@@ -644,6 +761,42 @@ class CloudAllTestWorker(QObject):
             metadata={"scene": "model_page_image_test"},
         )
         return self._safe_call(request, "image")
+
+    def _run_audio_test(self) -> dict[str, str]:
+        unsupported = _audio_input_support_status(self.provider, self.api_schema)
+        if unsupported is not None:
+            status, message = unsupported
+            return self._unsupported_section("audio", status, message)
+        request = ModelCallRequest(
+            purpose="connectivity_test_audio",
+            backend=cloud_model_provider(self.provider).backend_for("audio"),
+            model_name=self.model_name,
+            base_url=self.base_url,
+            api_key=self.api_key,
+            temperature=0,
+            max_tokens=self.max_output_tokens,
+            stream=True,
+            extra_body=_cloud_request_extra_body(self.provider),
+            messages=[
+                ModelMessage(role="system", content="You are an audio connectivity test assistant."),
+                ModelMessage(
+                    role="user",
+                    content=[
+                        {
+                            "type": "text",
+                            "text": (
+                                f"{_response_language_instruction(self.locale)} "
+                                "Listen to the uploaded audio. Say briefly what you heard. "
+                                "Start with CHARA_AUDIO_OK: "
+                            ),
+                        },
+                        {"type": "audio", "audio": str(self.audio_path.resolve()), "format": "wav"},
+                    ],
+                ),
+            ],
+            metadata={"scene": "model_page_audio_test", "api_schema": self.api_schema},
+        )
+        return self._safe_call(request, "audio")
 
     def _run_video_test(self) -> dict[str, str]:
         unsupported = _video_mode_support_status(self.provider, self.video_input_mode)
@@ -813,16 +966,34 @@ class ModelPage(QWidget):
         self._cloud_text_test_worker: CloudTextTestWorker | None = None
         self._cloud_image_test_thread: QThread | None = None
         self._cloud_image_test_worker: CloudImageTestWorker | None = None
+        self._cloud_audio_test_thread: QThread | None = None
+        self._cloud_audio_test_worker: CloudAudioTestWorker | None = None
         self._cloud_video_test_thread: QThread | None = None
         self._cloud_video_test_worker: CloudVideoTestWorker | None = None
         self._cloud_all_test_thread: QThread | None = None
         self._cloud_all_test_worker: CloudAllTestWorker | None = None
         self._cloud_text_stream_buffer = ""
         self._cloud_image_stream_buffer = ""
+        self._cloud_audio_stream_buffer = ""
         self._cloud_video_stream_buffer = ""
-        self._cloud_all_stream_buffers: dict[str, str] = {"text": "", "image": "", "video": ""}
-        self._cloud_all_token_usage: dict[str, dict[str, int]] = {"text": {}, "image": {}, "video": {}}
-        self._cloud_all_section_status: dict[str, str] = {"text": "queued", "image": "queued", "video": "queued"}
+        self._cloud_all_stream_buffers: dict[str, str] = {
+            "text": "",
+            "image": "",
+            "audio": "",
+            "video": "",
+        }
+        self._cloud_all_token_usage: dict[str, dict[str, int]] = {
+            "text": {},
+            "image": {},
+            "audio": {},
+            "video": {},
+        }
+        self._cloud_all_section_status: dict[str, str] = {
+            "text": "queued",
+            "image": "queued",
+            "audio": "queued",
+            "video": "queued",
+        }
         self._cloud_all_final_summary = ""
         self._last_valid_cloud_video_fps = DEFAULT_CLOUD_VIDEO_FPS
         self._last_valid_cloud_max_output_tokens = DEFAULT_CLOUD_MAX_OUTPUT_TOKENS
@@ -889,6 +1060,7 @@ class ModelPage(QWidget):
         self.local_test_type_combo.addItem(t("model.test.type.all"), "all")
         self.local_test_type_combo.addItem(t("model.test.type.text"), "text")
         self.local_test_type_combo.addItem(t("model.test.type.image"), "image")
+        self.local_test_type_combo.addItem(t("model.test.type.audio"), "audio")
         self.local_test_type_combo.addItem(t("model.test.type.video"), "video")
         self.local_test_result = PlainTextEdit(self.local_card)
         self.local_test_result.setPlaceholderText(t("model.local.test.placeholder"))
@@ -1006,6 +1178,7 @@ class ModelPage(QWidget):
         self.cloud_test_type_combo.addItem(t("model.test.type.all"), "all")
         self.cloud_test_type_combo.addItem(t("model.test.type.text"), "text")
         self.cloud_test_type_combo.addItem(t("model.test.type.image"), "image")
+        self.cloud_test_type_combo.addItem(t("model.test.type.audio"), "audio")
         self.cloud_test_type_combo.addItem(t("model.test.type.video"), "video")
         self.cloud_test_result = PlainTextEdit(self.cloud_card)
         self.cloud_test_result.setPlaceholderText(t("model.cloud.test.placeholder"))
@@ -1262,6 +1435,16 @@ class ModelPage(QWidget):
                 target_language=_response_language_name(locale),
                 response="",
             )
+        if kind == "audio":
+            return t(
+                "model.cloud.test.audio.successResult",
+                provider=provider,
+                base_url=base_url,
+                model_name=model_name,
+                asset=AUDIO_TEST_ASSET.relative_to(APP_ROOT).as_posix(),
+                target_language=_response_language_name(locale),
+                response="",
+            )
         if kind == "video":
             return t(
                 "model.cloud.test.video.successResult",
@@ -1320,12 +1503,16 @@ class ModelPage(QWidget):
                     if self.use_cache.isChecked()
                     else t("model.local.test.cache.disabled"),
                     image_asset=IMAGE_TEST_ASSET.relative_to(APP_ROOT).as_posix(),
+                    audio_asset=AUDIO_TEST_ASSET.relative_to(APP_ROOT).as_posix(),
                     video_asset=VIDEO_TEST_ASSET.relative_to(APP_ROOT).as_posix(),
                 )
             )
             return
         if test_type == "image":
             self.local_test_result.setPlainText(t("model.test.image.placeholderResult"))
+            return
+        if test_type == "audio":
+            self.local_test_result.setPlainText(t("model.test.audio.placeholderResult"))
             return
         if test_type == "video":
             self.local_test_result.setPlainText(t("model.test.video.placeholderResult"))
@@ -1696,6 +1883,9 @@ class ModelPage(QWidget):
         if test_type == "image":
             self._test_cloud_image()
             return
+        if test_type == "audio":
+            self._test_cloud_audio()
+            return
         if test_type == "video":
             self._test_cloud_video()
             return
@@ -1746,7 +1936,12 @@ class ModelPage(QWidget):
     def _show_cloud_single_test_unsupported(self, test_type: str, status: str, message: str) -> None:
         status_text = t(f"model.cloud.test.status.{status}")
         template_key = f"model.cloud.test.{test_type}.unsupportedResult"
-        asset = IMAGE_TEST_ASSET if test_type == "image" else VIDEO_TEST_ASSET
+        asset_map = {
+            "image": IMAGE_TEST_ASSET,
+            "audio": AUDIO_TEST_ASSET,
+            "video": VIDEO_TEST_ASSET,
+        }
+        asset = asset_map.get(test_type, VIDEO_TEST_ASSET)
         self._set_cloud_test_result_text(
             t(
                 template_key,
@@ -1837,6 +2032,80 @@ class ModelPage(QWidget):
         self._cloud_image_test_thread.finished.connect(self._cloud_image_test_thread.deleteLater)
         self._cloud_image_test_thread.finished.connect(self._clear_cloud_image_test_worker)
         self._cloud_image_test_thread.start()
+
+    def _test_cloud_audio(self) -> None:
+        if self._is_cloud_test_running():
+            LOGGER.info("Cloud audio understanding test ignored because a test is already running")
+            return
+
+        base_url = self._validated_cloud_base_url(t("model.cloud.test.failure.title"))
+        if base_url is None:
+            return
+        model_name = self.cloud_model_name.text().strip()
+        if not model_name:
+            InfoBar.warning(
+                title=t("model.cloud.test.failure.title"),
+                content=t("model.cloud.test.modelRequired"),
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=4000,
+            )
+            return
+        unsupported = _audio_input_support_status(
+            self._current_cloud_provider_id(),
+            self._current_cloud_api_schema(),
+        )
+        if unsupported is not None:
+            status, message = unsupported
+            self._show_cloud_single_test_unsupported("audio", status, message)
+            return
+        if not AUDIO_TEST_ASSET.exists():
+            short_error = self._short_error(t("model.test.audio.assetMissing", path=AUDIO_TEST_ASSET.as_posix()))
+            self._set_cloud_test_result_text(
+                t(
+                    "model.cloud.test.audio.failureResult",
+                    provider=self.cloud_provider_combo.currentText(),
+                    base_url=base_url,
+                    model_name=model_name,
+                    asset=AUDIO_TEST_ASSET.as_posix(),
+                    error=short_error,
+                )
+            )
+            InfoBar.warning(
+                title=t("model.cloud.test.failure.title"),
+                content=short_error,
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=5000,
+            )
+            return
+
+        self.test_cloud_model_button.setEnabled(False)
+        self.test_cloud_model_button.setText(t("model.cloud.test.running"))
+        self._cloud_stream_kind = ""
+        locale = current_locale()
+        self._cloud_audio_test_thread = QThread(self)
+        self._cloud_audio_test_worker = CloudAudioTestWorker(
+            provider=self._current_cloud_provider_id(),
+            api_schema=self._current_cloud_api_schema(),
+            base_url=base_url,
+            api_key=self.cloud_api_key.text().strip(),
+            model_name=model_name,
+            audio_path=AUDIO_TEST_ASSET,
+            max_output_tokens=self._current_cloud_max_output_tokens(),
+            locale=locale,
+        )
+        self._cloud_audio_stream_buffer = ""
+        self._cloud_audio_test_worker.moveToThread(self._cloud_audio_test_thread)
+        self._cloud_audio_test_thread.started.connect(self._cloud_audio_test_worker.run)
+        self._cloud_audio_test_worker.progressChanged.connect(self._show_cloud_audio_test_stream)
+        self._cloud_audio_test_worker.succeeded.connect(self._show_cloud_audio_test_success)
+        self._cloud_audio_test_worker.failed.connect(self._show_cloud_audio_test_failure)
+        self._cloud_audio_test_worker.finished.connect(self._cloud_audio_test_thread.quit)
+        self._cloud_audio_test_worker.finished.connect(self._cloud_audio_test_worker.deleteLater)
+        self._cloud_audio_test_thread.finished.connect(self._cloud_audio_test_thread.deleteLater)
+        self._cloud_audio_test_thread.finished.connect(self._clear_cloud_audio_test_worker)
+        self._cloud_audio_test_thread.start()
 
     def _test_cloud_video(self) -> None:
         if self._is_cloud_test_running():
@@ -1942,16 +2211,23 @@ class ModelPage(QWidget):
             api_key=self.cloud_api_key.text().strip(),
             model_name=model_name,
             image_path=IMAGE_TEST_ASSET,
+            audio_path=AUDIO_TEST_ASSET,
             video_path=VIDEO_TEST_ASSET,
+            api_schema=self._current_cloud_api_schema(),
             video_fps=self._current_cloud_video_fps(),
             video_input_mode=self._current_cloud_video_input_mode(),
             max_output_tokens=self._current_cloud_max_output_tokens(),
             locale=locale,
             text_prompt_override=text_prompt_override,
         )
-        self._cloud_all_stream_buffers = {"text": "", "image": "", "video": ""}
-        self._cloud_all_token_usage = {"text": {}, "image": {}, "video": {}}
-        self._cloud_all_section_status = {"text": "queued", "image": "queued", "video": "queued"}
+        self._cloud_all_stream_buffers = {"text": "", "image": "", "audio": "", "video": ""}
+        self._cloud_all_token_usage = {"text": {}, "image": {}, "audio": {}, "video": {}}
+        self._cloud_all_section_status = {
+            "text": "queued",
+            "image": "queued",
+            "audio": "queued",
+            "video": "queued",
+        }
         self._cloud_all_final_summary = ""
         self._set_cloud_test_result_text(self._render_cloud_all_report(None))
         self._cloud_all_test_worker.moveToThread(self._cloud_all_test_thread)
@@ -2077,12 +2353,61 @@ class ModelPage(QWidget):
             duration=7000,
         )
 
+    def _show_cloud_audio_test_success(self, payload: dict) -> None:
+        content = str(payload.get("content", "")).strip() or t("model.cloud.test.empty")
+        token_usage = payload.get("token_usage") if isinstance(payload.get("token_usage"), dict) else {}
+        response = f"{content}\n{_format_token_usage_line(token_usage)}"
+        locale = current_locale()
+        self._set_cloud_test_result_text(
+            t(
+                "model.cloud.test.audio.successResult",
+                provider=self.cloud_provider_combo.currentText(),
+                base_url=self.cloud_base_url.text().strip() or t("model.cloud.test.empty"),
+                model_name=self.cloud_model_name.text().strip() or t("model.cloud.test.empty"),
+                asset=AUDIO_TEST_ASSET.relative_to(APP_ROOT).as_posix(),
+                target_language=_response_language_name(locale),
+                response=response,
+            )
+        )
+        InfoBar.success(
+            title=t("model.cloud.test.success.title"),
+            content=t("model.cloud.test.success.content"),
+            parent=self.window(),
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=3000,
+        )
+
+    def _show_cloud_audio_test_stream(self, delta: str) -> None:
+        self._cloud_audio_stream_buffer += delta
+        self._append_cloud_stream_delta("audio", delta)
+
+    def _show_cloud_audio_test_failure(self, error: str) -> None:
+        short_error = self._short_error(error)
+        self._set_cloud_test_result_text(
+            t(
+                "model.cloud.test.audio.failureResult",
+                provider=self.cloud_provider_combo.currentText(),
+                base_url=self.cloud_base_url.text().strip() or t("model.cloud.test.empty"),
+                model_name=self.cloud_model_name.text().strip() or t("model.cloud.test.empty"),
+                asset=AUDIO_TEST_ASSET.relative_to(APP_ROOT).as_posix(),
+                error=short_error,
+            )
+        )
+        InfoBar.warning(
+            title=t("model.cloud.test.failure.title"),
+            content=t("model.cloud.test.failure.content", error=short_error),
+            parent=self.window(),
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=7000,
+        )
+
     def _is_cloud_test_running(self) -> bool:
         return any(
             thread is not None
             for thread in (
                 self._cloud_text_test_thread,
                 self._cloud_image_test_thread,
+                self._cloud_audio_test_thread,
                 self._cloud_video_test_thread,
                 self._cloud_all_test_thread,
             )
@@ -2099,6 +2424,12 @@ class ModelPage(QWidget):
         self.test_cloud_model_button.setText(t("model.cloud.test"))
         self._cloud_image_test_thread = None
         self._cloud_image_test_worker = None
+
+    def _clear_cloud_audio_test_worker(self) -> None:
+        self.test_cloud_model_button.setEnabled(True)
+        self.test_cloud_model_button.setText(t("model.cloud.test"))
+        self._cloud_audio_test_thread = None
+        self._cloud_audio_test_worker = None
 
     def _show_cloud_video_test_success(self, payload: dict) -> None:
         content = str(payload.get("content", "")).strip() or t("model.cloud.test.empty")
@@ -2157,14 +2488,21 @@ class ModelPage(QWidget):
     def _show_cloud_all_test_result(self, results: dict) -> None:
         text_result = results.get("text", {})
         image_result = results.get("image", {})
+        audio_result = results.get("audio", {})
         video_result = results.get("video", {})
         locale = current_locale()
-        success_count = sum(1 for item in (text_result, image_result, video_result) if item.get("status") == "ok")
-        all_ok = success_count == 3
+        result_items = (
+            ("text", text_result),
+            ("image", image_result),
+            ("audio", audio_result),
+            ("video", video_result),
+        )
+        success_count = sum(1 for _key, item in result_items if item.get("status") == "ok")
+        all_ok = success_count == len(result_items)
         failure_statuses = {"error", "failed"}
         failed_items: list[str] = []
         non_failure_items: list[str] = []
-        for key, item in (("text", text_result), ("image", image_result), ("video", video_result)):
+        for key, item in result_items:
             status = str(item.get("status") or "error")
             if status in failure_statuses:
                 failed_items.append(t(f"model.test.type.{key}"))
@@ -2185,7 +2523,7 @@ class ModelPage(QWidget):
                 )
             )
         )
-        for section, result in (("text", text_result), ("image", image_result), ("video", video_result)):
+        for section, result in result_items:
             status = str(result.get("status") or "error")
             self._cloud_all_stream_buffers[section] = str(result.get("content") or "")
             self._cloud_all_section_status[section] = status
@@ -2253,10 +2591,11 @@ class ModelPage(QWidget):
             f"{t('model.cloud.modelName')}: {self.cloud_model_name.text().strip() or t('model.cloud.test.empty')}",
             f"{t('model.cloud.test.report.targetLanguage')}: {_response_language_name(locale)}",
             f"{t('model.cloud.test.report.imageAsset')}: {IMAGE_TEST_ASSET.relative_to(APP_ROOT).as_posix()}",
+            f"{t('model.cloud.test.report.audioAsset')}: {AUDIO_TEST_ASSET.relative_to(APP_ROOT).as_posix()}",
             f"{t('model.cloud.test.report.videoAsset')}: {VIDEO_TEST_ASSET.relative_to(APP_ROOT).as_posix()}",
         ]
         sections: list[str] = []
-        for key in ("text", "image", "video"):
+        for key in ("text", "image", "audio", "video"):
             status_key = self._cloud_all_section_status.get(key, "queued")
             content = self._cloud_all_stream_buffers.get(key, "")
             token_usage = self._cloud_all_token_usage.get(key, {})
