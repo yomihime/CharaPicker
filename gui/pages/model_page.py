@@ -680,26 +680,34 @@ class CloudAllTestWorker(QObject):
 
     def _safe_call(self, request: ModelCallRequest, section: str) -> dict[str, Any]:
         self.sectionStarted.emit(section)
+        emitted_stream_delta = False
+
+        def emit_stream_delta(delta: str) -> None:
+            nonlocal emitted_stream_delta
+            if delta:
+                emitted_stream_delta = True
+            self.progressChanged.emit(section, delta)
+
         try:
             if section == "image":
                 result = call_image_model(
                     request,
-                    on_stream_delta=lambda delta: self.progressChanged.emit(section, delta),
+                    on_stream_delta=emit_stream_delta,
                 )
             elif section == "audio":
                 result = call_audio_model(
                     request,
-                    on_stream_delta=lambda delta: self.progressChanged.emit(section, delta),
+                    on_stream_delta=emit_stream_delta,
                 )
             elif section == "video":
                 result = call_video_model(
                     request,
-                    on_stream_delta=lambda delta: self.progressChanged.emit(section, delta),
+                    on_stream_delta=emit_stream_delta,
                 )
             else:
                 result = call_text_model(
                     request,
-                    on_stream_delta=lambda delta: self.progressChanged.emit(section, delta),
+                    on_stream_delta=emit_stream_delta,
                 )
             prompt_tokens, completion_tokens, total_tokens = _token_usage_log_fields(result.metadata)
             LOGGER.info(
@@ -714,6 +722,8 @@ class CloudAllTestWorker(QObject):
                 "content": result.content.strip(),
                 "token_usage": _token_usage_from_metadata(result.metadata),
             }
+            if payload["content"] and not emitted_stream_delta:
+                self.progressChanged.emit(section, payload["content"])
             self.sectionFinished.emit(section, "ok", payload["token_usage"])
             return payload
         except Exception as exc:  # noqa: BLE001
