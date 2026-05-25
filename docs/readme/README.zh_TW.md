@@ -1,6 +1,6 @@
 ﻿# CharaPicker / 拾卡姬（繁體中文）
 
-[简体中文](../README.md) | [日本語](README.ja_JP.md) | [English](README.en_US.md)
+[简体中文](../../README.md) | [日本語](README.ja_JP.md) | [English](README.en_US.md)
 
 ## 專案簡介
 
@@ -14,7 +14,7 @@ CharaPicker（拾卡姬）是一個桌面工具，從番劇、漫畫、影片、
 
 ## 目前狀態
 
-- 版本：`v0.4.0-alpha`（開發中）
+- 版本：`v0.5.0-beta`（開發中）
 - 文件更新時間：`2026-05-24`
 
 ## 已實現內容
@@ -69,11 +69,11 @@ python main.py
 
 ## 文件導航
 
-- [简体中文 README](../README.md)
+- [简体中文 README](../../README.md)
 - [日本語 README](README.ja_JP.md)
 - [English README](README.en_US.md)
-- [docs 架構說明](ARCHITECTURE.md)
-- [根目錄架構說明](../ARCHITECTURE.md)
+- [docs 架構說明](../ARCHITECTURE.md)
+- [根目錄架構說明](../../ARCHITECTURE.md)
 
 ## 開發說明
 

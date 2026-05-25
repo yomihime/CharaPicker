@@ -1,6 +1,6 @@
 ﻿# CharaPicker (English)
 
-[简体中文](../README.md) | [繁體中文](README.zh_TW.md) | [日本語](README.ja_JP.md)
+[简体中文](../../README.md) | [繁體中文](README.zh_TW.md) | [日本語](README.ja_JP.md)
 
 ## Overview
 
@@ -14,7 +14,7 @@ CharaPicker is a desktop tool that extracts character-focused information from a
 
 ## Current Status
 
-- Version: `v0.4.0-alpha` (in development)
+- Version: `v0.5.0-beta` (in development)
 - Document updated: `2026-05-24`
 
 ## Implemented
@@ -69,11 +69,11 @@ python main.py
 
 ## Documentation
 
-- [简体中文 README](../README.md)
+- [简体中文 README](../../README.md)
 - [繁體中文 README](README.zh_TW.md)
 - [日本語 README](README.ja_JP.md)
-- [docs Architecture](ARCHITECTURE.md)
-- [Root Architecture](../ARCHITECTURE.md)
+- [docs Architecture](../ARCHITECTURE.md)
+- [Root Architecture](../../ARCHITECTURE.md)
 
 ## Development Notes
 

@@ -24,6 +24,7 @@
 - `{project_id}/knowledge_base/targeted_insights.json`：早期/兼容用定向洞察记录。
 - `{project_id}/knowledge_base/source_manifest.json`：素材根目录、季、集与稳定内部 ID 的映射。
 - `{project_id}/knowledge_base/seasons/{season_id}/episodes/{episode_id}/chunks/{chunk_id}.json`：当前分层知识库中的 chunk 结构化结果。
+- `{project_id}/knowledge_base/seasons/{season_id}/episodes/{episode_id}/episode_transcript.json`：单集音频转写结果，保存可追溯对白/旁白文本、时间段、来源素材指纹和转写后端信息。
 - `{project_id}/knowledge_base/seasons/{season_id}/episodes/{episode_id}/episode_content.json`：单集完整结构化内容合并结果。
 - `{project_id}/knowledge_base/seasons/{season_id}/episodes/{episode_id}/episode_summary.json`：单集压缩摘要。
 - `{project_id}/knowledge_base/seasons/{season_id}/season_content.json`：单季完整结构化内容合并结果。
@@ -51,4 +52,4 @@
 - 写入 JSON 时保持 UTF-8 和结构化格式。
 - 正式角色卡、预览草稿和导出产物路径必须隔离：正式卡只在 `knowledge_base/character_cards/`，预览草稿只在 `knowledge_base/preview_character_cards/`，导出只在 `output/character_cards/`。
 - 后续新增项目子目录时，同步更新本说明和路径工具。
-- 修改知识库结构时，同步核对 `docs/extraction-workflow.zh_CN.md` 和 `docs/extraction-development-roadmap.zh_CN.md`，避免把 roadmap 当成已实现事实。
+- 修改知识库结构时，同步核对 `docs/reference/extraction-workflow.zh_CN.md` 和 `docs/plans/extraction-development-roadmap.zh_CN.md`，避免把 roadmap 当成已实现事实。

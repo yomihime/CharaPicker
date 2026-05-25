@@ -26,7 +26,7 @@ CharaPicker（拾卡姬）是一个面向二次元素材分析的桌面工具，
 
 示例风格：
 
-- 启动：`拾卡姬 (CharaPicker) v0.4.0-alpha 已就位`
+- 启动：`拾卡姬 (CharaPicker) v0.5.0-beta 已就位`
 - 引导：`准备好帮您从番剧/漫画里扒角色卡啦！请投喂视频文件或漫画文件夹吧。`
 - 处理中：`拾卡姬正在逐帧观察表情...`
 - 格式不支持：`这个格式暂时读不懂，请换成 MP4 或 PNG 试试。`
@@ -99,7 +99,7 @@ CharaPicker（拾卡姬）是一个面向二次元素材分析的桌面工具，
 - 低输出预算是有效的试错参数，不应硬性阻断预览。低于建议值时先弹窗说明风险并请求确认；用户确认后不要在洞察流重复展示同一条低预算提示。
 - 只有模型实际因为输出长度上限截断结构化结果时，才应在洞察流提示该 chunk 被跳过，并继续使用其他可用结果。
 
-这些是产品与流程约束，不代表所有能力都已完整实现。涉及真实素材接入时，应同时查阅 `docs/extraction-workflow.zh_CN.md`、`docs/extraction-development-roadmap.zh_CN.md` 和当前 `core/extractor.py`。
+这些是产品与流程约束，不代表所有能力都已完整实现。涉及真实素材接入时，应同时查阅 `docs/reference/extraction-workflow.zh_CN.md`、`docs/plans/extraction-development-roadmap.zh_CN.md` 和当前 `core/extractor.py`。
 
 ## 6. Prompt 与结构化输出原则
 

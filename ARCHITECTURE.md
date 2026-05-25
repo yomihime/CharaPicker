@@ -61,5 +61,5 @@
 - UI 颜色标识先放入 `res/colors.py`，界面代码再引用。
 - 保持 `core`、`gui`、`utils` 的职责边界清楚。
 - 打包元数据逻辑放在 `scripts/`；GitHub Actions 只编排构建，不承载应用运行逻辑。
-- 打包与发布规则以 `docs/release-packaging.zh_CN.md` 为正式说明。
-- 文档与架构说明维护规则以 `docs/documentation-maintenance.zh_CN.md` 为正式说明。
+- 打包与发布规则以 `docs/reference/release-packaging.zh_CN.md` 为正式说明。
+- 文档与架构说明维护规则以 `docs/reference/documentation-maintenance.zh_CN.md` 为正式说明。

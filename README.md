@@ -4,7 +4,7 @@
   <img src="res/app_icon.png" alt="CharaPicker logo" width="96">
 </p>
 
-[繁體中文](docs/README.zh_TW.md) | [日本語](docs/README.ja_JP.md) | [English](docs/README.en_US.md)
+[繁體中文](docs/readme/README.zh_TW.md) | [日本語](docs/readme/README.ja_JP.md) | [English](docs/readme/README.en_US.md)
 
 ## 项目简介
 
@@ -18,7 +18,7 @@ CharaPicker（拾卡姬）是一个面向二次元素材分析的桌面工具，
 
 ## 当前状态
 
-- 当前版本：`v0.4.0-alpha`（开发中）
+- 当前版本：`v0.5.0-beta`（开发中）
 - 文档更新时间：`2026-05-24`
 
 ## 已实现内容
@@ -72,8 +72,8 @@ build.bat
 
 - 产物输出到 `release/` 目录。
 - 常用参数示例：
-  - `build.bat --tag=v0.4.0-alpha`
-  - `build.bat --version=0.4.0 --stage=alpha`
+  - `build.bat --tag=v0.5.0-beta`
+  - `build.bat --version=0.5.0 --stage=beta`
   - `build.bat --local`
 
 ## 功能概览
@@ -90,19 +90,19 @@ build.bat
 
 ## 文档导航
 
-- [繁體中文 README](docs/README.zh_TW.md)
-- [日本語 README](docs/README.ja_JP.md)
-- [English README](docs/README.en_US.md)
+- [繁體中文 README](docs/readme/README.zh_TW.md)
+- [日本語 README](docs/readme/README.ja_JP.md)
+- [English README](docs/readme/README.en_US.md)
 - [Codex 长期项目指导](AGENTS.md)
 - [根目录架构说明](ARCHITECTURE.md)
 - [项目文档索引](docs/README.md)
 - [docs 架构说明](docs/ARCHITECTURE.md)
-- [提取工作流说明](docs/extraction-workflow.zh_CN.md)
-- [提取与角色成长编译路线](docs/extraction-development-roadmap.zh_CN.md)
-- [产品与设计规范](docs/product-design-guidelines.zh_CN.md)
-- [运行时中间件设计说明](docs/runtime-middleware.zh_CN.md)
-- [打包与发布规范](docs/release-packaging.zh_CN.md)
-- [文档维护规范](docs/documentation-maintenance.zh_CN.md)
+- [提取工作流说明](docs/reference/extraction-workflow.zh_CN.md)
+- [提取与角色成长编译路线](docs/plans/extraction-development-roadmap.zh_CN.md)
+- [产品与设计规范](docs/reference/product-design-guidelines.zh_CN.md)
+- [运行时中间件设计说明](docs/reference/runtime-middleware.zh_CN.md)
+- [打包与发布规范](docs/reference/release-packaging.zh_CN.md)
+- [文档维护规范](docs/reference/documentation-maintenance.zh_CN.md)
 
 ## 开发说明
 

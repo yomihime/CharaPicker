@@ -1,6 +1,6 @@
-# 多供应商与多 API 规范接入计划
+# 多供应商与多 API 规范接入计划完成记录
 
-> 本文档是执行计划，不代表功能已经实现。实施前必须重新核对当前代码、官方文档和目标供应商的最新 API 说明。
+> 归档状态：本文档记录的多供应商 endpoint、API 规范、视频输入方式、DashScope 原生音频测试、Whisper 管理和音频转写首版已完成并归档。后续模型接入开发默认以当前代码、根目录 `README.md`、相关 `ARCHITECTURE.md`、`docs/README.md` 和 `docs/plans/TODO.zh_CN.md` 为准；如需引用本文档，必须先核对当前实现、官方文档和目标供应商的最新 API 说明。
 
 ## 1. 范围
 
@@ -37,7 +37,7 @@
 16. 原生音频输入 schema 第一批优先接入 DashScope/Qwen-Omni 方向，因为当前项目已经存在 DashScope 视频调用路径。
 17. Whisper 模型默认选择以模型 bin 体积和普通用户下载负担为优先；高级弹窗提供多个模型文件选择，并展示大小、速度和质量取舍。
 18. transcript 知识库落点按独立子流程设计，先把音频转写事实沉入知识库，再由抽帧加转写或角色卡生成流程读取。
-19. 当前真人声音测试素材可以继续作为开发与发布候选素材；录音者已确认可用于 CharaPicker 的开发、测试和发布包分发。素材来源简单记录在 `docs/asset-material-declaration.zh_CN.md`。
+19. 当前真人声音测试素材可以继续作为开发与发布候选素材；录音者已确认可用于 CharaPicker 的开发、测试和发布包分发。素材来源简单记录在 `docs/reference/asset-material-declaration.zh_CN.md`。
 20. 第一批 OpenAI-compatible 供应商按阶段推进：先接入 OpenAI、DeepSeek、OpenRouter 和自定义 OpenAI-compatible，后续再扩展更多聚合商或国内兼容供应商。
 21. 非 Chat Completions schema 的后续优先级为：DashScope/Qwen-Omni 原生音频优先，其次 OpenAI Responses，再后 Gemini GenerateContent，Anthropic Messages 暂缓。
 22. transcript 知识库落点以 episode 为主，chunk 只做按需引用或截取；音频转写文本通常不太长，视频拆 chunk 主要是为了控制视觉模型上下文、费用和长上下文退化。
@@ -353,7 +353,7 @@ python -m ruff check utils gui core
 涉及文件：
 
 - `docs/README.md`
-- `docs/asset-material-declaration.zh_CN.md`
+- `docs/reference/asset-material-declaration.zh_CN.md`
 - `res/test_media/model_test_input.jpg`
 - `res/test_media/model_test_input.mp4`
 - `res/test_media/model_test_input.wav`
@@ -362,7 +362,7 @@ python -m ruff check utils gui core
 
 1. 确认三份测试素材存在，音频为 16 kHz、mono、PCM WAV。
 2. 确认 `docs/README.md` 已链接素材来源说明。
-3. 若替换图片、视频或音频，在 `docs/asset-material-declaration.zh_CN.md` 补来源说明。
+3. 若替换图片、视频或音频，在 `docs/reference/asset-material-declaration.zh_CN.md` 补来源说明。
 
 验收：
 
@@ -782,7 +782,7 @@ python -m compileall utils core gui
 - `utils/cloud_model_presets.py`
 - `gui/pages/model_page.py`
 - `res/` 下新增图标资源目录
-- `docs/asset-material-declaration.zh_CN.md`
+- `docs/reference/asset-material-declaration.zh_CN.md`
 - 可选：`main.spec`
 - 四个 `i18n/*.json`
 
@@ -821,8 +821,8 @@ python -m compileall gui utils
 涉及文件：
 
 - 四个 `i18n/*.json`
-- `docs/multi-provider-api-support-plan.zh_CN.md`
-- `docs/asset-material-declaration.zh_CN.md`
+- `docs/archive/multi-provider-api-support-plan.completed.zh_CN.md`
+- `docs/reference/asset-material-declaration.zh_CN.md`
 - 相关 `ARCHITECTURE.md`，若新增模块职责已稳定则更新
 
 实施步骤：
@@ -831,7 +831,7 @@ python -m compileall gui utils
 2. 全量搜索 `dashscope.aliyuncs.com`，确认没有旧的区域判断逻辑。
 3. 全量搜索 `Whisper`、`whisper`，确认下载、检测、转写职责在 utils，不在页面层执行核心逻辑。
 4. 确认日志不输出完整 API Key、代理凭据、完整 transcript、大型素材内容。
-5. 确认 `docs/asset-material-declaration.zh_CN.md` 包含新增随包资源。
+5. 确认 `docs/reference/asset-material-declaration.zh_CN.md` 包含新增随包资源。
 6. 若新增长期模块，更新 `utils/ARCHITECTURE.md` 或相关架构文档。
 
 验收命令：
@@ -857,6 +857,17 @@ python -m ruff check utils gui core
 - Whisper 缺失不阻塞普通素材整理。
 - 需要 transcript 的流程在 Whisper 缺失时给出明确选择。
 - episode transcript 可复用，不重复转写同一素材。
+
+执行记录（2026-05-25）：
+
+- 已全量搜索 Python 源码中的中文文案；除 `utils/i18n.py` 语言名和模型页固定测试 prompt 外，新增用户可见文案均已进入四个 `i18n/*.json`。
+- 已搜索 `dashscope.aliyuncs.com`、`dashscope-intl`、`dashscope-us`、`cn-hongkong` 和 `maas.aliyuncs`；相关字符串保留在 endpoint 预设和 DashScope URL 归一化中，`gui/` 与 `core/` 不再用旧域名字符串判断阿里行为。
+- 已搜索 `Whisper` / `whisper`；下载、检测、安装、删除、转写和 transcript 缓存逻辑位于 `utils/`，页面层只负责状态展示、用户触发和 Qt worker 桥接。
+- 已抽查模型调用、下载器、转写和页面 worker 日志；日志只记录 endpoint、模型名、状态、路径、计数、token usage 或脱敏错误，不输出完整 API Key、完整 transcript、完整请求体或大型素材内容。
+- `docs/reference/asset-material-declaration.zh_CN.md` 已记录新增的 `res/provider_icons/*.svg` 随包资源；`core/`、`utils/`、`projects/`、`res/` 的架构说明已随对应里程碑更新。
+- 已运行：`python -m compileall utils gui core`、`conda run -n CharaPicker python -m compileall utils gui core`、`python -m ruff check utils gui core`、对四个 `i18n/*.json` 分别执行 `python -m json.tool`、`python -m json.tool res\default_prompts.json`、`git diff --check`。
+- 已做轻量冒烟：旧 `openaiCompatible` 预设可归一化；阿里 `cn/intl/us/hk/eu/custom` endpoints 可枚举；模型页能力状态 helper 在 `CharaPicker` conda 环境可导入并返回预期状态。
+- 未执行真实联网 API 与完整 GUI 人工验收；这些需要有效供应商 API Key、可用模型和用户侧交互试用。
 
 建议提交：`test: verify multi-provider and audio workflows`
 
@@ -899,4 +910,4 @@ python -m ruff check utils gui core
 
 - 已完成的执行记录可移入 `docs/archive/`，文件名建议为 `multi-provider-api-support-plan.completed.zh_CN.md`。
 - 稳定下来的长期事实同步到相关 `ARCHITECTURE.md`；只有明确需要长期约束 Codex 行为时，再征得用户同意后更新 `AGENTS.md`。
-- 不阻塞首版的可选增强已拆到 `docs/TODO.zh_CN.md`，归档时计划书末尾不再保留开放 TODO。
+- 不阻塞首版的可选增强已拆到 `docs/plans/TODO.zh_CN.md`，归档时计划书末尾不再保留开放 TODO。

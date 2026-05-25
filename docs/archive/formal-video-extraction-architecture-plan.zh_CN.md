@@ -43,10 +43,10 @@
 
 主要依据：
 
-- 主工作流说明：[提取工作流技术说明](../extraction-workflow.zh_CN.md)
-- 长期开发路线：[提取与角色成长编译开发路线](../extraction-development-roadmap.zh_CN.md)
-- 预览支线计划：[真实预览结果接入计划](../preview-real-result-ingestion-plan.zh_CN.md)
-- 文档维护规则：[文档维护规范](../documentation-maintenance.zh_CN.md)
+- 主工作流说明：[提取工作流技术说明](../reference/extraction-workflow.zh_CN.md)
+- 长期开发路线：[提取与角色成长编译开发路线](../plans/extraction-development-roadmap.zh_CN.md)
+- 预览支线计划：[真实预览结果接入计划](../plans/preview-real-result-ingestion-plan.zh_CN.md)
+- 文档维护规则：[文档维护规范](../reference/documentation-maintenance.zh_CN.md)
 
 代码核对入口：
 
@@ -326,7 +326,7 @@ knowledge_base/
 
 ## 9. 预览提取支线
 
-预览提取是正式提取计划的并行支线。详细计划见：[真实预览结果接入计划](../preview-real-result-ingestion-plan.zh_CN.md)。
+预览提取是正式提取计划的并行支线。详细计划见：[真实预览结果接入计划](../plans/preview-real-result-ingestion-plan.zh_CN.md)。
 
 本计划只规定两条强约束：
 
@@ -434,7 +434,7 @@ knowledge_base/
 - `gui/main_window.py`
 - `gui/pages/model_page.py`
 - `i18n/*.json`
-- `docs/preview-real-result-ingestion-plan.zh_CN.md`
+- `docs/plans/preview-real-result-ingestion-plan.zh_CN.md`
 
 里程碑：
 
@@ -463,7 +463,7 @@ knowledge_base/
 
 - 完成日期：2026-05-14
 - 开发分支/提交：`formal-video-extraction-plan` / `d092891 feat: isolate preview extraction artifacts`
-- 改动文件：`core/knowledge_base.py`、`core/extractor.py`、`core/compiler.py`、`gui/main_window.py`、`i18n/*.json`、`docs/preview-real-result-ingestion-plan.zh_CN.md`、`docs/formal-video-extraction-architecture-plan.zh_CN.md`
+- 改动文件：`core/knowledge_base.py`、`core/extractor.py`、`core/compiler.py`、`gui/main_window.py`、`i18n/*.json`、`docs/plans/preview-real-result-ingestion-plan.zh_CN.md`、`docs/archive/formal-video-extraction-architecture-plan.zh_CN.md`
 - 可检查状态：预览 chunk 写入 `preview__*.json` 并带 `extraction_stage = "preview"`、`run_type = "preview_trial"`；预览 episode 聚合写入 `preview__episode_content.json`；输出页预览成功后读取预览专用 episode content；预览文案不再提示正式 chunk JSON 缺失。
 - 验证命令：`$env:PYTHONPYCACHEPREFIX = Join-Path $env:TEMP 'charapicker-s2-pycache'; python -m compileall core gui`；轻量 Python 脚本验证 preview/full/legacy 隔离、预览 episode 聚合和预览编译读取；`python -m ruff check core/knowledge_base.py core/extractor.py core/compiler.py gui/main_window.py`；`python -m json.tool i18n/zh_CN.json`、`python -m json.tool i18n/zh_TW.json`、`python -m json.tool i18n/en_US.json`、`python -m json.tool i18n/ja_JP.json`；`git diff --check`。
 - 已知风险：S2 不迁移历史预览产物；旧的无标记 `chunk_*.json` 和正式 `episode_content.json` 会保留在磁盘上；正式提取入口、正式扫描和正式聚合过滤仍留给 S3/S4/S5。
@@ -478,7 +478,7 @@ knowledge_base/
 - `core/source_scanner.py`
 - `core/extractor.py`
 - `core/knowledge_base.py`
-- 必要时更新 `docs/extraction-development-roadmap.zh_CN.md`
+- 必要时更新 `docs/plans/extraction-development-roadmap.zh_CN.md`
 
 里程碑：
 
@@ -647,7 +647,7 @@ knowledge_base/
 
 ## 18. 支线步进 P：预览提取同步任务
 
-详细计划见：[真实预览结果接入计划](../preview-real-result-ingestion-plan.zh_CN.md)。
+详细计划见：[真实预览结果接入计划](../plans/preview-real-result-ingestion-plan.zh_CN.md)。
 
 这些任务可以与主线并行规划，但实现时仍要遵守步进门禁。
 

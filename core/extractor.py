@@ -13,6 +13,7 @@ from core import knowledge_base as kb
 from core import source_scanner
 from core.models import (
     ChunkExtractionResult,
+    EpisodeTranscript,
     ExtractionArtifactStage,
     InsightEvent,
     InsightStatus,
@@ -31,9 +32,18 @@ from utils.cloud_model_presets import (
     CLOUD_MAX_OUTPUT_TOKENS_MAX,
     CLOUD_MAX_OUTPUT_TOKENS_STEP,
     CloudModelPreset,
+    VideoInputMode,
     cloud_model_provider,
     load_cloud_model_presets,
+    normalize_video_input_mode,
+    provider_requires_aliyun_extra_body,
     scale_cloud_max_output_tokens_for_video_duration,
+)
+from utils.audio_transcription import (
+    AudioTranscriptionError,
+    TranscriptionOptions,
+    transcribe_episode_audio as run_episode_audio_transcription,
+    transcript_segments_for_material,
 )
 from utils.ffmpeg_tool import FfmpegProcessError, probe_video_duration_seconds
 from utils.i18n import t
@@ -562,8 +572,8 @@ class Extractor(QObject):
                 candidates.append(payload)
         return candidates
 
-    def _video_model_extra_body(self, base_url: str) -> dict[str, Any]:
-        if "dashscope.aliyuncs.com" in base_url.lower():
+    def _video_model_extra_body(self, provider: str) -> dict[str, Any]:
+        if provider_requires_aliyun_extra_body(provider):
             return {"enable_thinking": False}
         return {}
 
@@ -728,6 +738,21 @@ class Extractor(QObject):
             return preset
         return next((item for item in presets if item.base_url.strip() and item.model_name.strip()), None)
 
+    def _backend_for_video_input_mode(
+        self,
+        preset: CloudModelPreset,
+        video_input_mode: VideoInputMode,
+    ) -> ModelBackend:
+        provider = cloud_model_provider(preset.provider)
+        if video_input_mode == "audio_transcript_only":
+            return provider.backend_for("text")  # type: ignore[return-value]
+        if video_input_mode in {"frame_sampling", "frame_sampling_with_transcript"}:
+            return provider.backend_for("image")  # type: ignore[return-value]
+        return provider.backend_for("video")  # type: ignore[return-value]
+
+    def _video_mode_requires_transcript(self, video_input_mode: VideoInputMode) -> bool:
+        return video_input_mode in {"frame_sampling_with_transcript", "audio_transcript_only"}
+
     def _collect_formal_video_chunk_inputs(
         self,
         project_id: str,
@@ -782,6 +807,149 @@ class Extractor(QObject):
                     seen.add(key)
                     episode_ids.append(key)
         return episode_ids
+
+    def transcribe_episode_audio(
+        self,
+        project_id: str,
+        season_id: str,
+        episode_id: str,
+        material_paths: Path | str | list[Path | str],
+        *,
+        language: str = "auto",
+        force_rebuild: bool = False,
+    ) -> EpisodeTranscript:
+        return run_episode_audio_transcription(
+            project_id,
+            season_id,
+            episode_id,
+            material_paths,
+            options=TranscriptionOptions(language=language, force_rebuild=force_rebuild),
+        )
+
+    def ensure_episode_transcripts_from_manifest(
+        self,
+        project_id: str,
+        manifest: dict[str, Any],
+        *,
+        language: str = "auto",
+        force_rebuild: bool = False,
+        emit_event: Callable[[dict], None] | None = None,
+    ) -> list[EpisodeTranscript]:
+        transcripts: list[EpisodeTranscript] = []
+        episode_inputs = self._collect_formal_episode_transcript_inputs(project_id, manifest)
+        total = len(episode_inputs)
+        for index, episode_input in enumerate(episode_inputs, start=1):
+            season_id = episode_input["season_id"]
+            episode_id = episode_input["episode_id"]
+            material_paths = episode_input["material_paths"]
+            if emit_event is not None:
+                emit_event(
+                    InsightEvent(
+                        title=t("extractor.transcript.title"),
+                        description=t(
+                            "extractor.transcript.transcribing",
+                            current=index,
+                            total=total,
+                            episode=episode_id,
+                        ),
+                        status=InsightStatus.RUNNING,
+                    ).model_dump(mode="json")
+                )
+            try:
+                transcript = run_episode_audio_transcription(
+                    project_id,
+                    season_id,
+                    episode_id,
+                    material_paths,
+                    options=TranscriptionOptions(
+                        language=language,
+                        force_rebuild=force_rebuild,
+                    ),
+                )
+            except AudioTranscriptionError as exc:
+                LOGGER.warning(
+                    "Episode transcription failed; project_id=%s season_id=%s episode_id=%s error=%s",
+                    project_id,
+                    season_id,
+                    episode_id,
+                    self._compact_exception_message(exc),
+                )
+                if emit_event is not None:
+                    emit_event(
+                        InsightEvent(
+                            title=t("extractor.transcript.title"),
+                            description=t(
+                                "extractor.transcript.failed",
+                                episode=episode_id,
+                                error=self._compact_exception_message(exc),
+                            ),
+                            status=InsightStatus.WARNING,
+                        ).model_dump(mode="json")
+                    )
+                continue
+            transcripts.append(transcript)
+            if emit_event is not None:
+                emit_event(
+                    InsightEvent(
+                        title=t("extractor.transcript.title"),
+                        description=t(
+                            "extractor.transcript.ready",
+                            episode=episode_id,
+                            count=len(transcript.segments),
+                        ),
+                        status=InsightStatus.DONE,
+                    ).model_dump(mode="json")
+                )
+        return transcripts
+
+    def _collect_formal_episode_transcript_inputs(
+        self,
+        project_id: str,
+        manifest: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        episode_inputs: list[dict[str, Any]] = []
+        for season in manifest.get("seasons", []):
+            if not isinstance(season, dict):
+                continue
+            season_id = self._manifest_string(season.get("season_id"))
+            if not season_id:
+                continue
+            for episode in season.get("episodes", []):
+                if not isinstance(episode, dict):
+                    continue
+                episode_id = self._manifest_string(episode.get("episode_id"))
+                if not episode_id:
+                    continue
+                material_paths = self._episode_material_paths(project_id, episode)
+                if material_paths:
+                    episode_inputs.append(
+                        {
+                            "season_id": season_id,
+                            "episode_id": episode_id,
+                            "material_paths": material_paths,
+                        }
+                    )
+        return episode_inputs
+
+    def _episode_material_paths(self, project_id: str, episode: dict[str, Any]) -> list[Path]:
+        material_paths: list[Path] = []
+        for chunk in episode.get("chunks", []):
+            if not isinstance(chunk, dict):
+                continue
+            source_path = self._manifest_string(chunk.get("source_path"))
+            if not source_path:
+                continue
+            material_path = self._formal_material_video_path(project_id, source_path)
+            if material_path.is_file():
+                material_paths.append(material_path)
+        if material_paths:
+            return material_paths
+
+        source_path = self._manifest_string(episode.get("source_path"))
+        if not source_path:
+            return []
+        material_path = self._formal_material_video_path(project_id, source_path)
+        return [material_path] if material_path.is_file() else []
 
     def _collect_formal_season_ids_from_manifest(self, manifest: dict[str, Any]) -> list[str]:
         season_ids: list[str] = []
@@ -841,11 +1009,13 @@ class Extractor(QObject):
         *,
         chunk_inputs: list[dict[str, Any]] | None = None,
         backend: ModelBackend,
+        provider: str,
         model_name: str,
         base_url: str,
         api_key: str,
         video_fps: float,
         max_output_tokens: int,
+        video_input_mode: VideoInputMode,
         emit_token_usage: Callable[[dict[str, int]], None] | None = None,
         emit_event: Callable[[dict], None] | None = None,
         emit_progress: Callable[[int], None] | None = None,
@@ -860,6 +1030,22 @@ class Extractor(QObject):
         usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         extracted_chunks: list[ChunkExtractionResult] = []
         total_chunks = len(chunk_inputs)
+        transcripts_by_episode: dict[tuple[str, str], EpisodeTranscript] = {}
+        if self._video_mode_requires_transcript(video_input_mode):
+            transcripts = self.ensure_episode_transcripts_from_manifest(
+                config.project_id,
+                manifest,
+                emit_event=emit_event,
+            )
+            transcripts_by_episode = {
+                (transcript.source.season_id, transcript.source.episode_id): transcript
+                for transcript in transcripts
+            }
+            if not transcripts_by_episode:
+                message = t("extractor.transcript.requiredUnavailable")
+                self._emit_full_warning(emit_event, message)
+                raise ValueError(message)
+
         for index, chunk_input in enumerate(chunk_inputs, start=1):
             video_path = chunk_input["video_path"]
             source_path = chunk_input["source_path"]
@@ -924,15 +1110,40 @@ class Extractor(QObject):
                         ).model_dump(mode="json")
                     )
 
+                transcript_context = ""
+                if self._video_mode_requires_transcript(video_input_mode):
+                    transcript = transcripts_by_episode.get(
+                        (chunk_input["season_id"], chunk_input["episode_id"])
+                    )
+                    if transcript is not None:
+                        transcript_context = transcript_segments_for_material(
+                            transcript,
+                            video_path,
+                            max_chars=4000,
+                        )
+                    if not transcript_context.strip():
+                        self._emit_full_warning(
+                            emit_event,
+                            t(
+                                "extractor.transcript.chunkMissing",
+                                episode=chunk_input["episode_id"],
+                                chunk=chunk_input["chunk_id"],
+                            ),
+                        )
+                        continue
+
                 request = self._build_full_video_chunk_request(
                     config,
                     chunk_input=chunk_input,
                     backend=backend,
+                    provider=provider,
                     model_name=model_name,
                     base_url=base_url,
                     api_key=api_key,
                     video_fps=video_fps,
                     request_max_output_tokens=request_max_output_tokens,
+                    video_input_mode=video_input_mode,
+                    transcript_context=transcript_context,
                 )
                 result = call_video_model(request)
                 token_usage = result.metadata.get("token_usage")
@@ -1097,11 +1308,14 @@ class Extractor(QObject):
         *,
         chunk_input: dict[str, Any],
         backend: ModelBackend,
+        provider: str,
         model_name: str,
         base_url: str,
         api_key: str,
         video_fps: float,
         request_max_output_tokens: int,
+        video_input_mode: VideoInputMode,
+        transcript_context: str = "",
     ) -> ModelCallRequest:
         video_path = chunk_input["video_path"]
         chunk_ref = (
@@ -1112,8 +1326,15 @@ class Extractor(QObject):
             variables={
                 "chunk_id": chunk_ref,
                 "source_path": chunk_input["source_path"],
+                "transcript_section": self._format_transcript_prompt_section(
+                    video_input_mode,
+                    transcript_context,
+                ),
             },
         )
+        content_parts: list[dict[str, Any]] = [{"type": "text", "text": user_text}]
+        if video_input_mode != "audio_transcript_only":
+            content_parts.append(self._build_video_chunk_part(video_path, video_fps))
         return ModelCallRequest(
             purpose="formal_video_chunk_extraction",
             backend=backend,
@@ -1127,10 +1348,7 @@ class Extractor(QObject):
                 ),
                 ModelMessage(
                     role="user",
-                    content=[
-                        {"type": "text", "text": user_text},
-                        self._build_video_chunk_part(video_path, video_fps),
-                    ],
+                    content=content_parts,
                 ),
             ],
             temperature=0.2,
@@ -1138,7 +1356,7 @@ class Extractor(QObject):
             stream=False,
             timeout_seconds=240,
             response_format={"type": "json_object"},
-            extra_body=self._video_model_extra_body(base_url),
+            extra_body=self._video_model_extra_body(provider),
             metadata={
                 "project_id": config.project_id,
                 "stage": "full_chunk_extraction",
@@ -1146,8 +1364,23 @@ class Extractor(QObject):
                 "episode_id": chunk_input["episode_id"],
                 "chunk_id": chunk_input["chunk_id"],
                 "source_path": chunk_input["source_path"],
+                "video_input_mode": video_input_mode,
             },
         )
+
+    def _format_transcript_prompt_section(
+        self,
+        video_input_mode: VideoInputMode,
+        transcript_context: str,
+    ) -> str:
+        if not self._video_mode_requires_transcript(video_input_mode):
+            return ""
+        context = transcript_context.strip() or t("extractor.transcript.context.empty")
+        if video_input_mode == "audio_transcript_only":
+            note = t("extractor.transcript.prompt.audioOnly")
+        else:
+            note = t("extractor.transcript.prompt.withFrames")
+        return f"[TRANSCRIPT_CONTEXT]\n{context}\n\n{note}"
 
     def _emit_full_warning(self, emit_event: Callable[[dict], None] | None, description: str) -> None:
         if emit_event is None:
@@ -1219,6 +1452,7 @@ class Extractor(QObject):
         config: ProjectConfig,
         *,
         backend: ModelBackend,
+        provider: str,
         model_name: str,
         base_url: str,
         api_key: str,
@@ -1313,7 +1547,7 @@ class Extractor(QObject):
                     stream=False,
                     timeout_seconds=240,
                     response_format={"type": "json_object"},
-                    extra_body=self._video_model_extra_body(base_url),
+                    extra_body=self._video_model_extra_body(provider),
                     metadata={
                         "project_id": config.project_id,
                         "stage": "preview_chunk_extraction",
@@ -1600,16 +1834,19 @@ class Extractor(QObject):
             LOGGER.warning("Full extraction stopped because no usable cloud preset was found")
             raise ValueError(message)
 
+        video_input_mode = normalize_video_input_mode(preset.video_input_mode, preset.provider)
         created_count, extraction_usage, extracted_chunks = self._extract_full_chunk_json_from_manifest(
             config,
             manifest,
             chunk_inputs=chunk_inputs,
-            backend=cloud_model_provider(preset.provider).backend_for("video"),
+            backend=self._backend_for_video_input_mode(preset, video_input_mode),
+            provider=preset.provider,
             model_name=preset.model_name,
             base_url=preset.base_url,
             api_key=preset.api_key,
             video_fps=preset.video_fps,
             max_output_tokens=preset.max_output_tokens,
+            video_input_mode=video_input_mode,
             emit_token_usage=emit_token_usage,
             emit_event=emit_event,
             emit_progress=emit_progress,
@@ -1702,6 +1939,7 @@ class Extractor(QObject):
             created_count, extraction_usage, extracted_chunks = self._extract_preview_chunk_json_from_materials(
                 config,
                 backend=cloud_model_provider(preset.provider).backend_for("video"),
+                provider=preset.provider,
                 model_name=preset.model_name,
                 base_url=preset.base_url,
                 api_key=preset.api_key,

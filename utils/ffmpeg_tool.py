@@ -110,6 +110,41 @@ def probe_video_duration_seconds(source: Path, bin_root: Path = BIN_ROOT) -> flo
     return _probe_duration_seconds(ffmpeg_binary, source)
 
 
+def extract_audio_to_wav(
+    source: Path,
+    target: Path,
+    *,
+    sample_rate: int = 16000,
+    channels: int = 1,
+    cancelled: CancelledCallback | None = None,
+    bin_root: Path = BIN_ROOT,
+) -> Path:
+    ffmpeg_binary = find_usable_ffmpeg_binary(bin_root)
+    if ffmpeg_binary is None:
+        raise FfmpegProcessError("FFmpeg is required to extract audio tracks.")
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        str(ffmpeg_binary),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(source),
+        "-vn",
+        "-acodec",
+        "pcm_s16le",
+        "-ar",
+        str(sample_rate),
+        "-ac",
+        str(channels),
+        str(target),
+    ]
+    _run_ffmpeg_command(command, cancelled=cancelled)
+    return target
+
+
 def list_available_device_options(bin_root: Path = BIN_ROOT) -> list[DeviceOption]:
     ffmpeg_binary = find_usable_ffmpeg_binary(bin_root)
     if ffmpeg_binary is None:

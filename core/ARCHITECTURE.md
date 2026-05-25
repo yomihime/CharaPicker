@@ -16,11 +16,11 @@
 
 ## 关键文件
 
-- `models.py`：定义 `ProjectConfig`、`SourceProcessingConfig`、`InsightEvent`、`CharacterState`、`ChunkExtractionResult`、`ProjectPaths` 等 Pydantic 模型。
+- `models.py`：定义 `ProjectConfig`、`SourceProcessingConfig`、`InsightEvent`、`CharacterState`、`ChunkExtractionResult`、`EpisodeTranscript`、`ProjectPaths` 等 Pydantic 模型。
 - `character_card_constants.py`：集中保存角色卡固定文件名、预览卡保留 ID 和 stale warning reason 等跨模块共享常量。
 - `knowledge_base.py`：集中管理 `projects/{project_id}/knowledge_base/` 下常用产物的路径、JSON 读写和结构校验。
 - `source_scanner.py`：提供素材目录扫描、预览视频 chunk 收集和预览 chunk 标识生成。
-- `extractor.py`：定义 `Extractor`，作为 UI-facing 提取入口，负责知识库分层初始化、chunk/episode/season 内容合并和流式预览提取，并委托知识库读写与素材扫描 helper。
+- `extractor.py`：定义 `Extractor`，作为 UI-facing 提取入口，负责知识库分层初始化、chunk/episode/season 内容合并、episode transcript 入口和流式预览提取，并委托知识库读写与素材扫描 helper。
 - `compiler.py`：定义 `build_character_compile_request()`、`compile_character_state()`、`compile_character_state_by_season_episode()`、`write_character_stage_states()` 和 `final_polish_character_state()`，负责从知识库聚合角色阶段状态。
 - `character_card_store.py`：管理 `knowledge_base/character_cards/` 与 `preview_character_cards/` 下角色卡的创建、读取、保存、列表、删除和封面路径登记。
 - `character_card_compiler.py`：从正式或预览知识库生成 CharaPicker 角色卡 JSON；不读取原始素材，也不读取 `ProjectConfig.target_characters`。
@@ -40,7 +40,7 @@
 - 向 `gui` 通过回调传递预览进度和 token 用量。
 - 被 `utils.state_manager` 引用，用于项目配置的序列化和反序列化。
 - 被 `utils.paths` 引用，用于描述包含 `raw/`、`materials/`、`cache/`、`knowledge_base/` 和 `output/` 的项目路径。
-- 向 `projects/{project_id}/knowledge_base/` 写入 `source_manifest.json`、`seasons/*/episodes/*/chunks/*.json`、`episode_content.json`、`episode_summary.json`、`season_content.json`、阶段性角色状态和 `character_cards/{card_id}/card.json`。
+- 向 `projects/{project_id}/knowledge_base/` 写入 `source_manifest.json`、`seasons/*/episodes/*/chunks/*.json`、`episode_content.json`、`episode_summary.json`、`episode_transcript.json`、`season_content.json`、阶段性角色状态和 `character_cards/{card_id}/card.json`。
 - 向 `projects/{project_id}/output/character_cards/` 写入 Markdown、HTML、CharaPicker JSON、Character Card V2 JSON 和 AstrBot 手动复制清单。
 
 ## 维护注意事项

@@ -13,8 +13,8 @@ build.bat
 常用参数：
 
 ```powershell
-build.bat --tag=v0.4.0-alpha
-build.bat --version=0.4.0 --stage=alpha
+build.bat --tag=v0.5.0-beta
+build.bat --version=0.5.0 --stage=beta
 build.bat --local
 ```
 
@@ -67,8 +67,8 @@ release/
 
 允许通过 Git tag 指示版本与阶段：
 
-- `v0.4.0-alpha` -> `version=0.4.0`，`stage=alpha`
-- `v0.4.0-alpha.1` -> `version=0.4.0`，`stage=alpha.1`
+- `v0.5.0-beta` -> `version=0.5.0`，`stage=beta`
+- `v0.5.0-beta.1` -> `version=0.5.0`，`stage=beta.1`
 - `v1.0.0` -> `version=1.0.0`，`stage=release`
 
 构建脚本只读取显式 `--tag` 或当前提交上的精确 Git tag；历史最近 tag 不应覆盖当前默认版本。
@@ -80,7 +80,7 @@ release/
 - `utils/app_metadata.py`：运行时应用名、版本阶段和 HTTP User-Agent。
 - `pyproject.toml`：Python 项目元数据版本。
 - `build.bat`：批处理脚本回退默认值和发布文件名默认变量。
-- `README.md`、`docs/README.*.md` 和 `i18n/*`：用户可见版本文案。
+- `README.md`、`docs/readme/README.*.md` 和 `i18n/*`：用户可见版本文案。
 - `scripts/build_meta.py`：确认默认值仍从 `utils.app_metadata` 读取，命令行、tag 和 `--local` 覆盖逻辑保持有效。
 
 ## 5. 文件命名
@@ -94,7 +94,7 @@ CharaPicker-v<version>-<stage>-<platform>-<arch>.zip
 示例：
 
 ```text
-CharaPicker-v0.4.0-alpha-windows-x64.zip
+CharaPicker-v0.5.0-beta-windows-x64.zip
 CharaPicker-v1.0.0-release-windows-x64.zip
 ```
 

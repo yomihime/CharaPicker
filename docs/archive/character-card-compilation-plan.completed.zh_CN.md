@@ -6,7 +6,7 @@
 
 最近归档日期：2026-05-24。
 
-后续角色卡开发不应继续把本文当作默认执行入口；新任务应以当前代码、根目录 `AGENTS.md`、相关 `ARCHITECTURE.md`、`docs/TODO.zh_CN.md` 和用户确认的新计划为准。
+后续角色卡开发不应继续把本文当作默认执行入口；新任务应以当前代码、根目录 `AGENTS.md`、相关 `ARCHITECTURE.md`、`docs/plans/TODO.zh_CN.md` 和用户确认的新计划为准。
 
 本文只记录本任务特有的产品决策、边界和里程碑。通用开发规则、代码优先级、文档优先级、i18n、依赖、日志、worker/thread 等要求不在本文重复。
 
@@ -1398,7 +1398,7 @@ CharacterCardPage select image
 
 交付：
 
-- 根据实际完成情况更新 `docs/TODO.zh_CN.md` 第 3、4 项。
+- 根据实际完成情况更新 `docs/plans/TODO.zh_CN.md` 第 3、4 项。
 
 验收：
 
@@ -1450,7 +1450,7 @@ CharacterCardPage select image
 交付：
 
 - 按发布规范将本功能阶段版本升级为 `v0.3.0-alpha`；这是分支合并前的收尾动作。
-- 同步更新构建元数据、项目元数据、用户可见版本文案和多语言文档中的当前版本号。实现时至少核对 `utils/app_metadata.py`、`build.bat`、`pyproject.toml`、`scripts/build_meta.py` 默认版本来源、`README.md`、`docs/README.*.md`、`i18n/*` 的 about 版本文案，以及运行时 HTTP User-Agent 是否仍由统一应用元数据生成。
+- 同步更新构建元数据、项目元数据、用户可见版本文案和多语言文档中的当前版本号。实现时至少核对 `utils/app_metadata.py`、`build.bat`、`pyproject.toml`、`scripts/build_meta.py` 默认版本来源、`README.md`、`docs/readme/README.*.md`、`i18n/*` 的 about 版本文案，以及运行时 HTTP User-Agent 是否仍由统一应用元数据生成。
 - 若发布规范文档中的示例命令被用作当前推荐命令，同步改为 `v0.3.0-alpha`；若只是历史示例，保持示例性质但避免让用户误读为当前版本。
 - 版本升级提交使用 `chore: prepare v0.3.0-alpha release`。
 

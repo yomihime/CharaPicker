@@ -251,6 +251,23 @@ def call_video_model(
     return _call_model(request, on_stream_delta=on_stream_delta)
 
 
+def call_audio_model(
+    request: ModelCallRequest,
+    *,
+    on_stream_delta: Callable[[str], None] | None = None,
+) -> ModelCallResult:
+    if request.backend == "dashscope":
+        return _call_model(request.model_copy(update={"stream": False}))
+    if request.backend != "openai_compatible":
+        raise ModelCallError("Audio input is not supported by the selected model backend.")
+    extra_body = dict(request.extra_body)
+    extra_body.setdefault("modalities", ["text"])
+    return _call_model(
+        request.model_copy(update={"stream": True, "extra_body": extra_body}),
+        on_stream_delta=on_stream_delta,
+    )
+
+
 def _render_template(template: str, variables: dict[str, Any]) -> str:
     normalized = {key: _stringify_value(value) for key, value in variables.items()}
     field_names = {field_name for _, field_name, _, _ in Formatter().parse(template) if field_name}
@@ -389,6 +406,22 @@ def _to_dashscope_message(message: ModelMessage) -> dict[str, Any]:
                 if isinstance(fps, (int, float)):
                     video_part["fps"] = fps
                 content.append(video_part)
+            continue
+        if "audio" in item:
+            audio = item.get("audio")
+            if isinstance(audio, str):
+                content.append({"audio": _to_dashscope_file_reference(audio)})
+            continue
+        if item_type == "audio_url":
+            audio_url = item.get("audio_url")
+            if isinstance(audio_url, dict) and isinstance(audio_url.get("url"), str):
+                content.append({"audio": _to_dashscope_file_reference(audio_url["url"])})
+            continue
+        if item_type == "input_audio":
+            input_audio = item.get("input_audio")
+            if isinstance(input_audio, dict) and isinstance(input_audio.get("data"), str):
+                content.append({"audio": _to_dashscope_file_reference(input_audio["data"])})
+            continue
     return {"role": message.role, "content": content}
 
 
@@ -460,12 +493,77 @@ def _to_openai_compatible_message(message: ModelMessage) -> dict[str, Any]:
         if _is_video_content_item(item):
             content.extend(_openai_video_item_to_image_parts(item))
             continue
+        if _is_audio_content_item(item):
+            content.append(_openai_audio_item_to_input_audio_part(item))
+            continue
         content.append(item)
     return {"role": message.role, "content": content}
 
 
 def _is_video_content_item(item: dict[str, Any]) -> bool:
     return "video" in item or item.get("type") == "video_url"
+
+
+def _is_audio_content_item(item: dict[str, Any]) -> bool:
+    return (
+        "audio" in item
+        or "input_audio" in item
+        or item.get("type") in {"audio_url", "input_audio"}
+    )
+
+
+def _openai_audio_item_to_input_audio_part(item: dict[str, Any]) -> dict[str, Any]:
+    audio_data: str | None = None
+    audio_format = item.get("format")
+    if not isinstance(audio_format, str) or not audio_format.strip():
+        audio_format = None
+
+    input_audio = item.get("input_audio")
+    if isinstance(input_audio, dict):
+        value = input_audio.get("data")
+        if isinstance(value, str):
+            audio_data = value
+        value_format = input_audio.get("format")
+        if isinstance(value_format, str) and value_format.strip():
+            audio_format = value_format
+    if audio_data is None:
+        value = item.get("audio")
+        if isinstance(value, str):
+            audio_data = value
+    if audio_data is None and item.get("type") == "audio_url":
+        audio_url = item.get("audio_url")
+        if isinstance(audio_url, dict) and isinstance(audio_url.get("url"), str):
+            audio_data = audio_url["url"]
+
+    if not isinstance(audio_data, str) or not audio_data.strip():
+        raise ModelCallError("OpenAI-compatible audio input requires an audio file reference.")
+
+    normalized_data, inferred_format = _openai_audio_reference_to_data(audio_data)
+    input_audio_payload = {
+        "data": normalized_data,
+        "format": (audio_format or inferred_format or "wav").strip().lower(),
+    }
+    return {"type": "input_audio", "input_audio": input_audio_payload}
+
+
+def _openai_audio_reference_to_data(value: str) -> tuple[str, str | None]:
+    stripped = value.strip()
+    lower_value = stripped.lower()
+    if lower_value.startswith(("http://", "https://", "data:")):
+        return stripped, _infer_audio_format(stripped)
+
+    audio_path = _local_path_from_reference(stripped)
+    if audio_path is None or not audio_path.is_file():
+        raise ModelCallError("OpenAI-compatible audio input currently requires a local audio file.")
+    encoded = base64.b64encode(audio_path.read_bytes()).decode("ascii")
+    return f"data:;base64,{encoded}", _infer_audio_format(audio_path.name)
+
+
+def _infer_audio_format(value: str) -> str | None:
+    suffix = Path(value.split("?", 1)[0]).suffix.lstrip(".").lower()
+    if suffix:
+        return "mp3" if suffix == "mpeg" else suffix
+    return None
 
 
 def _openai_video_item_to_image_parts(item: dict[str, Any]) -> list[dict[str, Any]]:

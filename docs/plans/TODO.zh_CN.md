@@ -28,13 +28,13 @@
 
 | 顺序 | 待办 | 优先级 | 规模 | 主要验收点 |
 | --- | --- | --- | --- | --- |
-| 6 | 补充模型页图片与视频测试素材来源记录 | 低 | 小 | 如后续需要更完整素材声明，补充原始 URL；或替换为新的自由素材并更新 `docs/asset-material-declaration.zh_CN.md`。 |
+| 6 | 补充模型页图片与视频测试素材来源记录 | 低 | 小 | 如后续需要更完整素材声明，补充原始 URL；或替换为新的自由素材并更新 `docs/reference/asset-material-declaration.zh_CN.md`。 |
 | 7 | 继续扩展首版以外的 API 规范 | 低 | 大 | 在多供应商首版稳定后，按优先级继续评估 OpenAI Responses、Gemini GenerateContent、Anthropic Messages 等 schema；每个 schema 需通过中间件路由和模型页测试验证后再开放。 |
 | 8 | 增强 transcript 后处理能力 | 低 | 中 | 在 episode transcript 基础上按需增加说话人识别、置信度、字幕导入合并或人工校正流程，不影响首版 Whisper 接入。 |
 
 ## 已完成并移出队列
 
-- 整理输出角色卡空间：基础版已完成，详细计划归档到 [角色卡最终编译与角色卡页面计划](archive/character-card-compilation-plan.completed.zh_CN.md)。
+- 整理输出角色卡空间：基础版已完成，详细计划归档到 [角色卡最终编译与角色卡页面计划](../archive/character-card-compilation-plan.completed.zh_CN.md)。
 - 目标角色移动到角色卡页面，提取只提取素材信息，角色卡页面编译角色卡：基础版已完成，主页不再编辑目标角色，预览完成不再自动生成角色卡。
 - 内置 proxy 设置：基础版已完成，设置页支持 HTTP、HTTPS、SOCKS5、SOCKS5 远程 DNS、固定三站点连通性测试和自定义 URL 测试；模型请求、模型列表、FFmpeg 下载和 llama.cpp 下载统一走网络中间件，日志和错误摘要需保持敏感信息脱敏。
 
