@@ -63,6 +63,7 @@ from utils.cloud_model_presets import (
     normalize_cloud_endpoint_id,
     normalize_cloud_provider,
     normalize_video_input_mode,
+    provider_requires_aliyun_extra_body,
     provider_supports_capability,
     scale_cloud_max_output_tokens_for_video_duration,
     upsert_cloud_model_preset,
@@ -135,8 +136,8 @@ def _video_max_output_tokens(max_output_tokens_per_minute: int, video_path: Path
     return max_tokens
 
 
-def _cloud_request_extra_body(base_url: str) -> dict[str, Any]:
-    if "dashscope.aliyuncs.com" in base_url.lower():
+def _cloud_request_extra_body(provider: str) -> dict[str, Any]:
+    if provider_requires_aliyun_extra_body(provider):
         return {"enable_thinking": False}
     return {}
 
@@ -275,7 +276,7 @@ class CloudTextTestWorker(QObject):
                 temperature=0,
                 max_tokens=self.max_output_tokens,
                 stream=True,
-                extra_body=_cloud_request_extra_body(self.base_url),
+                extra_body=_cloud_request_extra_body(self.provider),
                 messages=[
                     ModelMessage(role="system", content="You are a model connectivity test assistant."),
                     ModelMessage(
@@ -354,7 +355,7 @@ class CloudImageTestWorker(QObject):
                 temperature=0,
                 max_tokens=self.max_output_tokens,
                 stream=True,
-                extra_body=_cloud_request_extra_body(self.base_url),
+                extra_body=_cloud_request_extra_body(self.provider),
                 messages=[
                     ModelMessage(role="system", content="You are a vision connectivity test assistant."),
                     ModelMessage(
@@ -444,7 +445,7 @@ class CloudVideoTestWorker(QObject):
                 api_key=self.api_key,
                 temperature=0,
                 max_tokens=max_tokens,
-                extra_body=_cloud_request_extra_body(self.base_url),
+                extra_body=_cloud_request_extra_body(self.provider),
                 messages=[
                     ModelMessage(role="system", content="You are a video connectivity test assistant."),
                     ModelMessage(
@@ -597,7 +598,7 @@ class CloudAllTestWorker(QObject):
             temperature=0,
             max_tokens=self.max_output_tokens,
             stream=True,
-            extra_body=_cloud_request_extra_body(self.base_url),
+            extra_body=_cloud_request_extra_body(self.provider),
             messages=[
                 ModelMessage(role="system", content="You are a model connectivity test assistant."),
                 ModelMessage(role="user", content=user_prompt),
@@ -623,7 +624,7 @@ class CloudAllTestWorker(QObject):
             temperature=0,
             max_tokens=self.max_output_tokens,
             stream=True,
-            extra_body=_cloud_request_extra_body(self.base_url),
+            extra_body=_cloud_request_extra_body(self.provider),
             messages=[
                 ModelMessage(role="system", content="You are a vision connectivity test assistant."),
                 ModelMessage(
@@ -658,7 +659,7 @@ class CloudAllTestWorker(QObject):
             api_key=self.api_key,
             temperature=0,
             max_tokens=max_tokens,
-            extra_body=_cloud_request_extra_body(self.base_url),
+            extra_body=_cloud_request_extra_body(self.provider),
             messages=[
                 ModelMessage(role="system", content="You are a video connectivity test assistant."),
                 ModelMessage(

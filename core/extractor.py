@@ -33,6 +33,7 @@ from utils.cloud_model_presets import (
     CloudModelPreset,
     cloud_model_provider,
     load_cloud_model_presets,
+    provider_requires_aliyun_extra_body,
     scale_cloud_max_output_tokens_for_video_duration,
 )
 from utils.ffmpeg_tool import FfmpegProcessError, probe_video_duration_seconds
@@ -562,8 +563,8 @@ class Extractor(QObject):
                 candidates.append(payload)
         return candidates
 
-    def _video_model_extra_body(self, base_url: str) -> dict[str, Any]:
-        if "dashscope.aliyuncs.com" in base_url.lower():
+    def _video_model_extra_body(self, provider: str) -> dict[str, Any]:
+        if provider_requires_aliyun_extra_body(provider):
             return {"enable_thinking": False}
         return {}
 
@@ -841,6 +842,7 @@ class Extractor(QObject):
         *,
         chunk_inputs: list[dict[str, Any]] | None = None,
         backend: ModelBackend,
+        provider: str,
         model_name: str,
         base_url: str,
         api_key: str,
@@ -928,6 +930,7 @@ class Extractor(QObject):
                     config,
                     chunk_input=chunk_input,
                     backend=backend,
+                    provider=provider,
                     model_name=model_name,
                     base_url=base_url,
                     api_key=api_key,
@@ -1097,6 +1100,7 @@ class Extractor(QObject):
         *,
         chunk_input: dict[str, Any],
         backend: ModelBackend,
+        provider: str,
         model_name: str,
         base_url: str,
         api_key: str,
@@ -1138,7 +1142,7 @@ class Extractor(QObject):
             stream=False,
             timeout_seconds=240,
             response_format={"type": "json_object"},
-            extra_body=self._video_model_extra_body(base_url),
+            extra_body=self._video_model_extra_body(provider),
             metadata={
                 "project_id": config.project_id,
                 "stage": "full_chunk_extraction",
@@ -1219,6 +1223,7 @@ class Extractor(QObject):
         config: ProjectConfig,
         *,
         backend: ModelBackend,
+        provider: str,
         model_name: str,
         base_url: str,
         api_key: str,
@@ -1313,7 +1318,7 @@ class Extractor(QObject):
                     stream=False,
                     timeout_seconds=240,
                     response_format={"type": "json_object"},
-                    extra_body=self._video_model_extra_body(base_url),
+                    extra_body=self._video_model_extra_body(provider),
                     metadata={
                         "project_id": config.project_id,
                         "stage": "preview_chunk_extraction",
@@ -1605,6 +1610,7 @@ class Extractor(QObject):
             manifest,
             chunk_inputs=chunk_inputs,
             backend=cloud_model_provider(preset.provider).backend_for("video"),
+            provider=preset.provider,
             model_name=preset.model_name,
             base_url=preset.base_url,
             api_key=preset.api_key,
@@ -1702,6 +1708,7 @@ class Extractor(QObject):
             created_count, extraction_usage, extracted_chunks = self._extract_preview_chunk_json_from_materials(
                 config,
                 backend=cloud_model_provider(preset.provider).backend_for("video"),
+                provider=preset.provider,
                 model_name=preset.model_name,
                 base_url=preset.base_url,
                 api_key=preset.api_key,
