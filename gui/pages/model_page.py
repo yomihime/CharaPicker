@@ -48,12 +48,22 @@ from utils.cloud_model_presets import (
     DEFAULT_CLOUD_MAX_OUTPUT_TOKENS,
     CLOUD_PROVIDER_IDS,
     DEFAULT_CLOUD_VIDEO_FPS,
+    DEFAULT_CLOUD_API_SCHEMA,
+    DEFAULT_VIDEO_INPUT_MODE,
+    base_url_has_unresolved_placeholder,
+    cloud_model_endpoint,
     CloudModelPreset,
+    cloud_endpoint_requires_custom_base_url,
     cloud_model_provider,
+    cloud_provider_endpoints,
     coerce_cloud_max_output_tokens,
     delete_cloud_model_preset,
     load_cloud_model_presets,
+    normalize_cloud_api_schema,
+    normalize_cloud_endpoint_id,
     normalize_cloud_provider,
+    normalize_video_input_mode,
+    provider_supports_capability,
     scale_cloud_max_output_tokens_for_video_duration,
     upsert_cloud_model_preset,
 )
@@ -88,6 +98,14 @@ from utils.ai_model_middleware import (
 TEST_MEDIA_ROOT = APP_ROOT / "res" / "test_media"
 IMAGE_TEST_ASSET = TEST_MEDIA_ROOT / "model_test_input.jpg"
 VIDEO_TEST_ASSET = TEST_MEDIA_ROOT / "model_test_input.mp4"
+API_SCHEMA_IDS = ("openai_chat_completions", "dashscope_native")
+VIDEO_INPUT_MODE_IDS = (
+    "auto",
+    "native_video",
+    "frame_sampling",
+    "frame_sampling_with_transcript",
+    "audio_transcript_only",
+)
 LOGGER = logging.getLogger(__name__)
 EASTER_TAP_TARGET = 9
 
@@ -121,6 +139,31 @@ def _cloud_request_extra_body(base_url: str) -> dict[str, Any]:
     if "dashscope.aliyuncs.com" in base_url.lower():
         return {"enable_thinking": False}
     return {}
+
+
+def _status_payload(status: str, content: str) -> dict[str, Any]:
+    return {"status": status, "content": content, "token_usage": {}}
+
+
+def _video_mode_support_status(provider: str, video_input_mode: str) -> tuple[str, str] | None:
+    mode = normalize_video_input_mode(video_input_mode, provider)
+    if mode == "auto":
+        if provider_supports_capability(provider, "native_video"):
+            return None
+        if provider_supports_capability(provider, "frame_sampling_video"):
+            return None
+        return ("model_unsupported", t("model.cloud.test.unsupported.video"))
+    if mode == "native_video":
+        if provider_supports_capability(provider, "native_video"):
+            return None
+        return ("api_unsupported", t("model.cloud.test.unsupported.nativeVideo"))
+    if mode == "frame_sampling":
+        if provider_supports_capability(provider, "frame_sampling_video"):
+            return None
+        return ("api_unsupported", t("model.cloud.test.unsupported.frameSampling"))
+    if mode in {"frame_sampling_with_transcript", "audio_transcript_only"}:
+        return ("skipped", t("model.cloud.test.unsupported.transcriptMode"))
+    return ("api_unsupported", t("model.cloud.test.unsupported.video"))
 
 
 EASTER_PROMPT_OVERRIDE = (
@@ -171,16 +214,17 @@ class CloudModelListWorker(QObject):
     failed = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, provider: str, base_url: str, api_key: str) -> None:
+    def __init__(self, provider: str, base_url: str, api_key: str, api_schema: str) -> None:
         super().__init__()
         self.provider = provider
         self.base_url = base_url
         self.api_key = api_key
+        self.api_schema = api_schema
 
     def run(self) -> None:
         LOGGER.info("Cloud model list worker started; base_url=%s", self.base_url)
         try:
-            models = fetch_cloud_models(self.provider, self.base_url, self.api_key)
+            models = fetch_cloud_models(self.provider, self.base_url, self.api_key, self.api_schema)
         except CloudModelListError as exc:
             LOGGER.warning("Cloud model list worker failed; base_url=%s", self.base_url, exc_info=True)
             self.failed.emit(str(exc))
@@ -364,6 +408,7 @@ class CloudVideoTestWorker(QObject):
         model_name: str,
         video_path: Path,
         video_fps: float,
+        video_input_mode: str,
         max_output_tokens: int,
         locale: str,
     ) -> None:
@@ -374,6 +419,7 @@ class CloudVideoTestWorker(QObject):
         self.model_name = model_name
         self.video_path = video_path
         self.video_fps = video_fps
+        self.video_input_mode = video_input_mode
         self.max_output_tokens = max_output_tokens
         self.locale = locale
 
@@ -385,6 +431,10 @@ class CloudVideoTestWorker(QObject):
             self.video_path,
         )
         try:
+            unsupported = _video_mode_support_status(self.provider, self.video_input_mode)
+            if unsupported is not None:
+                status, message = unsupported
+                raise ModelMiddlewareError(f"{t(f'model.cloud.test.status.{status}')}: {message}")
             max_tokens = _video_max_output_tokens(self.max_output_tokens, self.video_path)
             request = ModelCallRequest(
                 purpose="connectivity_test_video",
@@ -453,6 +503,7 @@ class CloudAllTestWorker(QObject):
         image_path: Path,
         video_path: Path,
         video_fps: float,
+        video_input_mode: str,
         max_output_tokens: int,
         locale: str,
         text_prompt_override: str | None = None,
@@ -465,6 +516,7 @@ class CloudAllTestWorker(QObject):
         self.image_path = image_path
         self.video_path = video_path
         self.video_fps = video_fps
+        self.video_input_mode = video_input_mode
         self.max_output_tokens = max_output_tokens
         self.locale = locale
         self.text_prompt_override = text_prompt_override
@@ -521,6 +573,11 @@ class CloudAllTestWorker(QObject):
             self.sectionFinished.emit(section, "error", {})
             return {"status": "error", "content": str(exc)}
 
+    def _unsupported_section(self, section: str, status: str, message: str) -> dict[str, Any]:
+        self.sectionStarted.emit(section)
+        self.sectionFinished.emit(section, status, {})
+        return _status_payload(status, message)
+
     def _run_text_test(self) -> dict[str, str]:
         if self.text_prompt_override:
             user_prompt = self.text_prompt_override
@@ -550,6 +607,12 @@ class CloudAllTestWorker(QObject):
         return self._safe_call(request, "text")
 
     def _run_image_test(self) -> dict[str, str]:
+        if not provider_supports_capability(self.provider, "image"):
+            return self._unsupported_section(
+                "image",
+                "model_unsupported",
+                t("model.cloud.test.unsupported.image"),
+            )
         image_data_url = _build_data_url(self.image_path, "image/jpeg")
         request = ModelCallRequest(
             purpose="connectivity_test_image",
@@ -582,6 +645,10 @@ class CloudAllTestWorker(QObject):
         return self._safe_call(request, "image")
 
     def _run_video_test(self) -> dict[str, str]:
+        unsupported = _video_mode_support_status(self.provider, self.video_input_mode)
+        if unsupported is not None:
+            status, message = unsupported
+            return self._unsupported_section("video", status, message)
         max_tokens = _video_max_output_tokens(self.max_output_tokens, self.video_path)
         request = ModelCallRequest(
             purpose="connectivity_test_video",
@@ -763,6 +830,7 @@ class ModelPage(QWidget):
         self._cloud_presets: list[CloudModelPreset] = []
         self._loading_cloud_preset = False
         self._restoring_model_selection = False
+        self._syncing_cloud_endpoint_options = False
         self._syncing_cloud_video_fps_slider_from_text = False
         self._syncing_cloud_max_output_tokens_slider_from_text = False
         self._llamacpp_ready_cache = initial_llamacpp_ready
@@ -873,8 +941,14 @@ class ModelPage(QWidget):
             provider = cloud_model_provider(provider_id)
             self.cloud_provider_combo.addItem(t(provider.label_key), provider.provider_id)
 
+        self.cloud_endpoint_combo = ComboBox(self.cloud_card)
+
         self.cloud_base_url = LineEdit(self.cloud_card)
         self.cloud_base_url.setPlaceholderText(t("model.cloud.baseUrl.placeholder"))
+
+        self.cloud_api_schema_combo = ComboBox(self.cloud_card)
+        for schema_id in API_SCHEMA_IDS:
+            self.cloud_api_schema_combo.addItem(t(f"model.cloud.apiSchema.{schema_id}"), schema_id)
 
         self.cloud_api_key = PasswordLineEdit(self.cloud_card)
         self.cloud_api_key.setPlaceholderText(t("model.cloud.apiKey.placeholder"))
@@ -899,6 +973,13 @@ class ModelPage(QWidget):
         self.cloud_video_fps.setMaximumWidth(72)
         video_fps_row.addWidget(self.cloud_video_fps_slider, 1)
         video_fps_row.addWidget(self.cloud_video_fps)
+
+        self.cloud_video_input_mode_combo = ComboBox(self.cloud_card)
+        for mode_id in VIDEO_INPUT_MODE_IDS:
+            self.cloud_video_input_mode_combo.addItem(
+                t(f"model.cloud.videoInputMode.{mode_id}"),
+                mode_id,
+            )
 
         max_output_tokens_row = QHBoxLayout()
         max_output_tokens_row.setSpacing(8)
@@ -945,30 +1026,37 @@ class ModelPage(QWidget):
         connection_grid.addWidget(BodyLabel(t("model.cloud.modelName"), self.cloud_card), 1, 2)
         connection_grid.addLayout(model_name_row, 1, 3, 1, 2)
 
-        connection_grid.addWidget(BodyLabel(t("model.cloud.baseUrl"), self.cloud_card), 2, 0)
-        connection_grid.addWidget(self.cloud_base_url, 2, 1, 1, 4)
-        connection_grid.addWidget(BodyLabel(t("model.cloud.apiKey"), self.cloud_card), 3, 0)
-        connection_grid.addWidget(self.cloud_api_key, 3, 1, 1, 4)
+        connection_grid.addWidget(BodyLabel(t("model.cloud.endpoint"), self.cloud_card), 2, 0)
+        connection_grid.addWidget(self.cloud_endpoint_combo, 2, 1)
+        connection_grid.addWidget(BodyLabel(t("model.cloud.apiSchema"), self.cloud_card), 2, 2)
+        connection_grid.addWidget(self.cloud_api_schema_combo, 2, 3, 1, 2)
 
-        connection_grid.addWidget(BodyLabel(t("model.cloud.videoFps"), self.cloud_card), 4, 0)
-        connection_grid.addLayout(video_fps_row, 4, 1)
-        connection_grid.addWidget(BodyLabel(t("model.test.type"), self.cloud_card), 4, 2)
-        connection_grid.addWidget(self.cloud_test_type_combo, 4, 3, 1, 2)
+        connection_grid.addWidget(BodyLabel(t("model.cloud.baseUrl"), self.cloud_card), 3, 0)
+        connection_grid.addWidget(self.cloud_base_url, 3, 1, 1, 4)
+        connection_grid.addWidget(BodyLabel(t("model.cloud.apiKey"), self.cloud_card), 4, 0)
+        connection_grid.addWidget(self.cloud_api_key, 4, 1, 1, 4)
 
-        connection_grid.addWidget(BodyLabel(t("model.cloud.maxOutputTokens"), self.cloud_card), 5, 0)
-        connection_grid.addLayout(max_output_tokens_row, 5, 1)
+        connection_grid.addWidget(BodyLabel(t("model.cloud.videoInputMode"), self.cloud_card), 5, 0)
+        connection_grid.addWidget(self.cloud_video_input_mode_combo, 5, 1)
+        connection_grid.addWidget(BodyLabel(t("model.cloud.videoFps"), self.cloud_card), 5, 2)
+        connection_grid.addLayout(video_fps_row, 5, 3, 1, 2)
 
-        connection_grid.addWidget(self.cloud_test_action_label, 6, 0)
-        connection_grid.addWidget(self.test_cloud_model_button, 6, 1, 1, 4)
+        connection_grid.addWidget(BodyLabel(t("model.cloud.maxOutputTokens"), self.cloud_card), 6, 0)
+        connection_grid.addLayout(max_output_tokens_row, 6, 1)
+        connection_grid.addWidget(BodyLabel(t("model.test.type"), self.cloud_card), 6, 2)
+        connection_grid.addWidget(self.cloud_test_type_combo, 6, 3, 1, 2)
+
+        connection_grid.addWidget(self.cloud_test_action_label, 7, 0)
+        connection_grid.addWidget(self.test_cloud_model_button, 7, 1, 1, 4)
         connection_grid.addWidget(
             BodyLabel(t("model.cloud.test.result"), self.cloud_card),
-            7,
+            8,
             0,
             1,
             1,
             Qt.AlignmentFlag.AlignTop,
         )
-        connection_grid.addWidget(self.cloud_test_result, 7, 1, 1, 4)
+        connection_grid.addWidget(self.cloud_test_result, 8, 1, 1, 4)
         connection_grid.setColumnStretch(0, 0)
         connection_grid.setColumnStretch(1, 1)
         connection_grid.setColumnStretch(2, 0)
@@ -997,7 +1085,11 @@ class ModelPage(QWidget):
         self.cloud_max_output_tokens.editingFinished.connect(self._commit_cloud_max_output_tokens_text)
         self.cloud_video_fps.installEventFilter(self)
         self.cloud_max_output_tokens.installEventFilter(self)
-        self.cloud_provider_combo.currentIndexChanged.connect(self._sync_cloud_video_fps_availability)
+        self.cloud_provider_combo.currentIndexChanged.connect(self._on_cloud_provider_changed)
+        self.cloud_endpoint_combo.currentIndexChanged.connect(self._on_cloud_endpoint_changed)
+        self.cloud_video_input_mode_combo.currentIndexChanged.connect(
+            self._sync_cloud_video_input_mode_availability
+        )
         self.cloud_preset_combo.currentIndexChanged.connect(self._load_selected_cloud_preset)
         self.save_cloud_preset_button.clicked.connect(self._save_current_cloud_preset)
         self.delete_cloud_preset_button.clicked.connect(self._delete_selected_cloud_preset)
@@ -1254,24 +1346,21 @@ class ModelPage(QWidget):
             LOGGER.info("Cloud model fetch ignored because a fetch is already running")
             return
 
-        base_url = self.cloud_base_url.text().strip()
-        api_key = self.cloud_api_key.text().strip()
-        if not base_url:
-            LOGGER.warning("Cloud model fetch blocked because base URL is empty")
-            InfoBar.warning(
-                title=t("model.cloud.models.failure.title"),
-                content=t("model.cloud.models.baseUrlRequired"),
-                parent=self.window(),
-                position=InfoBarPosition.TOP_RIGHT,
-                duration=4000,
-            )
+        base_url = self._validated_cloud_base_url(t("model.cloud.models.failure.title"))
+        if base_url is None:
             return
+        api_key = self.cloud_api_key.text().strip()
 
         LOGGER.info("Cloud model fetch requested; base_url=%s has_api_key=%s", base_url, bool(api_key))
         self.fetch_cloud_models_button.setEnabled(False)
         self.fetch_cloud_models_button.setText(t("model.cloud.models.fetching"))
         self._cloud_models_thread = QThread(self)
-        self._cloud_models_worker = CloudModelListWorker(self._current_cloud_provider_id(), base_url, api_key)
+        self._cloud_models_worker = CloudModelListWorker(
+            self._current_cloud_provider_id(),
+            base_url,
+            api_key,
+            self._current_cloud_api_schema(),
+        )
         self._cloud_models_worker.moveToThread(self._cloud_models_thread)
         self._cloud_models_thread.started.connect(self._cloud_models_worker.run)
         self._cloud_models_worker.succeeded.connect(self._show_cloud_models)
@@ -1307,6 +1396,119 @@ class ModelPage(QWidget):
     def _current_cloud_provider_id(self) -> str:
         return normalize_cloud_provider(str(self.cloud_provider_combo.currentData() or ""))
 
+    def _current_cloud_endpoint_id(self) -> str:
+        return normalize_cloud_endpoint_id(
+            self._current_cloud_provider_id(),
+            str(self.cloud_endpoint_combo.currentData() or ""),
+            self.cloud_base_url.text().strip(),
+        )
+
+    def _current_cloud_api_schema(self) -> str:
+        return normalize_cloud_api_schema(
+            str(self.cloud_api_schema_combo.currentData() or DEFAULT_CLOUD_API_SCHEMA),
+            self._current_cloud_provider_id(),
+        )
+
+    def _current_cloud_video_input_mode(self) -> str:
+        return normalize_video_input_mode(
+            str(self.cloud_video_input_mode_combo.currentData() or DEFAULT_VIDEO_INPUT_MODE),
+            self._current_cloud_provider_id(),
+        )
+
+    def _set_cloud_combo_data(self, combo: ComboBox, value: str) -> None:
+        index = combo.findData(value)
+        if index < 0:
+            index = 0
+        with QSignalBlocker(combo):
+            combo.setCurrentIndex(index)
+
+    def _set_cloud_api_schema(self, api_schema: str) -> None:
+        self._set_cloud_combo_data(
+            self.cloud_api_schema_combo,
+            normalize_cloud_api_schema(api_schema, self._current_cloud_provider_id()),
+        )
+
+    def _set_cloud_video_input_mode(self, video_input_mode: str) -> None:
+        self._set_cloud_combo_data(
+            self.cloud_video_input_mode_combo,
+            normalize_video_input_mode(video_input_mode, self._current_cloud_provider_id()),
+        )
+        self._sync_cloud_video_input_mode_availability()
+
+    def _sync_cloud_endpoint_options(
+        self,
+        selected_endpoint_id: str | None = None,
+        base_url: str = "",
+    ) -> None:
+        provider_id = self._current_cloud_provider_id()
+        endpoint_id = normalize_cloud_endpoint_id(
+            provider_id,
+            selected_endpoint_id or str(self.cloud_endpoint_combo.currentData() or ""),
+            base_url or self.cloud_base_url.text().strip(),
+        )
+        self._syncing_cloud_endpoint_options = True
+        try:
+            with QSignalBlocker(self.cloud_endpoint_combo):
+                self.cloud_endpoint_combo.clear()
+                for endpoint in cloud_provider_endpoints(provider_id):
+                    self.cloud_endpoint_combo.addItem(t(endpoint.label_key), endpoint.endpoint_id)
+                index = self.cloud_endpoint_combo.findData(endpoint_id)
+                if index < 0:
+                    index = 0
+                self.cloud_endpoint_combo.setCurrentIndex(index)
+        finally:
+            self._syncing_cloud_endpoint_options = False
+        self._apply_cloud_endpoint_to_base_url(preserve_existing=True)
+
+    def _apply_cloud_endpoint_to_base_url(self, *, preserve_existing: bool) -> None:
+        provider_id = self._current_cloud_provider_id()
+        endpoint_id = self._current_cloud_endpoint_id()
+        endpoint = cloud_model_endpoint(provider_id, endpoint_id)
+        requires_custom_url = cloud_endpoint_requires_custom_base_url(provider_id, endpoint_id)
+        self.cloud_base_url.setReadOnly(not requires_custom_url)
+        self.cloud_base_url.setPlaceholderText(endpoint.base_url or t("model.cloud.baseUrl.placeholder"))
+        if endpoint.base_url and (not preserve_existing or not self.cloud_base_url.text().strip()):
+            self.cloud_base_url.setText(endpoint.base_url)
+        elif not endpoint.base_url and not preserve_existing:
+            self.cloud_base_url.clear()
+
+    def _on_cloud_provider_changed(self) -> None:
+        provider = cloud_model_provider(self._current_cloud_provider_id())
+        self._sync_cloud_endpoint_options(provider.default_endpoint_id)
+        self._set_cloud_api_schema(provider.default_api_schema)
+        self._set_cloud_video_input_mode(provider.default_video_input_mode)
+        self._apply_cloud_endpoint_to_base_url(preserve_existing=False)
+        self._sync_cloud_video_fps_availability()
+
+    def _on_cloud_endpoint_changed(self) -> None:
+        if self._syncing_cloud_endpoint_options:
+            return
+        self._apply_cloud_endpoint_to_base_url(preserve_existing=False)
+
+    def _validated_cloud_base_url(self, title: str) -> str | None:
+        base_url = self.cloud_base_url.text().strip()
+        if not base_url:
+            LOGGER.warning("Cloud action blocked because base URL is empty")
+            InfoBar.warning(
+                title=title,
+                content=t("model.cloud.models.baseUrlRequired"),
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=4000,
+            )
+            return None
+        if base_url_has_unresolved_placeholder(base_url):
+            LOGGER.warning("Cloud action blocked because base URL contains an unresolved placeholder")
+            InfoBar.warning(
+                title=title,
+                content=t("model.cloud.models.baseUrlPlaceholder"),
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=5000,
+            )
+            return None
+        return base_url
+
     def _current_cloud_video_fps(self) -> float:
         self._commit_cloud_video_fps_text()
         return self._last_valid_cloud_video_fps
@@ -1323,9 +1525,12 @@ class ModelPage(QWidget):
         return CloudModelPreset(
             name=self.cloud_preset_name.text().strip() or self.cloud_preset_combo.currentText().strip(),
             provider=self._current_cloud_provider_id(),
+            endpoint_id=self._current_cloud_endpoint_id(),
             base_url=base_url,
+            api_schema=self._current_cloud_api_schema(),
             api_key=self.cloud_api_key.text().strip(),
             model_name=model_name,
+            video_input_mode=self._current_cloud_video_input_mode(),
             video_fps=self._current_cloud_video_fps(),
             max_output_tokens=self._current_cloud_max_output_tokens(),
         )
@@ -1450,10 +1655,36 @@ class ModelPage(QWidget):
 
     def _sync_cloud_video_fps_availability(self) -> None:
         provider = cloud_model_provider(self._current_cloud_provider_id())
-        self.cloud_video_fps.setEnabled(provider.supports_video_fps)
-        self.cloud_video_fps_slider.setEnabled(provider.supports_video_fps)
-        self.cloud_video_fps.setToolTip(t(f"model.cloud.videoFps.mode.{provider.video_fps_mode}"))
-        self.cloud_video_fps_slider.setToolTip(t(f"model.cloud.videoFps.mode.{provider.video_fps_mode}"))
+        video_input_mode = self._current_cloud_video_input_mode()
+        supports_fps = provider.supports_video_fps and video_input_mode != "audio_transcript_only"
+        if video_input_mode == "native_video":
+            supports_fps = provider.video_fps_mode == "direct"
+        elif video_input_mode in {"frame_sampling", "frame_sampling_with_transcript"}:
+            supports_fps = provider_supports_capability(provider.provider_id, "frame_sampling_video")
+
+        self.cloud_video_fps.setEnabled(supports_fps)
+        self.cloud_video_fps_slider.setEnabled(supports_fps)
+        tooltip = t(f"model.cloud.videoFps.mode.{provider.video_fps_mode}")
+        self.cloud_video_fps.setToolTip(tooltip)
+        self.cloud_video_fps_slider.setToolTip(tooltip)
+
+    def _sync_cloud_video_input_mode_availability(self) -> None:
+        unsupported = _video_mode_support_status(
+            self._current_cloud_provider_id(),
+            self._current_cloud_video_input_mode(),
+        )
+        if unsupported is None:
+            self.cloud_video_input_mode_combo.setToolTip(t("model.cloud.videoInputMode.supported"))
+        else:
+            status, message = unsupported
+            self.cloud_video_input_mode_combo.setToolTip(
+                t(
+                    "model.cloud.videoInputMode.unsupported",
+                    status=t(f"model.cloud.test.status.{status}"),
+                    reason=message,
+                )
+            )
+        self._sync_cloud_video_fps_availability()
 
     def _test_cloud_model(self) -> None:
         test_type = self.cloud_test_type_combo.currentData() or "all"
@@ -1472,17 +1703,10 @@ class ModelPage(QWidget):
             LOGGER.info("Cloud text understanding test ignored because a test is already running")
             return
 
-        base_url = self.cloud_base_url.text().strip()
-        model_name = self.cloud_model_name.text().strip()
-        if not base_url:
-            InfoBar.warning(
-                title=t("model.cloud.test.failure.title"),
-                content=t("model.cloud.models.baseUrlRequired"),
-                parent=self.window(),
-                position=InfoBarPosition.TOP_RIGHT,
-                duration=4000,
-            )
+        base_url = self._validated_cloud_base_url(t("model.cloud.test.failure.title"))
+        if base_url is None:
             return
+        model_name = self.cloud_model_name.text().strip()
         if not model_name:
             InfoBar.warning(
                 title=t("model.cloud.test.failure.title"),
@@ -1518,22 +1742,38 @@ class ModelPage(QWidget):
         self._cloud_text_test_thread.finished.connect(self._clear_cloud_text_test_worker)
         self._cloud_text_test_thread.start()
 
+    def _show_cloud_single_test_unsupported(self, test_type: str, status: str, message: str) -> None:
+        status_text = t(f"model.cloud.test.status.{status}")
+        template_key = f"model.cloud.test.{test_type}.unsupportedResult"
+        asset = IMAGE_TEST_ASSET if test_type == "image" else VIDEO_TEST_ASSET
+        self._set_cloud_test_result_text(
+            t(
+                template_key,
+                provider=self.cloud_provider_combo.currentText(),
+                base_url=self.cloud_base_url.text().strip() or t("model.cloud.test.empty"),
+                model_name=self.cloud_model_name.text().strip() or t("model.cloud.test.empty"),
+                asset=asset.relative_to(APP_ROOT).as_posix(),
+                status=status_text,
+                reason=message,
+            )
+        )
+        InfoBar.info(
+            title=t("model.cloud.test.unsupported.title"),
+            content=t("model.cloud.test.unsupported.content", status=status_text, reason=message),
+            parent=self.window(),
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=5000,
+        )
+
     def _test_cloud_image(self) -> None:
         if self._is_cloud_test_running():
             LOGGER.info("Cloud image understanding test ignored because a test is already running")
             return
 
-        base_url = self.cloud_base_url.text().strip()
-        model_name = self.cloud_model_name.text().strip()
-        if not base_url:
-            InfoBar.warning(
-                title=t("model.cloud.test.failure.title"),
-                content=t("model.cloud.models.baseUrlRequired"),
-                parent=self.window(),
-                position=InfoBarPosition.TOP_RIGHT,
-                duration=4000,
-            )
+        base_url = self._validated_cloud_base_url(t("model.cloud.test.failure.title"))
+        if base_url is None:
             return
+        model_name = self.cloud_model_name.text().strip()
         if not model_name:
             InfoBar.warning(
                 title=t("model.cloud.test.failure.title"),
@@ -1541,6 +1781,13 @@ class ModelPage(QWidget):
                 parent=self.window(),
                 position=InfoBarPosition.TOP_RIGHT,
                 duration=4000,
+            )
+            return
+        if not provider_supports_capability(self._current_cloud_provider_id(), "image"):
+            self._show_cloud_single_test_unsupported(
+                "image",
+                "model_unsupported",
+                t("model.cloud.test.unsupported.image"),
             )
             return
         if not IMAGE_TEST_ASSET.exists():
@@ -1595,17 +1842,10 @@ class ModelPage(QWidget):
             LOGGER.info("Cloud video understanding test ignored because a test is already running")
             return
 
-        base_url = self.cloud_base_url.text().strip()
-        model_name = self.cloud_model_name.text().strip()
-        if not base_url:
-            InfoBar.warning(
-                title=t("model.cloud.test.failure.title"),
-                content=t("model.cloud.models.baseUrlRequired"),
-                parent=self.window(),
-                position=InfoBarPosition.TOP_RIGHT,
-                duration=4000,
-            )
+        base_url = self._validated_cloud_base_url(t("model.cloud.test.failure.title"))
+        if base_url is None:
             return
+        model_name = self.cloud_model_name.text().strip()
         if not model_name:
             InfoBar.warning(
                 title=t("model.cloud.test.failure.title"),
@@ -1614,6 +1854,14 @@ class ModelPage(QWidget):
                 position=InfoBarPosition.TOP_RIGHT,
                 duration=4000,
             )
+            return
+        unsupported = _video_mode_support_status(
+            self._current_cloud_provider_id(),
+            self._current_cloud_video_input_mode(),
+        )
+        if unsupported is not None:
+            status, message = unsupported
+            self._show_cloud_single_test_unsupported("video", status, message)
             return
         if not VIDEO_TEST_ASSET.exists():
             short_error = self._short_error(t("model.test.video.assetMissing", path=VIDEO_TEST_ASSET.as_posix()))
@@ -1648,6 +1896,7 @@ class ModelPage(QWidget):
             model_name=model_name,
             video_path=VIDEO_TEST_ASSET,
             video_fps=self._current_cloud_video_fps(),
+            video_input_mode=self._current_cloud_video_input_mode(),
             max_output_tokens=self._current_cloud_max_output_tokens(),
             locale=locale,
         )
@@ -1668,17 +1917,10 @@ class ModelPage(QWidget):
             LOGGER.info("Cloud all-modal test ignored because a test is already running")
             return
 
-        base_url = self.cloud_base_url.text().strip()
-        model_name = self.cloud_model_name.text().strip()
-        if not base_url:
-            InfoBar.warning(
-                title=t("model.cloud.test.failure.title"),
-                content=t("model.cloud.models.baseUrlRequired"),
-                parent=self.window(),
-                position=InfoBarPosition.TOP_RIGHT,
-                duration=4000,
-            )
+        base_url = self._validated_cloud_base_url(t("model.cloud.test.failure.title"))
+        if base_url is None:
             return
+        model_name = self.cloud_model_name.text().strip()
         if not model_name:
             InfoBar.warning(
                 title=t("model.cloud.test.failure.title"),
@@ -1701,6 +1943,7 @@ class ModelPage(QWidget):
             image_path=IMAGE_TEST_ASSET,
             video_path=VIDEO_TEST_ASSET,
             video_fps=self._current_cloud_video_fps(),
+            video_input_mode=self._current_cloud_video_input_mode(),
             max_output_tokens=self._current_cloud_max_output_tokens(),
             locale=locale,
             text_prompt_override=text_prompt_override,
@@ -1917,36 +2160,36 @@ class ModelPage(QWidget):
         locale = current_locale()
         success_count = sum(1 for item in (text_result, image_result, video_result) if item.get("status") == "ok")
         all_ok = success_count == 3
+        failure_statuses = {"error", "failed"}
         failed_items: list[str] = []
+        non_failure_items: list[str] = []
         for key, item in (("text", text_result), ("image", image_result), ("video", video_result)):
-            if item.get("status") != "ok":
+            status = str(item.get("status") or "error")
+            if status in failure_statuses:
                 failed_items.append(t(f"model.test.type.{key}"))
+            elif status != "ok":
+                non_failure_items.append(t(f"model.test.type.{key}"))
         summary = (
             t("model.cloud.test.all.final.success")
             if all_ok
-            else t("model.cloud.test.all.final.failure", failed_items=_join_failed_items(failed_items, locale))
+            else (
+                t(
+                    "model.cloud.test.all.final.failure",
+                    failed_items=_join_failed_items(failed_items, locale),
+                )
+                if failed_items
+                else t(
+                    "model.cloud.test.all.final.completed",
+                    skipped_items=_join_failed_items(non_failure_items, locale),
+                )
+            )
         )
-        if text_result.get("status") == "ok":
-            self._cloud_all_stream_buffers["text"] = text_result.get("content", "")
-            self._cloud_all_section_status["text"] = "ok"
-            self._cloud_all_token_usage["text"] = text_result.get("token_usage", {})
-        else:
-            self._cloud_all_section_status["text"] = "error"
-            self._cloud_all_token_usage["text"] = {}
-        if image_result.get("status") == "ok":
-            self._cloud_all_stream_buffers["image"] = image_result.get("content", "")
-            self._cloud_all_section_status["image"] = "ok"
-            self._cloud_all_token_usage["image"] = image_result.get("token_usage", {})
-        else:
-            self._cloud_all_section_status["image"] = "error"
-            self._cloud_all_token_usage["image"] = {}
-        if video_result.get("status") == "ok":
-            self._cloud_all_stream_buffers["video"] = video_result.get("content", "")
-            self._cloud_all_section_status["video"] = "ok"
-            self._cloud_all_token_usage["video"] = video_result.get("token_usage", {})
-        else:
-            self._cloud_all_section_status["video"] = "error"
-            self._cloud_all_token_usage["video"] = {}
+        for section, result in (("text", text_result), ("image", image_result), ("video", video_result)):
+            status = str(result.get("status") or "error")
+            self._cloud_all_stream_buffers[section] = str(result.get("content") or "")
+            self._cloud_all_section_status[section] = status
+            token_usage = result.get("token_usage")
+            self._cloud_all_token_usage[section] = token_usage if status == "ok" and isinstance(token_usage, dict) else {}
         self._cloud_all_final_summary = summary
         self._set_cloud_test_result_text(self._render_cloud_all_report(summary))
         if all_ok:
@@ -1957,10 +2200,18 @@ class ModelPage(QWidget):
                 position=InfoBarPosition.TOP_RIGHT,
                 duration=3000,
             )
-        else:
+        elif failed_items:
             InfoBar.warning(
                 title=t("model.cloud.test.failure.title"),
                 content=t("model.cloud.test.partialFailure.content"),
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=5000,
+            )
+        else:
+            InfoBar.info(
+                title=t("model.cloud.test.unsupported.title"),
+                content=summary,
                 parent=self.window(),
                 position=InfoBarPosition.TOP_RIGHT,
                 duration=5000,
@@ -1983,7 +2234,7 @@ class ModelPage(QWidget):
     def _show_cloud_all_test_section_finished(self, section: str, status: str, token_usage: dict) -> None:
         if section not in self._cloud_all_section_status:
             return
-        self._cloud_all_section_status[section] = "ok" if status == "ok" else "error"
+        self._cloud_all_section_status[section] = status
         if status == "ok" and isinstance(token_usage, dict):
             self._cloud_all_token_usage[section] = token_usage
         elif status != "ok":
@@ -1993,12 +2244,15 @@ class ModelPage(QWidget):
     def _render_cloud_all_report(self, final_summary: str | None) -> str:
         locale = current_locale()
         header_lines = [
-            f"{t('model.cloud.provider')}：{self.cloud_provider_combo.currentText()}",
-            f"{t('model.cloud.baseUrl')}：{self.cloud_base_url.text().strip() or t('model.cloud.test.empty')}",
-            f"{t('model.cloud.modelName')}：{self.cloud_model_name.text().strip() or t('model.cloud.test.empty')}",
-            f"{t('model.cloud.test.report.targetLanguage')}：{_response_language_name(locale)}",
-            f"{t('model.cloud.test.report.imageAsset')}：{IMAGE_TEST_ASSET.relative_to(APP_ROOT).as_posix()}",
-            f"{t('model.cloud.test.report.videoAsset')}：{VIDEO_TEST_ASSET.relative_to(APP_ROOT).as_posix()}",
+            f"{t('model.cloud.provider')}: {self.cloud_provider_combo.currentText()}",
+            f"{t('model.cloud.endpoint')}: {self.cloud_endpoint_combo.currentText()}",
+            f"{t('model.cloud.apiSchema')}: {self.cloud_api_schema_combo.currentText()}",
+            f"{t('model.cloud.videoInputMode')}: {self.cloud_video_input_mode_combo.currentText()}",
+            f"{t('model.cloud.baseUrl')}: {self.cloud_base_url.text().strip() or t('model.cloud.test.empty')}",
+            f"{t('model.cloud.modelName')}: {self.cloud_model_name.text().strip() or t('model.cloud.test.empty')}",
+            f"{t('model.cloud.test.report.targetLanguage')}: {_response_language_name(locale)}",
+            f"{t('model.cloud.test.report.imageAsset')}: {IMAGE_TEST_ASSET.relative_to(APP_ROOT).as_posix()}",
+            f"{t('model.cloud.test.report.videoAsset')}: {VIDEO_TEST_ASSET.relative_to(APP_ROOT).as_posix()}",
         ]
         sections: list[str] = []
         for key in ("text", "image", "video"):
@@ -2024,7 +2278,7 @@ class ModelPage(QWidget):
             sections.extend(
                 [
                     "",
-                    f"{t('model.cloud.test.report.finalSummary')}：{final_summary}",
+                    f"{t('model.cloud.test.report.finalSummary')}: {final_summary}",
                 ]
             )
         return "\n".join(header_lines + [""] + sections)
@@ -2087,6 +2341,10 @@ class ModelPage(QWidget):
             if not self._restoring_model_selection:
                 set_last_cloud_preset_name("")
             self.cloud_preset_name.clear()
+            self._sync_cloud_endpoint_options(base_url=self.cloud_base_url.text().strip())
+            self._apply_cloud_endpoint_to_base_url(preserve_existing=True)
+            self._set_cloud_api_schema(DEFAULT_CLOUD_API_SCHEMA)
+            self._set_cloud_video_input_mode(DEFAULT_VIDEO_INPUT_MODE)
             self._set_cloud_video_fps(DEFAULT_CLOUD_VIDEO_FPS)
             self._set_cloud_max_output_tokens(DEFAULT_CLOUD_MAX_OUTPUT_TOKENS)
             self._sync_cloud_video_fps_availability()
@@ -2096,16 +2354,21 @@ class ModelPage(QWidget):
         if not self._restoring_model_selection:
             set_last_cloud_preset_name(preset.name)
         self.cloud_preset_name.setText(preset.name)
-        self.cloud_base_url.setText(preset.base_url)
-        self.cloud_api_key.setText(preset.api_key)
-        self.cloud_model_name.setText(preset.model_name)
-        self._set_cloud_video_fps(preset.video_fps)
-        self._set_cloud_max_output_tokens(preset.max_output_tokens)
         provider_id = normalize_cloud_provider(preset.provider)
         provider_index = self.cloud_provider_combo.findData(provider_id)
         if provider_index < 0:
             provider_index = 0
-        self.cloud_provider_combo.setCurrentIndex(provider_index)
+        with QSignalBlocker(self.cloud_provider_combo):
+            self.cloud_provider_combo.setCurrentIndex(provider_index)
+        self._sync_cloud_endpoint_options(preset.endpoint_id, preset.base_url)
+        self._set_cloud_api_schema(preset.api_schema)
+        self._set_cloud_video_input_mode(preset.video_input_mode)
+        self.cloud_base_url.setText(preset.base_url)
+        self._apply_cloud_endpoint_to_base_url(preserve_existing=True)
+        self.cloud_api_key.setText(preset.api_key)
+        self.cloud_model_name.setText(preset.model_name)
+        self._set_cloud_video_fps(preset.video_fps)
+        self._set_cloud_max_output_tokens(preset.max_output_tokens)
         self._sync_cloud_video_fps_availability()
 
     def _save_current_cloud_preset(self) -> None:
@@ -2124,9 +2387,12 @@ class ModelPage(QWidget):
         preset = CloudModelPreset(
             name=name,
             provider=self._current_cloud_provider_id(),
+            endpoint_id=self._current_cloud_endpoint_id(),
             base_url=self.cloud_base_url.text().strip(),
+            api_schema=self._current_cloud_api_schema(),
             api_key=self.cloud_api_key.text().strip(),
             model_name=self.cloud_model_name.text().strip(),
+            video_input_mode=self._current_cloud_video_input_mode(),
             video_fps=self._current_cloud_video_fps(),
             max_output_tokens=self._current_cloud_max_output_tokens(),
         )
