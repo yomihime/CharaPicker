@@ -6,7 +6,7 @@ This file is the default long-term project context for Codex in this repository.
 
 CharaPicker（拾卡姬）是一个 Python 桌面应用，用于从番剧、漫画、视频、图片或文本素材中提取角色相关信息，并生成结构化角色档案与洞察。
 
-当前阶段是 `v0.3.0-alpha` 开发中：仓库已有可运行的 PyQt6 + qfluentwidgets UI 骨架、项目配置、素材导入/处理、云端模型预设、洞察流面板、预览链路和角色卡页面。角色卡页已承担项目内角色卡管理、CharaPicker JSON 母本、封面裁剪、预览、编译、导入和导出；真实素材提取质量、知识库质量、角色卡冲突消解和质量评估仍在持续完善。
+当前阶段是 `v0.5.0-beta` 开发中：仓库已有可运行的 PyQt6 + qfluentwidgets UI 骨架、项目配置、素材导入/处理、云端模型预设、洞察流面板、预览链路和角色卡页面。角色卡页已承担项目内角色卡管理、CharaPicker JSON 母本、封面裁剪、预览、编译、导入和导出；真实素材提取质量、知识库质量、角色卡冲突消解和质量评估仍在持续完善。
 
 当前主线方向是把 Extract Once 工作流和角色卡编译链路做实：让素材处理结果可靠进入 `projects/{project_id}/knowledge_base/`，后续角色卡生成优先读取结构化 JSON，而不是反复分析原始素材。
 

@@ -18,7 +18,7 @@ CharaPicker（拾卡姬）是一个面向二次元素材分析的桌面工具，
 
 ## 当前状态
 
-- 当前版本：`v0.4.0-alpha`（开发中）
+- 当前版本：`v0.5.0-beta`（开发中）
 - 文档更新时间：`2026-05-24`
 
 ## 已实现内容
@@ -72,8 +72,8 @@ build.bat
 
 - 产物输出到 `release/` 目录。
 - 常用参数示例：
-  - `build.bat --tag=v0.4.0-alpha`
-  - `build.bat --version=0.4.0 --stage=alpha`
+  - `build.bat --tag=v0.5.0-beta`
+  - `build.bat --version=0.5.0 --stage=beta`
   - `build.bat --local`
 
 ## 功能概览
