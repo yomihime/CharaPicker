@@ -508,6 +508,7 @@
   "model.cloud.test.all.final.completed": "Testing completed; unsupported or skipped items: {skipped_items}",
   "model.cloud.test.unsupported.image": "The current provider does not declare image input support.",
   "model.cloud.test.unsupported.audio": "The current provider does not declare native audio understanding support.",
+  "model.cloud.test.unsupported.audioModel": "The current model name does not look like an audio-input model. Choose Qwen-Omni / Qwen3-Omni or another audio model.",
   "model.cloud.test.unsupported.audioApi": "This audio test currently supports only DashScope/Qwen-Omni OpenAI-compatible Chat Completions input.",
   "model.cloud.test.unsupported.video": "The current provider does not declare any usable video input support.",
   "model.cloud.test.unsupported.nativeVideo": "The current provider does not support provider-native video APIs.",

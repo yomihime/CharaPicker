@@ -48,6 +48,7 @@ from utils.cloud_model_presets import (
     CLOUD_MAX_OUTPUT_TOKENS_MIN,
     CLOUD_MAX_OUTPUT_TOKENS_STEP,
     DEFAULT_CLOUD_MAX_OUTPUT_TOKENS,
+    CLOUD_PROVIDER_ALIYUN_BAILIAN,
     CLOUD_PROVIDER_IDS,
     DEFAULT_CLOUD_VIDEO_FPS,
     DEFAULT_CLOUD_API_SCHEMA,
@@ -171,9 +172,23 @@ def _video_mode_support_status(provider: str, video_input_mode: str) -> tuple[st
     return ("api_unsupported", t("model.cloud.test.unsupported.video"))
 
 
-def _audio_input_support_status(provider: str, api_schema: str) -> tuple[str, str] | None:
+def _model_supports_audio_understanding(provider: str, model_name: str) -> bool:
+    provider_id = normalize_cloud_provider(provider)
+    normalized_model = model_name.strip().lower().replace("_", "-")
+    if provider_id == CLOUD_PROVIDER_ALIYUN_BAILIAN:
+        return "omni" in normalized_model or "audio" in normalized_model
+    return True
+
+
+def _audio_input_support_status(
+    provider: str,
+    api_schema: str,
+    model_name: str = "",
+) -> tuple[str, str] | None:
     if not provider_supports_capability(provider, "audio_understanding"):
         return ("model_unsupported", t("model.cloud.test.unsupported.audio"))
+    if model_name and not _model_supports_audio_understanding(provider, model_name):
+        return ("model_unsupported", t("model.cloud.test.unsupported.audioModel"))
     normalized_schema = normalize_cloud_api_schema(api_schema, provider)
     if (
         normalized_schema != "openai_chat_completions"
@@ -446,7 +461,11 @@ class CloudAudioTestWorker(QObject):
             self.audio_path,
         )
         try:
-            unsupported = _audio_input_support_status(self.provider, self.api_schema)
+            unsupported = _audio_input_support_status(
+                self.provider,
+                self.api_schema,
+                self.model_name,
+            )
             if unsupported is not None:
                 status, message = unsupported
                 raise ModelMiddlewareError(f"{t(f'model.cloud.test.status.{status}')}: {message}")
@@ -466,17 +485,17 @@ class CloudAudioTestWorker(QObject):
                         role="user",
                         content=[
                             {
+                                "type": "audio",
+                                "audio": str(self.audio_path.resolve()),
+                                "format": "wav",
+                            },
+                            {
                                 "type": "text",
                                 "text": (
                                     f"{_response_language_instruction(self.locale)} "
                                     "Listen to the uploaded audio. Say briefly what you heard. "
                                     "Start with CHARA_AUDIO_OK: "
                                 ),
-                            },
-                            {
-                                "type": "audio",
-                                "audio": str(self.audio_path.resolve()),
-                                "format": "wav",
                             },
                         ],
                     ),
@@ -765,7 +784,11 @@ class CloudAllTestWorker(QObject):
         return self._safe_call(request, "image")
 
     def _run_audio_test(self) -> dict[str, str]:
-        unsupported = _audio_input_support_status(self.provider, self.api_schema)
+        unsupported = _audio_input_support_status(
+            self.provider,
+            self.api_schema,
+            self.model_name,
+        )
         if unsupported is not None:
             status, message = unsupported
             return self._unsupported_section("audio", status, message)
@@ -784,6 +807,7 @@ class CloudAllTestWorker(QObject):
                 ModelMessage(
                     role="user",
                     content=[
+                        {"type": "audio", "audio": str(self.audio_path.resolve()), "format": "wav"},
                         {
                             "type": "text",
                             "text": (
@@ -792,7 +816,6 @@ class CloudAllTestWorker(QObject):
                                 "Start with CHARA_AUDIO_OK: "
                             ),
                         },
-                        {"type": "audio", "audio": str(self.audio_path.resolve()), "format": "wav"},
                     ],
                 ),
             ],
@@ -2076,6 +2099,7 @@ class ModelPage(QWidget):
         unsupported = _audio_input_support_status(
             self._current_cloud_provider_id(),
             self._current_cloud_api_schema(),
+            model_name,
         )
         if unsupported is not None:
             status, message = unsupported

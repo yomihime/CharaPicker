@@ -508,6 +508,7 @@
   "model.cloud.test.all.final.completed": "测试已完成；不支持或已跳过的项目：{skipped_items}",
   "model.cloud.test.unsupported.image": "当前供应商没有声明图片输入能力。",
   "model.cloud.test.unsupported.audio": "当前供应商没有声明原生音频理解能力。",
+  "model.cloud.test.unsupported.audioModel": "当前模型名不像支持音频输入的模型，请选择 Qwen-Omni / Qwen3-Omni 等音频模型。",
   "model.cloud.test.unsupported.audioApi": "当前版本的音频测试只支持 DashScope/Qwen-Omni 的 OpenAI-compatible Chat Completions 输入。",
   "model.cloud.test.unsupported.video": "当前供应商没有声明可用的视频输入能力。",
   "model.cloud.test.unsupported.nativeVideo": "当前供应商不支持供应商原生视频 API。",
