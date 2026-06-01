@@ -15,7 +15,7 @@ CharaPicker（拾卡姬）是一個桌面工具，從番劇、漫畫、影片、
 ## 目前狀態
 
 - 版本：`v0.5.0-beta`（開發中）
-- 文件更新時間：`2026-05-24`
+- 文件更新時間：`2026-06-01`
 
 ## 已實現內容
 
@@ -83,4 +83,6 @@ python main.py
 
 ## 授權
 
-- License 待補充。
+- CharaPicker 自有原始碼採用 [Mozilla Public License 2.0](../../LICENSE)（`MPL-2.0`）。
+- 第三方依賴與打包產物中的第三方元件遵循各自授權，見 [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md)。
+- 目前開源構建使用 GPL 授權的 PyQt6 / PyQt6-Fluent-Widgets 元件；發布二進位包時也需要遵守這些第三方授權義務。

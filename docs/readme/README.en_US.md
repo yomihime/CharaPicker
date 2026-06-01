@@ -15,7 +15,7 @@ CharaPicker is a desktop tool that extracts character-focused information from a
 ## Current Status
 
 - Version: `v0.5.0-beta` (in development)
-- Document updated: `2026-05-24`
+- Document updated: `2026-06-01`
 
 ## Implemented
 
@@ -83,4 +83,6 @@ python main.py
 
 ## License
 
-- License TBD.
+- CharaPicker's own source code is licensed under [Mozilla Public License 2.0](../../LICENSE) (`MPL-2.0`).
+- Third-party dependencies and bundled components remain under their own licenses. See [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md).
+- Current open-source builds use GPL-licensed PyQt6 / PyQt6-Fluent-Widgets components; binary distribution must also comply with those third-party license obligations.

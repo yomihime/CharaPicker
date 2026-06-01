@@ -19,7 +19,7 @@ CharaPicker（拾卡姬）是一个面向二次元素材分析的桌面工具，
 ## 当前状态
 
 - 当前版本：`v0.5.0-beta`（开发中）
-- 文档更新时间：`2026-05-24`
+- 文档更新时间：`2026-06-01`
 
 ## 已实现内容
 
@@ -112,4 +112,6 @@ build.bat
 
 ## 许可证
 
-- License 待补充。
+- CharaPicker 自有源码采用 [Mozilla Public License 2.0](LICENSE)（`MPL-2.0`）。
+- 第三方依赖和打包产物中的第三方组件遵循各自许可证，见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+- 当前开源构建使用 GPL 许可的 PyQt6 / PyQt6-Fluent-Widgets 组件；发布二进制包时需要同时遵守这些第三方许可证义务。

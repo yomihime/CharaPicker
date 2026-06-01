@@ -104,7 +104,16 @@ CharaPicker-v1.0.0-release-windows-x64.zip
 
 - 运行所需程序文件。
 - `i18n/`、`res/` 和 qfluentwidgets 运行资源。
-- 必要说明文件，例如 `README.md`。
+- 必要说明文件：`README.md`、`LICENSE` 和 `THIRD_PARTY_NOTICES.md`。
+
+许可证与第三方声明：
+
+- CharaPicker 自有源码采用 MPL-2.0；发布包必须包含根目录 `LICENSE`。
+- 发布包必须包含根目录 `THIRD_PARTY_NOTICES.md`，说明主要第三方依赖、打包工具和运行资源的许可证信息。
+- 当前开源构建使用 GPL 许可的 PyQt6 / PyQt6-Fluent-Widgets 组件；发布二进制包时必须同时遵守这些第三方许可证义务。若未来改用商业许可或替代依赖，发布前应更新第三方声明。
+- 升级 PyQt6、PyQt6-Fluent-Widgets、Qt、PyInstaller 或运行时依赖时，应复核第三方声明。
+- 公开发布二进制包时，优先从 Git tag 发布，确保用户可以找到与二进制对应的源码版本。
+- 发布包包含的图片、视频、音频、图标、截图或 AI 生成素材应在 `docs/reference/asset-material-declaration.zh_CN.md` 中记录简要来源、用途和 AI 生成/人工编辑声明；若后续进入正式商用分发、官网宣传或商店上架等高风险场景，再补充更完整来源或替换为来源可核验素材。
 
 发布包不应包含：
 

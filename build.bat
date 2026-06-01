@@ -61,7 +61,9 @@ mkdir "%STAGE_DIR%"
 xcopy /e /i /y "%DIST_DIR%\%APP_NAME%\*" "%STAGE_DIR%\" >nul
 if errorlevel 1 goto :error
 
-if exist "%ROOT_DIR%README.md" copy /y "%ROOT_DIR%README.md" "%STAGE_DIR%\README.md" >nul
+for %%F in (README.md LICENSE THIRD_PARTY_NOTICES.md) do (
+  if exist "%ROOT_DIR%%%F" copy /y "%ROOT_DIR%%%F" "%STAGE_DIR%\%%F" >nul
+)
 
 echo [3/4] Compressing release zip...
 set "ZIP_OK=0"

@@ -3,6 +3,11 @@ name = "charapicker"
 version = "0.5.0"
 description = "A Fluent UI desktop tool for character-focused insight extraction and compilation."
 requires-python = ">=3.10"
+license = { file = "LICENSE" }
+license-files = [
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+]
 dependencies = [
     "PyQt6>=6.6",
     "PyQt6-Fluent-Widgets>=1.5",
