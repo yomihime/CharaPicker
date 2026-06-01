@@ -120,7 +120,8 @@ knowledge_base/
 │       ├── character_stage_states.json
 │       └── episodes/
 └── character_cards/
-    └── {character_id}.json
+    └── {card_id}/
+        └── card.json
 ```
 
 この構造には次の利点があります。

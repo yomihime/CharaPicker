@@ -1,6 +1,15 @@
-# Proxy 运行时网络能力计划（zh_CN）
+# Proxy 运行时网络能力计划完成记录（zh_CN）
 
-> 本文档是 P3「内置 proxy 设置」的执行计划；基础实现已于 2026-05-24 按本文落地，当前事实仍以代码、TODO 和运行时中间件文档为准。
+> 归档状态：已完成并移出当前计划队列。基础实现已于 2026-05-24 按本文落地；当前事实以代码、`docs/reference/runtime-middleware.zh_CN.md`、`utils/ARCHITECTURE.md` 和 `docs/plans/TODO.zh_CN.md` 为准。
+
+归档复核日期：2026-06-01。
+
+归档口径：
+
+- 代码已包含 `utils/proxy_preferences.py` 与 `utils/network_middleware.py`。
+- 模型请求、模型列表、FFmpeg、llama.cpp、whisper.cpp 下载和设置页连通性测试已接入网络中间件。
+- 设置页、四语系 i18n、`requirements.txt`、`pyproject.toml`、`utils/ARCHITECTURE.md` 与运行时中间件参考文档均已记录基础能力。
+- 本计划未发现需要继续迁入 TODO 的独立未完成项；后续新增联网入口的约束已转入长期参考文档。
 
 ## 1. 范围
 

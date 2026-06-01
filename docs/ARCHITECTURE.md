@@ -16,7 +16,7 @@
 ## 关键文件与分组
 
 - `README.md`：`docs/` 的文档索引和导航入口。
-- `reference/`：稳定参考材料、长期设计说明和声明类文档。
+- `reference/`：稳定参考材料、长期设计说明和声明类文档；`reference/README.md` 负责按阅读目的分组，避免 reference 文件过多时只能按文件名猜用途。
 - `reference/extraction-workflow.*.md`：面向用户和研究者的提取工作流技术说明，多语言版本。
 - `reference/product-design-guidelines.zh_CN.md`：产品定位、产品语气、UI/i18n/资源规范、InsightStreamPanel 和混合媒体成本控制规范。
 - `reference/runtime-middleware.zh_CN.md`：全局存储、日志、弹窗、启动预热、素材处理和 AI 模型调用中间件的设计边界。
@@ -26,7 +26,7 @@
 - `plans/extraction-development-roadmap.zh_CN.md`：面向开发者的 Extract Once、知识库和角色成长编译长期路线；不是当前剩余任务清单。
 - `plans/preview-real-result-ingestion-plan.zh_CN.md`：面向开发者的真实预览结果后续计划，当前聚焦非视频素材接入和角色卡质量强化。
 - `readme/`：README 的多语言补充版本，例如 `README.en_US.md`、`README.ja_JP.md`、`README.zh_TW.md`。
-- `archive/`：已执行完成、已被替代或仅保留历史查阅价值的计划类文档，包括已完成的角色卡最终编译计划。
+- `archive/`：已执行完成、已被替代或仅保留历史查阅价值的计划类文档，包括已完成的正式视频提取、角色卡最终编译、多供应商和 proxy 计划。
 - 后续多语言文档应在文件名中标明语种，例如 `usage.zh_CN.md`。
 
 ## 与其他目录的关系
@@ -41,5 +41,5 @@
 - 文档默认使用 UTF-8。
 - 文档内容应短句清楚，优先说明边界、流程和限制。
 - 多语言文档文件名必须能区分语种。
-- 计划类文档可能随代码演进而过期；如发现与当前代码冲突，应在文档中显式标注状态，已完成或已替代的一次性计划应移入 `archive/`。
+- 计划类文档可能随代码演进而过期；如发现与当前代码冲突，应在文档中显式标注阶段和可用性，已完成或已替代的一次性计划应移入 `archive/`。
 - 不要把运行时配置或用户数据写入 `docs/`。

@@ -11,3 +11,4 @@
 - [真实预览结果接入计划完成记录](preview-real-result-ingestion-plan.completed.zh_CN.md)：视频 chunk 真实预览、`preview__` 产物隔离和早期预览计划已完成部分的历史记录。
 - [角色卡最终编译与角色卡页面计划](character-card-compilation-plan.completed.zh_CN.md)：角色卡页面、CharaPicker JSON 母本、封面裁剪、预览、编译、导入、导出和 AstrBot 手动复制辅助已完成基础生命周期，保留为历史阶段记录。
 - [多供应商与多 API 规范接入计划完成记录](multi-provider-api-support-plan.completed.zh_CN.md)：供应商 endpoint、API 规范、视频输入方式、DashScope 原生音频测试、Whisper 管理和音频转写首版已完成，保留为本阶段验收记录。
+- [Proxy 运行时网络能力计划完成记录](proxy-runtime-network-plan.completed.zh_CN.md)：内置代理设置、统一网络中间件、连通性测试、DashScope 临时代理环境和相关文档同步已完成，保留为本阶段验收记录。

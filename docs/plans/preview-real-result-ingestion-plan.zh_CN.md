@@ -1,6 +1,10 @@
 # 真实预览结果后续计划（zh_CN）
 
-最近核对日期：2026-05-24。
+最近核对日期：2026-06-01。
+
+计划阶段：待执行专项计划。
+
+可用性：可用。实施前仍需重新核对 `core/extractor.py`、`core/source_scanner.py`、`core/knowledge_base.py`、`utils/audio_transcription.py` 和角色卡编译相关代码。
 
 本文只保留真实预览链路仍未完成的后续计划。视频 chunk 预览、`preview__` 产物隔离和正式视频提取 MVP 的详细完成记录已归档到 [真实预览结果接入计划完成记录](../archive/preview-real-result-ingestion-plan.completed.zh_CN.md) 与 [正式视频提取架构指南与任务计划](../archive/formal-video-extraction-architecture-plan.zh_CN.md)。
 
@@ -10,7 +14,8 @@
 - 预览产物写入 `preview__*.json` 和 `preview__episode_content.json`，并带 `extraction_stage = "preview"`。
 - 正式提取产物使用 `extraction_stage = "full"`；正式聚合和正式编译不消费 preview 或 legacy 产物。
 - 角色卡页面、CharaPicker JSON 母本、正式知识库编译、预览草稿、导入、导出和 AstrBot 手动复制辅助的基础生命周期已完成并归档。
-- 文本、字幕、音频转写、图片和漫画素材仍未完整接入；角色卡冲突消解和质量评估仍需继续强化。
+- 正式视频提取可按配置生成 episode transcript；但预览链路仍只收集视频 chunk，文本、字幕、转写结果、图片和漫画素材仍未完整进入预览与统一知识库消费路径。
+- 角色卡冲突消解和质量评估仍需继续强化。
 
 ## 1. 后续里程碑
 
