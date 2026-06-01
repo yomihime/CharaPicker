@@ -14,7 +14,7 @@
 
 ## 关键文件
 
-- `workflows/build.yml`：Windows 构建工作流。安装 Python 3.12、安装依赖、运行 `build.bat`，上传 `release/*.zip`，并在 tag 触发时从 `CHANGELOG.md` 抽取版本说明发布 GitHub Release 附件。
+- `workflows/build.yml`：Windows 构建工作流。通过手动触发或 `v*` tag 触发；安装 Python 3.12、安装依赖、运行 `build.bat`，上传 `release/*.zip`，并在 tag 触发时从 `CHANGELOG.md` 抽取版本说明发布 GitHub Release 附件。
 
 ## 与其他目录的关系
 
@@ -27,4 +27,5 @@
 
 - 工作流只负责编排，不承载应用逻辑。
 - 修改发布命名规则时，同步更新 `build.bat`、`scripts/ARCHITECTURE.md` 和根目录架构说明。
+- Build 工作流默认不在普通 `main` push 上运行，避免每次提交都触发完整 Windows 打包；发布构建通过 `v*` tag 或手动触发执行。
 - tag 发布规则应与版本规范和 `CHANGELOG.md` 中的版本小节保持一致。
