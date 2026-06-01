@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   windows-build:
+    name: Windows Build
     runs-on: windows-latest
 
     steps:
@@ -33,7 +34,58 @@ jobs:
           python -m pip install pyinstaller
 
       - name: Build package
-        run: .\build.bat
+        shell: pwsh
+        run: |
+          $buildArgs = @()
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $buildArgs += "--tag=$env:GITHUB_REF_NAME"
+          }
+          & .\build.bat @buildArgs
+
+      - name: Prepare release notes
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $changelog = "CHANGELOG.md"
+          if (-not (Test-Path -LiteralPath $changelog)) {
+            throw "CHANGELOG.md is required for tag releases."
+          }
+
+          $lines = Get-Content -LiteralPath $changelog -Encoding UTF8
+          $escapedTag = [regex]::Escape($tag)
+          $start = $null
+
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match "^##\s+\[?$escapedTag\]?(\s|$)") {
+              $start = $i
+              break
+            }
+          }
+
+          if ($null -eq $start) {
+            throw "No CHANGELOG.md section found for $tag."
+          }
+
+          $end = $lines.Count
+          for ($i = $start + 1; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match "^##\s+") {
+              $end = $i
+              break
+            }
+          }
+
+          $section = New-Object System.Collections.Generic.List[string]
+          for ($i = $start + 1; $i -lt $end; $i++) {
+            $section.Add($lines[$i])
+          }
+
+          $body = ($section -join "`n").Trim()
+          if ([string]::IsNullOrWhiteSpace($body)) {
+            throw "CHANGELOG.md section for $tag is empty."
+          }
+
+          Set-Content -LiteralPath release_notes.md -Value $body -Encoding UTF8
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -46,5 +98,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          name: ${{ github.ref_name }}
           files: release/*.zip
-          generate_release_notes: true
+          body_path: release_notes.md
+          generate_release_notes: false
+          fail_on_unmatched_files: true
+          prerelease: ${{ contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}

@@ -72,6 +72,7 @@ python main.py
 - [简体中文 README](../../README.md)
 - [繁體中文 README](README.zh_TW.md)
 - [English README](README.en_US.md)
+- [更新ログ](../../CHANGELOG.md)
 - [docs アーキテクチャ](../ARCHITECTURE.md)
 - [ルート アーキテクチャ](../../ARCHITECTURE.md)
 

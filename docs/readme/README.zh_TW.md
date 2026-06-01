@@ -72,6 +72,7 @@ python main.py
 - [简体中文 README](../../README.md)
 - [日本語 README](README.ja_JP.md)
 - [English README](README.en_US.md)
+- [更新日誌](../../CHANGELOG.md)
 - [docs 架構說明](../ARCHITECTURE.md)
 - [根目錄架構說明](../../ARCHITECTURE.md)
 

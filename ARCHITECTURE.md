@@ -22,6 +22,7 @@
 - `main.spec`：PyInstaller 文件夹式打包配置，收集 `i18n/`、`res/` 和 qfluentwidgets 资源。
 - `build.bat`：Windows 打包入口。调用 `scripts/build_meta.py`，执行 PyInstaller，整理 `release/CharaPicker/` 并压缩 zip。
 - `README.md`：GitHub 首页说明，要求使用简体中文。
+- `CHANGELOG.md`：版本更新日志。tag 发布前维护对应版本小节，GitHub Release 正文从这里抽取。
 - `AGENTS.md`：Codex 默认自动加载的长期项目指导文件，不依赖 `.codex/`。
 
 ## 子目录架构说明

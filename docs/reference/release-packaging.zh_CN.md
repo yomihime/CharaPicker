@@ -128,3 +128,5 @@ CharaPicker-v1.0.0-release-windows-x64.zip
 ## 7. CI 关系
 
 GitHub Actions 只负责编排构建，不承载应用运行逻辑。当前 Windows workflow 会安装依赖和 PyInstaller，运行 `build.bat`，上传 `release/*.zip`，并在 tag 触发时发布 Release 附件。
+
+tag 构建会显式把当前 tag 传给 `build.bat`，让构建产物版本、阶段与发布 tag 对齐。发布 GitHub Release 前必须先在 `CHANGELOG.md` 中准备同名版本小节；workflow 会抽取该小节作为 Release 正文，找不到对应小节时应失败，以避免发布缺少版本说明的二进制包。

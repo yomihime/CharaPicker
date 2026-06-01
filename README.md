@@ -93,6 +93,7 @@ build.bat
 - [繁體中文 README](docs/readme/README.zh_TW.md)
 - [日本語 README](docs/readme/README.ja_JP.md)
 - [English README](docs/readme/README.en_US.md)
+- [更新日志](CHANGELOG.md)
 - [Codex 长期项目指导](AGENTS.md)
 - [根目录架构说明](ARCHITECTURE.md)
 - [项目文档索引](docs/README.md)
