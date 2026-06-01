@@ -14,7 +14,7 @@ CharaPicker is a desktop tool that extracts character-focused information from a
 
 ## Current Status
 
-- Version: `v0.5.0-beta` (in development)
+- Version: `v0.5.1-beta` (in development)
 - Document updated: `2026-06-01`
 
 ## Implemented

@@ -6,14 +6,31 @@
 
 ## 未发布
 
+暂无。
+
+## v0.5.1-beta - 2026-06-01
+
 ### 新增
 
-- 新增项目级 `CHANGELOG.md`，回溯整理已发布版本，后续 tag 发布前先维护版本记录。
-- 补强 GitHub Actions 构建发布流程：tag 构建显式传入 tag，并从 `CHANGELOG.md` 抽取对应版本段落作为 GitHub Release 正文。
+- 关于页新增独立 `LICENSE` 按钮与许可证弹窗，可在应用内查看许可证说明、MPL-2.0 正文和第三方声明全文，并支持一键复制。
+- 新增项目级 `CHANGELOG.md`，回溯整理 `v0.1.0-alpha.1` 到 `v0.5.0-beta` 的发布级变更，后续 tag 发布前先维护版本记录。
+- 新增根目录 `LICENSE` 与 `THIRD_PARTY_NOTICES.md`，明确 CharaPicker 自有源码、第三方依赖、打包工具和运行资源的许可证边界。
+
+### 变更
+
+- 调整四个语系的 UI 文案语气，让启动、项目、洞察流、模型测试、提示词和关于页文本更清晰，减少过度拟人化或容易误读的表达。
+- 关于页项目主页链接从通用 GitHub 首页改为 CharaPicker 仓库地址。
+
+### 构建
+
+- 发布包构建会复制 `README.md`、`LICENSE` 和 `THIRD_PARTY_NOTICES.md` 到发布目录。
+- GitHub Actions 的 tag 发布流程显式传入 tag 构建参数，并从 `CHANGELOG.md` 抽取对应版本段落作为 GitHub Release 正文。
+- Python 项目元数据补充许可证文件声明，便于打包与分发时携带许可证信息。
 
 ### 文档
 
-- 重组计划与参考文档，并补充许可证与第三方声明，完善公开构建前的合规说明。
+- 重组 `docs/plans/`、`docs/reference/` 和 `docs/archive/` 的索引与计划归档，更新提取工作流、文档维护、roadmap 和预览摄取计划等入口说明。
+- README、多语言 README、发布规范和素材声明文档补充许可证、第三方声明与公开构建合规说明。
 
 ## v0.5.0-beta - 2026-05-26
 
