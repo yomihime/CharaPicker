@@ -448,15 +448,29 @@ class CharacterCardExportResult(BaseModel):
     error: str = ""
 
 
-class ChunkExtractionResult(BaseModel):
+class ExtractionStructuredArtifact(BaseModel):
+    extraction_stage: ExtractionArtifactStage = ExtractionArtifactStage.LEGACY_UNKNOWN
+    extraction_run_id: str = ""
+    run_type: str = ""
+    source_kind: str = ""
+    schema_version: int = 1
+    source_counts: dict[str, int] = Field(default_factory=dict)
+    context_policy: dict[str, Any] = Field(default_factory=dict)
+    aggregation_warnings: list[str] = Field(default_factory=list)
+    failure_policy: dict[str, Any] = Field(default_factory=dict)
+    model_profile_id: str = ""
+    model_metadata: dict[str, Any] = Field(default_factory=dict)
+    token_usage: dict[str, int] = Field(default_factory=dict)
+    estimated_context_tokens: int | None = Field(default=None, ge=0)
+    requested_output_tokens: int | None = Field(default=None, ge=1)
+    finish_reason: str = ""
+
+
+class ChunkExtractionResult(ExtractionStructuredArtifact):
     season_id: str
     episode_id: str
     chunk_id: str
-    extraction_stage: ExtractionArtifactStage = ExtractionArtifactStage.LEGACY_UNKNOWN
-    run_type: str = ""
     source_path: str = ""
-    source_kind: str = ""
-    schema_version: int = 1
     targets: list[str] = Field(default_factory=list)
     facts: list[str] = Field(default_factory=list)
     behavior_traits: list[str] = Field(default_factory=list)
@@ -466,6 +480,65 @@ class ChunkExtractionResult(BaseModel):
     character_state_changes: list[str] = Field(default_factory=list)
     insight_summary: str = ""
     evidence_refs: list[str] = Field(default_factory=list)
+
+
+class EpisodeExtractionContent(ExtractionStructuredArtifact):
+    season_id: str
+    episode_id: str
+    targets: list[str] = Field(default_factory=list)
+    chunk_results: list[dict[str, Any]] = Field(default_factory=list)
+    facts: list[str] = Field(default_factory=list)
+    behavior_traits: list[str] = Field(default_factory=list)
+    dialogue_style: list[str] = Field(default_factory=list)
+    relationship_interactions: list[str] = Field(default_factory=list)
+    conflicts: list[str] = Field(default_factory=list)
+    character_state_changes: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    uncertainties: list[str] = Field(default_factory=list)
+    full_context_view: dict[str, Any] = Field(default_factory=dict)
+
+
+class EpisodeExtractionSummary(ExtractionStructuredArtifact):
+    season_id: str
+    episode_id: str
+    source_counts: dict[str, int] = Field(default_factory=dict)
+    character_summaries: list[str] = Field(default_factory=list)
+    relationship_changes: list[str] = Field(default_factory=list)
+    major_events: list[str] = Field(default_factory=list)
+    open_conflicts: list[str] = Field(default_factory=list)
+    growth_signals: list[str] = Field(default_factory=list)
+    insight_summary: str = ""
+    context_long: str = ""
+    context_brief: str = ""
+    context_candidate: dict[str, Any] = Field(default_factory=dict)
+
+
+class SeasonExtractionContent(ExtractionStructuredArtifact):
+    season_id: str
+    episode_contents: list[dict[str, Any]] = Field(default_factory=list)
+    targets: list[str] = Field(default_factory=list)
+    facts: list[str] = Field(default_factory=list)
+    behavior_traits: list[str] = Field(default_factory=list)
+    dialogue_style: list[str] = Field(default_factory=list)
+    relationship_interactions: list[str] = Field(default_factory=list)
+    conflicts: list[str] = Field(default_factory=list)
+    character_state_changes: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    unresolved_threads: list[str] = Field(default_factory=list)
+    season_outline: str = ""
+
+
+class SeasonExtractionSummary(ExtractionStructuredArtifact):
+    season_id: str
+    final_character_states: list[str] = Field(default_factory=list)
+    relationship_baseline: list[str] = Field(default_factory=list)
+    major_conflicts: list[str] = Field(default_factory=list)
+    unresolved_threads: list[str] = Field(default_factory=list)
+    growth_trajectory: list[str] = Field(default_factory=list)
+    background_summary: str = ""
+    series_background_summary: str = ""
+    context_long: str = ""
+    context_brief: str = ""
 
 
 class TranscriptSource(BaseModel):
