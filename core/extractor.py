@@ -12,6 +12,10 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 from core import knowledge_base as kb
 from core import source_scanner
+from core.extraction_ai import (
+    extract_json_object as parse_model_json_object,
+    extract_json_object_candidates as parse_model_json_object_candidates,
+)
 from core.models import (
     ChunkExtractionResult,
     EpisodeTranscript,
@@ -607,33 +611,10 @@ class Extractor(QObject):
                 )
 
     def _extract_json_object(self, content: str) -> dict[str, Any]:
-        text = content.strip()
-        if not text:
-            raise ValueError("empty model response")
-        try:
-            payload = json.loads(text)
-            if isinstance(payload, dict):
-                return payload
-        except json.JSONDecodeError:
-            pass
-        candidates = list(self._extract_json_object_candidates(text))
-        if candidates:
-            return candidates[-1]
-        raise ValueError("model response is not a JSON object")
+        return parse_model_json_object(content)
 
     def _extract_json_object_candidates(self, text: str) -> list[dict[str, Any]]:
-        decoder = json.JSONDecoder()
-        candidates: list[dict[str, Any]] = []
-        for index, char in enumerate(text):
-            if char != "{":
-                continue
-            try:
-                payload, _end = decoder.raw_decode(text[index:])
-            except json.JSONDecodeError:
-                continue
-            if isinstance(payload, dict):
-                candidates.append(payload)
-        return candidates
+        return parse_model_json_object_candidates(text)
 
     def _video_model_extra_body(self, provider: str) -> dict[str, Any]:
         if provider_requires_aliyun_extra_body(provider):
