@@ -91,6 +91,9 @@ def build_episode_context_candidate(
         {
             "season_id": _string_value(episode_content.get("season_id")),
             "episode_id": _string_value(episode_content.get("episode_id")),
+            "full_context_view": full_context_view,
+            "context_long": context_long,
+            "context_brief": context_brief,
             "important_characters": _candidate_list(
                 candidate.get("important_characters"),
                 summary.get("character_summaries"),
