@@ -40,10 +40,20 @@ DEFAULT_CLOUD_MAX_OUTPUT_TOKENS = 2048
 CLOUD_MAX_OUTPUT_TOKENS_MIN = 128
 CLOUD_MAX_OUTPUT_TOKENS_MAX = 8192
 CLOUD_MAX_OUTPUT_TOKENS_STEP = 128
+DEFAULT_CONTEXT_WINDOW_FALLBACK_TOKENS = 32768
+CLOUD_CONTEXT_WINDOW_TOKENS_MIN = 4096
+CLOUD_CONTEXT_WINDOW_TOKENS_MAX = 10_000_000
 DEFAULT_CLOUD_API_SCHEMA: CloudApiSchema = "openai_chat_completions"
 DEFAULT_VIDEO_INPUT_MODE: VideoInputMode = "auto"
 CUSTOM_ENDPOINT_ID = "custom"
 ALIYUN_EU_WORKSPACE_PLACEHOLDER = "{WorkspaceId}"
+CLOUD_CONTEXT_WINDOW_SOURCE_MANUAL = "manual"
+CLOUD_CONTEXT_WINDOW_SOURCE_BUILT_IN = "built_in"
+CLOUD_CONTEXT_WINDOW_SOURCE_PROVIDER = "provider"
+
+# Exact model context windows can drift over time. Keep this table conservative and
+# only add entries after confirming provider documentation.
+CLOUD_MODEL_CONTEXT_WINDOW_TOKENS: dict[tuple[str, str], int] = {}
 
 CLOUD_PROVIDER_ALIYUN_BAILIAN = "aliyunBailian"
 CLOUD_PROVIDER_OPENAI = "openai"
@@ -86,6 +96,8 @@ class CloudModelPreset:
     video_input_mode: str = DEFAULT_VIDEO_INPUT_MODE
     video_fps: float = DEFAULT_CLOUD_VIDEO_FPS
     max_output_tokens: int = DEFAULT_CLOUD_MAX_OUTPUT_TOKENS
+    context_window_tokens: int | None = None
+    context_window_source: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -459,6 +471,12 @@ def complete_cloud_model_preset(preset: CloudModelPreset) -> CloudModelPreset:
     base_url = preset.base_url.strip()
     if not base_url:
         base_url = cloud_endpoint_base_url(provider_id, endpoint_id)
+    context_window_tokens, context_window_source = complete_context_window_tokens(
+        provider_id,
+        preset.model_name,
+        preset.context_window_tokens,
+        preset.context_window_source,
+    )
     return CloudModelPreset(
         name=preset.name,
         provider=provider_id,
@@ -470,6 +488,8 @@ def complete_cloud_model_preset(preset: CloudModelPreset) -> CloudModelPreset:
         model_name=preset.model_name,
         video_fps=_coerce_video_fps(preset.video_fps),
         max_output_tokens=coerce_cloud_max_output_tokens(preset.max_output_tokens),
+        context_window_tokens=context_window_tokens,
+        context_window_source=context_window_source,
     )
 
 
@@ -507,6 +527,8 @@ def load_cloud_model_presets() -> list[CloudModelPreset]:
                     model_name=str(item.get("model_name", "")),
                     video_fps=_coerce_video_fps(item.get("video_fps")),
                     max_output_tokens=coerce_cloud_max_output_tokens(item.get("max_output_tokens")),
+                    context_window_tokens=coerce_context_window_tokens(item.get("context_window_tokens")),
+                    context_window_source=str(item.get("context_window_source", "")),
                 )
             )
         )
@@ -555,6 +577,46 @@ def coerce_cloud_max_output_tokens(value: object) -> int:
     return min(max(rounded, CLOUD_MAX_OUTPUT_TOKENS_MIN), CLOUD_MAX_OUTPUT_TOKENS_MAX)
 
 
+def coerce_context_window_tokens(value: object) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed <= 0:
+        return None
+    return min(max(parsed, CLOUD_CONTEXT_WINDOW_TOKENS_MIN), CLOUD_CONTEXT_WINDOW_TOKENS_MAX)
+
+
+def complete_context_window_tokens(
+    provider: str,
+    model_name: str,
+    value: object,
+    source: str = "",
+) -> tuple[int | None, str]:
+    normalized_source = source.strip()
+    context_window_tokens = coerce_context_window_tokens(value)
+    if context_window_tokens is not None and normalized_source != CLOUD_CONTEXT_WINDOW_SOURCE_BUILT_IN:
+        return (context_window_tokens, normalized_source or CLOUD_CONTEXT_WINDOW_SOURCE_MANUAL)
+
+    inferred_tokens = infer_context_window_tokens(provider, model_name)
+    if inferred_tokens is not None:
+        return (inferred_tokens, CLOUD_CONTEXT_WINDOW_SOURCE_BUILT_IN)
+
+    return (None, "")
+
+
+def infer_context_window_tokens(provider: str, model_name: str) -> int | None:
+    provider_id = normalize_cloud_provider(provider)
+    normalized_model = _normalize_model_context_key(model_name)
+    if not normalized_model:
+        return None
+    return CLOUD_MODEL_CONTEXT_WINDOW_TOKENS.get((provider_id, normalized_model))
+
+
+def context_window_budget_tokens(preset: CloudModelPreset) -> int:
+    return preset.context_window_tokens or DEFAULT_CONTEXT_WINDOW_FALLBACK_TOKENS
+
+
 def scale_cloud_max_output_tokens_for_video_duration(
     max_output_tokens_per_minute: object,
     duration_seconds: object,
@@ -567,3 +629,7 @@ def scale_cloud_max_output_tokens_for_video_duration(
     if duration <= 0:
         duration = 60.0
     return max(1, int(tokens_per_minute * duration / 60.0 + 0.5))
+
+
+def _normalize_model_context_key(model_name: str) -> str:
+    return model_name.strip().lower().replace("_", "-")
