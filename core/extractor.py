@@ -15,13 +15,21 @@ from core import source_scanner
 from core.extraction_ai import (
     FormalExtractionJsonError,
     FormalExtractionOutputTruncatedError,
+    build_formal_text_json_request,
     call_formal_json_model,
+    call_formal_text_json_model,
     extract_json_object as parse_model_json_object,
     extract_json_object_candidates as parse_model_json_object_candidates,
+)
+from core.extraction_budget import (
+    FORMAL_EPISODE_CONTENT_MERGE,
+    resolve_text_merge_output_tokens,
+    text_merge_budget_warning,
 )
 from core.extraction_context import (
     build_current_signals,
     build_episode_context_candidate,
+    estimate_context_tokens,
     select_episode_context_candidates,
 )
 from core.models import (
@@ -48,6 +56,7 @@ from utils.cloud_model_presets import (
     CloudModelPreset,
     VideoInputMode,
     cloud_model_provider,
+    context_window_budget_tokens,
     load_cloud_model_presets,
     normalize_video_input_mode,
     provider_requires_aliyun_extra_body,
@@ -1037,18 +1046,47 @@ class Extractor(QObject):
     def _finalize_formal_episode_context(
         self,
         project_id: str,
+        manifest: dict[str, Any],
         season_id: str,
         episode_id: str,
         *,
+        chunk_inputs: list[dict[str, Any]],
+        episode_chunks: list[ChunkExtractionResult],
+        previous_episode_id: str,
         extraction_run_id: str,
-    ) -> None:
+        backend: ModelBackend,
+        model_name: str,
+        base_url: str,
+        api_key: str,
+        context_window_tokens: int | None,
+    ) -> dict[str, int] | None:
         try:
-            self.merge_episode_content(
+            usage = self._merge_episode_content_with_ai(
+                project_id,
+                manifest,
+                season_id,
+                episode_id,
+                chunk_inputs=chunk_inputs,
+                episode_chunks=episode_chunks,
+                previous_episode_id=previous_episode_id,
+                extraction_run_id=extraction_run_id,
+                backend=backend,
+                model_name=model_name,
+                base_url=base_url,
+                api_key=api_key,
+                context_window_tokens=context_window_tokens,
+            )
+        except Exception:  # noqa: BLE001
+            LOGGER.warning(
+                "Formal episode AI content merge failed; project_id=%s season_id=%s episode_id=%s",
                 project_id,
                 season_id,
                 episode_id,
-                extraction_run_id=extraction_run_id,
+                exc_info=True,
             )
+            return None
+
+        try:
             self.generate_episode_summary(
                 project_id,
                 season_id,
@@ -1057,12 +1095,160 @@ class Extractor(QObject):
             )
         except Exception:  # noqa: BLE001
             LOGGER.warning(
-                "Formal episode context finalization failed; project_id=%s season_id=%s episode_id=%s",
+                "Formal local episode summary after AI merge failed; "
+                "project_id=%s season_id=%s episode_id=%s",
                 project_id,
                 season_id,
                 episode_id,
                 exc_info=True,
             )
+        return usage
+
+    def _merge_episode_content_with_ai(
+        self,
+        project_id: str,
+        manifest: dict[str, Any],
+        season_id: str,
+        episode_id: str,
+        *,
+        chunk_inputs: list[dict[str, Any]],
+        episode_chunks: list[ChunkExtractionResult],
+        previous_episode_id: str,
+        extraction_run_id: str,
+        backend: ModelBackend,
+        model_name: str,
+        base_url: str,
+        api_key: str,
+        context_window_tokens: int | None,
+    ) -> dict[str, int]:
+        if not episode_chunks:
+            raise ValueError("episode AI merge requires at least one successful chunk")
+
+        chunk_results = [chunk.model_dump(mode="json") for chunk in episode_chunks]
+        expected_chunk_ids = [self._manifest_string(item.get("chunk_id")) for item in chunk_inputs]
+        expected_chunk_ids = [item for item in expected_chunk_ids if item]
+        successful_chunk_ids = {chunk.chunk_id for chunk in episode_chunks}
+        missing_chunk_ids = [
+            chunk_id for chunk_id in expected_chunk_ids if chunk_id not in successful_chunk_ids
+        ]
+        aggregation_warnings = [f"chunk_missing_or_failed:{chunk_id}" for chunk_id in missing_chunk_ids]
+        source_metadata = {
+            "season_id": season_id,
+            "episode_id": episode_id,
+            "expected_chunks": [
+                {
+                    "chunk_id": self._manifest_string(item.get("chunk_id")),
+                    "source_path": self._manifest_string(item.get("source_path")),
+                }
+                for item in chunk_inputs
+            ],
+            "successful_chunk_ids": [chunk.chunk_id for chunk in episode_chunks],
+            "missing_chunk_ids": missing_chunk_ids,
+        }
+        merge_context = self._build_formal_chunk_context_payload(
+            project_id,
+            manifest,
+            {
+                "season_id": season_id,
+                "episode_id": episode_id,
+            },
+            current_episode_chunks=episode_chunks,
+            previous_episode_id=previous_episode_id,
+            extraction_run_id=extraction_run_id,
+        )
+        variables = {
+            "season_id": season_id,
+            "episode_id": episode_id,
+            "source_metadata": source_metadata,
+            "chunk_results": chunk_results,
+            "current_season_completed_episodes": merge_context.get(
+                "current_season_completed_episodes",
+                [],
+            ),
+            "previous_season_backgrounds": merge_context.get("previous_season_backgrounds", []),
+        }
+        estimated_input_tokens = estimate_context_tokens(variables)
+        requested_output_tokens = resolve_text_merge_output_tokens(
+            FORMAL_EPISODE_CONTENT_MERGE,
+            source_item_count=len(chunk_results),
+            estimated_input_tokens=estimated_input_tokens,
+            context_window_tokens=context_window_tokens,
+            reserved_input_tokens=estimated_input_tokens,
+        )
+        budget_warning = text_merge_budget_warning(
+            FORMAL_EPISODE_CONTENT_MERGE,
+            requested_output_tokens=requested_output_tokens,
+            context_window_tokens=context_window_tokens,
+            reserved_input_tokens=estimated_input_tokens,
+        )
+        if budget_warning:
+            aggregation_warnings.append(budget_warning)
+        request = build_formal_text_json_request(
+            purpose=FORMAL_EPISODE_CONTENT_MERGE,
+            backend=backend,
+            model_name=model_name,
+            base_url=base_url,
+            api_key=api_key,
+            variables=variables,
+            max_tokens=requested_output_tokens,
+            metadata={
+                "project_id": project_id,
+                "stage": "formal_episode_content_merge",
+                "season_id": season_id,
+                "episode_id": episode_id,
+                "extraction_run_id": extraction_run_id,
+                "context_policy": merge_context.get("context_policy", {}),
+            },
+        )
+        result = call_formal_text_json_model(
+            request,
+            estimated_context_tokens=estimated_input_tokens,
+        )
+        payload = result.payload
+        episode_content = {
+            "season_id": season_id,
+            "episode_id": episode_id,
+            "extraction_stage": kb.FULL_EXTRACTION_STAGE,
+            "extraction_run_id": extraction_run_id,
+            "run_type": FULL_EXTRACTION_RUN_TYPE,
+            "source_kind": "video",
+            "schema_version": 1,
+            "source_counts": {
+                "expected_chunks": len(expected_chunk_ids),
+                "successful_chunks": len(chunk_results),
+                "missing_chunks": len(missing_chunk_ids),
+            },
+            "context_policy": merge_context.get("context_policy", {}),
+            "aggregation_warnings": aggregation_warnings
+            + self._coerce_string_list(payload.get("aggregation_warnings")),
+            "model_profile_id": model_name,
+            "model_metadata": result.model_metadata,
+            "token_usage": result.token_usage,
+            "estimated_context_tokens": result.estimated_context_tokens,
+            "requested_output_tokens": result.requested_output_tokens,
+            "finish_reason": result.finish_reason,
+            "episode_outline": str(payload.get("episode_outline", "")).strip(),
+            "targets": self._coerce_string_list(payload.get("characters") or payload.get("targets")),
+            "chunk_results": chunk_results,
+            "facts": self._coerce_string_list(payload.get("facts")),
+            "behavior_traits": self._coerce_string_list(payload.get("behavior_traits")),
+            "dialogue_style": self._coerce_string_list(payload.get("dialogue_style")),
+            "relationship_interactions": self._coerce_string_list(
+                payload.get("relationship_interactions")
+            ),
+            "conflicts": self._coerce_string_list(payload.get("conflicts")),
+            "character_state_changes": self._coerce_string_list(
+                payload.get("character_state_changes")
+            ),
+            "uncertainties": self._coerce_string_list(payload.get("uncertainties")),
+            "evidence_refs": self._coerce_string_list(payload.get("evidence_refs")),
+            "chunk_refs": self._coerce_string_list(payload.get("chunk_refs")),
+            "full_context_view": payload.get("full_context_view")
+            if isinstance(payload.get("full_context_view"), dict)
+            else {},
+        }
+        kb.save_episode_content(project_id, season_id, episode_id, episode_content)
+        return result.token_usage
 
     def _finalize_formal_season_context(
         self,
@@ -1337,6 +1523,7 @@ class Extractor(QObject):
         *,
         chunk_inputs: list[dict[str, Any]] | None = None,
         backend: ModelBackend,
+        text_backend: ModelBackend,
         provider: str,
         model_name: str,
         base_url: str,
@@ -1344,6 +1531,7 @@ class Extractor(QObject):
         video_fps: float,
         max_output_tokens: int,
         video_input_mode: VideoInputMode,
+        context_window_tokens: int | None = None,
         emit_token_usage: Callable[[dict[str, int]], None] | None = None,
         emit_event: Callable[[dict], None] | None = None,
         emit_progress: Callable[[int], None] | None = None,
@@ -1698,14 +1886,28 @@ class Extractor(QObject):
                         emit_progress(5 + int(processed * 90 / total_chunks))
 
             if current_episode_chunks:
-                self._finalize_formal_episode_context(
+                episode_usage = self._finalize_formal_episode_context(
                     config.project_id,
+                    manifest,
                     season_id,
                     episode_id,
+                    chunk_inputs=episode_group.get("chunks", []),
+                    episode_chunks=current_episode_chunks,
+                    previous_episode_id=previous_episode_id,
                     extraction_run_id=extraction_run_id,
+                    backend=text_backend,
+                    model_name=model_name,
+                    base_url=base_url,
+                    api_key=api_key,
+                    context_window_tokens=context_window_tokens,
                 )
-                completed_episode_ids_by_season.setdefault(season_id, []).append(episode_id)
-                season_has_context = True
+                if episode_usage is not None:
+                    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                        usage_total[key] += episode_usage.get(key, 0)
+                    if emit_token_usage is not None and any(usage_total.values()):
+                        emit_token_usage(usage_total)
+                    completed_episode_ids_by_season.setdefault(season_id, []).append(episode_id)
+                    season_has_context = True
 
         if current_season_id and season_has_context:
             self._finalize_formal_season_context(
@@ -2262,11 +2464,13 @@ class Extractor(QObject):
             raise ValueError(message)
 
         video_input_mode = normalize_video_input_mode(preset.video_input_mode, preset.provider)
+        provider_profile = cloud_model_provider(preset.provider)
         created_count, extraction_usage, extracted_chunks = self._extract_full_chunk_json_from_manifest(
             config,
             manifest,
             chunk_inputs=chunk_inputs,
             backend=self._backend_for_video_input_mode(preset, video_input_mode),
+            text_backend=provider_profile.backend_for("text"),
             provider=preset.provider,
             model_name=preset.model_name,
             base_url=preset.base_url,
@@ -2274,16 +2478,16 @@ class Extractor(QObject):
             video_fps=preset.video_fps,
             max_output_tokens=preset.max_output_tokens,
             video_input_mode=video_input_mode,
+            context_window_tokens=context_window_budget_tokens(preset),
             emit_token_usage=emit_token_usage,
             emit_event=emit_event,
             emit_progress=emit_progress,
         )
         emit_progress(96)
-        aggregated_paths = self._aggregate_full_outputs_from_manifest(config.project_id, manifest)
         LOGGER.info(
-            "Full extraction aggregation finished; project_id=%s written_artifacts=%s",
+            "Full extraction serial aggregation finished; project_id=%s created_chunks=%s",
             config.project_id,
-            len(aggregated_paths),
+            created_count,
         )
         if extracted_chunks:
             emit_event(
