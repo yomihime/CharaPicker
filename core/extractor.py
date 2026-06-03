@@ -6,6 +6,7 @@ import math
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -15,6 +16,7 @@ from core.models import (
     ChunkExtractionResult,
     EpisodeTranscript,
     ExtractionArtifactStage,
+    ExtractionMode,
     InsightEvent,
     InsightStatus,
     ProjectConfig,
@@ -75,13 +77,33 @@ class Extractor(QObject):
 
     def generate_source_manifest(self, project_id: str, source_root: str) -> Path:
         manifest = self.scan_source_directory(source_root)
+        manifest = self._with_extraction_run_metadata(manifest, mode=ExtractionMode.FULL)
         return kb.save_source_manifest(project_id, manifest)
 
-    def prepare_formal_video_extraction_plan(self, project_id: str) -> dict[str, Any]:
+    def prepare_formal_video_extraction_plan(
+        self,
+        project_id: str,
+        mode: ExtractionMode = ExtractionMode.FULL,
+    ) -> dict[str, Any]:
         manifest = self.scan_formal_video_materials(project_id)
+        manifest = self._with_extraction_run_metadata(manifest, mode=mode)
         kb.save_source_manifest(project_id, manifest)
         kb.initialize_structure(project_id, manifest)
         return manifest
+
+    def _with_extraction_run_metadata(
+        self,
+        manifest: dict[str, Any],
+        *,
+        mode: ExtractionMode,
+    ) -> dict[str, Any]:
+        output = dict(manifest)
+        output["extraction_run_id"] = self._manifest_string(
+            output.get("extraction_run_id")
+        ) or f"run-{uuid4().hex[:12]}"
+        output["extraction_mode"] = mode.value
+        output["run_type"] = FULL_EXTRACTION_RUN_TYPE
+        return output
 
     def initialize_knowledge_base_structure(self, project_id: str, manifest: dict | None = None) -> Path:
         return kb.initialize_structure(project_id, manifest)
@@ -92,7 +114,14 @@ class Extractor(QObject):
     def save_preview_chunk_extraction_result(self, project_id: str, result: ChunkExtractionResult) -> Path:
         return kb.save_preview_chunk_result(project_id, result)
 
-    def merge_episode_content(self, project_id: str, season_id: str, episode_id: str) -> Path:
+    def merge_episode_content(
+        self,
+        project_id: str,
+        season_id: str,
+        episode_id: str,
+        *,
+        extraction_run_id: str = "",
+    ) -> Path:
         chunk_dir = kb.chunks_root_path(project_id, season_id, episode_id)
         chunk_paths = sorted(
             [path for path in chunk_dir.glob("*.json") if path.is_file()],
@@ -132,6 +161,11 @@ class Extractor(QObject):
                 continue
             if not kb.is_full_artifact_payload(payload):
                 skipped_chunks += 1
+                continue
+            if not kb.is_matching_run_artifact_payload(payload, extraction_run_id):
+                skipped_chunks += 1
+                warning = f"chunk_run_mismatch:{chunk_path.name}"
+                aggregation_warnings.append(warning)
                 continue
             try:
                 chunk = ChunkExtractionResult.model_validate(payload)
@@ -181,6 +215,7 @@ class Extractor(QObject):
             "season_id": season_id,
             "episode_id": episode_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
+            "extraction_run_id": extraction_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
             "source_kind": "video",
             "schema_version": 1,
@@ -254,7 +289,14 @@ class Extractor(QObject):
         }
         return kb.save_preview_episode_content(project_id, season_id, episode_id, episode_content)
 
-    def generate_episode_summary(self, project_id: str, season_id: str, episode_id: str) -> Path:
+    def generate_episode_summary(
+        self,
+        project_id: str,
+        season_id: str,
+        episode_id: str,
+        *,
+        extraction_run_id: str = "",
+    ) -> Path:
         episode_content_path = kb.episode_content_path(project_id, season_id, episode_id)
         if not episode_content_path.exists():
             raise ValueError("episode content not found; merge episode content first")
@@ -270,6 +312,9 @@ class Extractor(QObject):
                 kb.artifact_stage_from_payload(episode_content),
             )
             raise ValueError("episode content is not a full extraction artifact")
+        if not kb.is_matching_run_artifact_payload(episode_content, extraction_run_id):
+            raise ValueError("episode content does not match current extraction run")
+        artifact_run_id = extraction_run_id.strip() or kb.extraction_run_id_from_payload(episode_content)
         chunk_results = episode_content.get("chunk_results", [])
         insight_summaries: list[str] = []
         for chunk in chunk_results:
@@ -283,6 +328,7 @@ class Extractor(QObject):
             "season_id": season_id,
             "episode_id": episode_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
+            "extraction_run_id": artifact_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
             "source_kind": "video",
             "schema_version": 1,
@@ -297,7 +343,13 @@ class Extractor(QObject):
         }
         return kb.save_episode_summary(project_id, season_id, episode_id, summary)
 
-    def merge_season_content(self, project_id: str, season_id: str) -> Path:
+    def merge_season_content(
+        self,
+        project_id: str,
+        season_id: str,
+        *,
+        extraction_run_id: str = "",
+    ) -> Path:
         episodes_root = kb.episodes_root_path(project_id, season_id)
         if not episodes_root.exists():
             raise ValueError("season episodes not found; initialize knowledge base structure first")
@@ -342,7 +394,7 @@ class Extractor(QObject):
                     exc_info=True,
                 )
                 continue
-            if not kb.is_full_artifact_payload(payload):
+            if not kb.is_full_artifact_payload_for_run(payload, extraction_run_id):
                 skipped_episodes += 1
                 warning = f"episode_content_not_full:{episode_dir.name}"
                 aggregation_warnings.append(warning)
@@ -377,6 +429,7 @@ class Extractor(QObject):
         season_content = {
             "season_id": season_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
+            "extraction_run_id": extraction_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
             "source_kind": "video",
             "schema_version": 1,
@@ -398,7 +451,13 @@ class Extractor(QObject):
         }
         return kb.save_season_content(project_id, season_id, season_content)
 
-    def generate_season_summary(self, project_id: str, season_id: str) -> Path:
+    def generate_season_summary(
+        self,
+        project_id: str,
+        season_id: str,
+        *,
+        extraction_run_id: str = "",
+    ) -> Path:
         season_content_path = kb.season_content_path(project_id, season_id)
         if not season_content_path.exists():
             raise ValueError("season content not found; merge season content first")
@@ -412,6 +471,9 @@ class Extractor(QObject):
                 kb.artifact_stage_from_payload(season_content),
             )
             raise ValueError("season content is not a full extraction artifact")
+        if not kb.is_matching_run_artifact_payload(season_content, extraction_run_id):
+            raise ValueError("season content does not match current extraction run")
+        artifact_run_id = extraction_run_id.strip() or kb.extraction_run_id_from_payload(season_content)
         episode_contents = season_content.get("episode_contents", [])
         background_parts: list[str] = []
         for episode in episode_contents:
@@ -425,6 +487,7 @@ class Extractor(QObject):
         summary = {
             "season_id": season_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
+            "extraction_run_id": artifact_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
             "source_kind": "video",
             "schema_version": 1,
@@ -759,6 +822,7 @@ class Extractor(QObject):
         manifest: dict[str, Any],
     ) -> list[dict[str, Any]]:
         chunk_inputs: list[dict[str, Any]] = []
+        extraction_run_id = self._manifest_string(manifest.get("extraction_run_id"))
         for season in manifest.get("seasons", []):
             if not isinstance(season, dict):
                 continue
@@ -784,6 +848,7 @@ class Extractor(QObject):
                             "episode_id": episode_id,
                             "chunk_id": chunk_id,
                             "source_path": source_path,
+                            "extraction_run_id": extraction_run_id,
                             "video_path": self._formal_material_video_path(project_id, source_path),
                         }
                     )
@@ -965,10 +1030,25 @@ class Extractor(QObject):
 
     def _aggregate_full_outputs_from_manifest(self, project_id: str, manifest: dict[str, Any]) -> list[Path]:
         written_paths: list[Path] = []
+        extraction_run_id = self._manifest_string(manifest.get("extraction_run_id"))
         for season_id, episode_id in self._collect_formal_episode_ids_from_manifest(manifest):
             try:
-                written_paths.append(self.merge_episode_content(project_id, season_id, episode_id))
-                written_paths.append(self.generate_episode_summary(project_id, season_id, episode_id))
+                written_paths.append(
+                    self.merge_episode_content(
+                        project_id,
+                        season_id,
+                        episode_id,
+                        extraction_run_id=extraction_run_id,
+                    )
+                )
+                written_paths.append(
+                    self.generate_episode_summary(
+                        project_id,
+                        season_id,
+                        episode_id,
+                        extraction_run_id=extraction_run_id,
+                    )
+                )
             except Exception:  # noqa: BLE001
                 LOGGER.warning(
                     "Full episode aggregation failed; project_id=%s season_id=%s episode_id=%s",
@@ -981,8 +1061,20 @@ class Extractor(QObject):
 
         for season_id in self._collect_formal_season_ids_from_manifest(manifest):
             try:
-                written_paths.append(self.merge_season_content(project_id, season_id))
-                written_paths.append(self.generate_season_summary(project_id, season_id))
+                written_paths.append(
+                    self.merge_season_content(
+                        project_id,
+                        season_id,
+                        extraction_run_id=extraction_run_id,
+                    )
+                )
+                written_paths.append(
+                    self.generate_season_summary(
+                        project_id,
+                        season_id,
+                        extraction_run_id=extraction_run_id,
+                    )
+                )
             except Exception:  # noqa: BLE001
                 LOGGER.warning(
                     "Full season aggregation failed; project_id=%s season_id=%s",
@@ -1188,9 +1280,17 @@ class Extractor(QObject):
                     episode_id=chunk_input["episode_id"],
                     chunk_id=chunk_input["chunk_id"],
                     extraction_stage=ExtractionArtifactStage.FULL,
+                    extraction_run_id=self._manifest_string(chunk_input.get("extraction_run_id")),
                     run_type=FULL_EXTRACTION_RUN_TYPE,
                     source_path=source_path,
                     source_kind="video",
+                    token_usage={
+                        key: value
+                        for key, value in (token_usage if isinstance(token_usage, dict) else {}).items()
+                        if key in {"prompt_tokens", "completion_tokens", "total_tokens"} and isinstance(value, int)
+                    },
+                    requested_output_tokens=request_max_output_tokens,
+                    finish_reason=self._model_finish_reason(result),
                     targets=[],
                     facts=self._coerce_string_list(payload.get("facts")),
                     behavior_traits=self._coerce_string_list(payload.get("behavior_traits")),

@@ -146,6 +146,25 @@ def is_full_artifact_payload(payload: dict[str, Any]) -> bool:
     return artifact_stage_from_payload(payload) == FULL_EXTRACTION_STAGE
 
 
+def extraction_run_id_from_payload(payload: dict[str, Any]) -> str:
+    run_id = payload.get("extraction_run_id")
+    return run_id.strip() if isinstance(run_id, str) else ""
+
+
+def is_matching_run_artifact_payload(payload: dict[str, Any], extraction_run_id: str) -> bool:
+    expected_run_id = extraction_run_id.strip()
+    if not expected_run_id:
+        return True
+    return extraction_run_id_from_payload(payload) == expected_run_id
+
+
+def is_full_artifact_payload_for_run(payload: dict[str, Any], extraction_run_id: str) -> bool:
+    return is_full_artifact_payload(payload) and is_matching_run_artifact_payload(
+        payload,
+        extraction_run_id,
+    )
+
+
 def write_json(path: Path, payload: Any) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -225,6 +244,26 @@ def list_full_chunk_result_paths(project_id: str, *, include_legacy_top_level: b
         )
         if _is_full_chunk_artifact_path(path)
     ]
+
+
+def list_full_chunk_result_paths_for_run(
+    project_id: str,
+    extraction_run_id: str,
+    *,
+    include_legacy_top_level: bool = True,
+) -> list[Path]:
+    paths: list[Path] = []
+    for path in list_full_chunk_result_paths(
+        project_id,
+        include_legacy_top_level=include_legacy_top_level,
+    ):
+        try:
+            payload = read_json_object(path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if is_matching_run_artifact_payload(payload, extraction_run_id):
+            paths.append(path)
+    return paths
 
 
 def list_preview_chunk_result_paths(project_id: str, *, include_legacy_top_level: bool = True) -> list[Path]:
