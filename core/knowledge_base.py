@@ -433,6 +433,60 @@ def save_character_stage_states(project_id: str, season_id: str, payload: dict[s
     return write_json(character_stage_states_path(project_id, season_id), payload)
 
 
+def clean_regenerable_extraction_artifacts(project_id: str, *, dry_run: bool = False) -> dict[str, list[str]]:
+    knowledge_base = root_path(project_id).resolve()
+    paths = _regenerable_extraction_artifact_paths(project_id)
+    deleted: list[str] = []
+    missing: list[str] = []
+    warnings: list[str] = []
+
+    for path in paths:
+        resolved = path.resolve()
+        try:
+            relative_path = resolved.relative_to(knowledge_base).as_posix()
+        except ValueError:
+            raise ValueError(f"Unsafe knowledge base cleanup path: {resolved}") from None
+
+        if not resolved.exists():
+            missing.append(relative_path)
+            continue
+        if not resolved.is_file():
+            warnings.append(f"not_a_file:{relative_path}")
+            continue
+        if not dry_run:
+            resolved.unlink()
+        deleted.append(relative_path)
+
+    return {
+        "deleted_paths": deleted,
+        "missing_paths": missing,
+        "warnings": warnings,
+    }
+
+
+def _regenerable_extraction_artifact_paths(project_id: str) -> list[Path]:
+    paths: list[Path] = [source_manifest_path(project_id)]
+    seasons_root = seasons_root_path(project_id)
+    if not seasons_root.exists():
+        return paths
+
+    patterns = (
+        "*/season_content.json",
+        "*/season_summary.json",
+        "*/character_stage_states.json",
+        "*/episodes/*/episode_content.json",
+        "*/episodes/*/preview__episode_content.json",
+        "*/episodes/*/episode_summary.json",
+        "*/episodes/*/episode_transcript.json",
+        "*/episodes/*/chunks/*.json",
+    )
+    for pattern in patterns:
+        paths.extend(path for path in seasons_root.glob(pattern) if path.is_file())
+
+    unique_paths = {path.resolve(): path for path in paths}
+    return sorted(unique_paths.values(), key=lambda path: path.as_posix().lower())
+
+
 def _is_full_chunk_artifact_path(path: Path) -> bool:
     if is_preview_artifact_path(path):
         return False

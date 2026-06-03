@@ -158,6 +158,36 @@ def mark_card_stale(card: CharacterCard, reason: str = "") -> CharacterCard:
     return card
 
 
+def mark_compiled_official_cards_stale(project_id: str, reason: str = "") -> list[str]:
+    root = kb.character_cards_root_path(project_id)
+    if not root.exists():
+        return []
+
+    stale_card_ids: list[str] = []
+    card_dirs = sorted(
+        [path for path in root.iterdir() if path.is_dir()],
+        key=lambda item: item.name.lower(),
+    )
+    for card_dir in card_dirs:
+        try:
+            card = load_card(project_id, card_dir.name)
+        except Exception:  # noqa: BLE001
+            LOGGER.warning(
+                "Character card skipped during stale marking; project_id=%s card_id=%s",
+                project_id,
+                card_dir.name,
+                exc_info=True,
+            )
+            continue
+        if card.card_kind != CharacterCardKind.OFFICIAL:
+            continue
+        if card.compile_status != CharacterCardStatus.COMPILED:
+            continue
+        save_card(mark_card_stale(card, reason=reason))
+        stale_card_ids.append(card.card_id)
+    return stale_card_ids
+
+
 def resolve_cover_path(project_id: str, card_id: str) -> Path:
     card_dir = kb.character_card_dir_path(project_id, card_id)
     card_dir.mkdir(parents=True, exist_ok=True)
