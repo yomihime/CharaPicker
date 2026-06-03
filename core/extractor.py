@@ -20,9 +20,11 @@ from core.extraction_ai import (
     call_formal_text_json_model,
     extract_json_object as parse_model_json_object,
     extract_json_object_candidates as parse_model_json_object_candidates,
+    total_token_usage,
 )
 from core.extraction_budget import (
     FORMAL_EPISODE_CONTENT_MERGE,
+    FORMAL_EPISODE_SUMMARY,
     resolve_text_merge_output_tokens,
     text_merge_budget_warning,
 )
@@ -1059,9 +1061,9 @@ class Extractor(QObject):
         base_url: str,
         api_key: str,
         context_window_tokens: int | None,
-    ) -> dict[str, int] | None:
+    ) -> tuple[bool, dict[str, int]]:
         try:
-            usage = self._merge_episode_content_with_ai(
+            merge_usage = self._merge_episode_content_with_ai(
                 project_id,
                 manifest,
                 season_id,
@@ -1084,25 +1086,31 @@ class Extractor(QObject):
                 episode_id,
                 exc_info=True,
             )
-            return None
+            return (False, {})
 
         try:
-            self.generate_episode_summary(
+            summary_usage = self._generate_episode_summary_with_ai(
                 project_id,
                 season_id,
                 episode_id,
                 extraction_run_id=extraction_run_id,
+                backend=backend,
+                model_name=model_name,
+                base_url=base_url,
+                api_key=api_key,
+                context_window_tokens=context_window_tokens,
             )
         except Exception:  # noqa: BLE001
             LOGGER.warning(
-                "Formal local episode summary after AI merge failed; "
+                "Formal episode AI summary after AI merge failed; "
                 "project_id=%s season_id=%s episode_id=%s",
                 project_id,
                 season_id,
                 episode_id,
                 exc_info=True,
             )
-        return usage
+            return (False, merge_usage)
+        return (True, total_token_usage([merge_usage, summary_usage]))
 
     def _merge_episode_content_with_ai(
         self,
@@ -1248,6 +1256,113 @@ class Extractor(QObject):
             else {},
         }
         kb.save_episode_content(project_id, season_id, episode_id, episode_content)
+        return result.token_usage
+
+    def _generate_episode_summary_with_ai(
+        self,
+        project_id: str,
+        season_id: str,
+        episode_id: str,
+        *,
+        extraction_run_id: str,
+        backend: ModelBackend,
+        model_name: str,
+        base_url: str,
+        api_key: str,
+        context_window_tokens: int | None,
+    ) -> dict[str, int]:
+        episode_content = kb.load_episode_content(project_id, season_id, episode_id)
+        if not kb.is_full_artifact_payload_for_run(episode_content, extraction_run_id):
+            raise ValueError("episode content does not match current extraction run")
+
+        variables = {
+            "season_id": season_id,
+            "episode_id": episode_id,
+            "episode_content": episode_content,
+        }
+        estimated_input_tokens = estimate_context_tokens(variables)
+        requested_output_tokens = resolve_text_merge_output_tokens(
+            FORMAL_EPISODE_SUMMARY,
+            source_item_count=1,
+            estimated_input_tokens=estimated_input_tokens,
+            context_window_tokens=context_window_tokens,
+            reserved_input_tokens=estimated_input_tokens,
+        )
+        aggregation_warnings = list(episode_content.get("aggregation_warnings", []))
+        budget_warning = text_merge_budget_warning(
+            FORMAL_EPISODE_SUMMARY,
+            requested_output_tokens=requested_output_tokens,
+            context_window_tokens=context_window_tokens,
+            reserved_input_tokens=estimated_input_tokens,
+        )
+        if budget_warning:
+            aggregation_warnings.append(budget_warning)
+        request = build_formal_text_json_request(
+            purpose=FORMAL_EPISODE_SUMMARY,
+            backend=backend,
+            model_name=model_name,
+            base_url=base_url,
+            api_key=api_key,
+            variables=variables,
+            max_tokens=requested_output_tokens,
+            metadata={
+                "project_id": project_id,
+                "stage": "formal_episode_summary",
+                "season_id": season_id,
+                "episode_id": episode_id,
+                "extraction_run_id": extraction_run_id,
+            },
+        )
+        result = call_formal_text_json_model(
+            request,
+            estimated_context_tokens=estimated_input_tokens,
+        )
+        payload = result.payload
+        summary = {
+            "season_id": season_id,
+            "episode_id": episode_id,
+            "extraction_stage": kb.FULL_EXTRACTION_STAGE,
+            "extraction_run_id": extraction_run_id,
+            "run_type": FULL_EXTRACTION_RUN_TYPE,
+            "source_kind": "video",
+            "schema_version": 1,
+            "source_counts": episode_content.get("source_counts", {}),
+            "context_policy": episode_content.get("context_policy", {}),
+            "aggregation_warnings": aggregation_warnings
+            + self._coerce_string_list(payload.get("aggregation_warnings")),
+            "model_profile_id": model_name,
+            "model_metadata": result.model_metadata,
+            "token_usage": result.token_usage,
+            "requested_output_tokens": result.requested_output_tokens,
+            "finish_reason": result.finish_reason,
+            "character_summaries": self._coerce_string_list(
+                payload.get("important_characters")
+            ),
+            "relationship_changes": self._coerce_string_list(
+                payload.get("relationship_edges")
+            ),
+            "major_events": self._coerce_string_list(
+                payload.get("major_events") or episode_content.get("facts")
+            ),
+            "open_conflicts": self._coerce_string_list(payload.get("open_threads")),
+            "growth_signals": self._coerce_string_list(payload.get("continuity_hooks")),
+            "insight_summary": str(
+                payload.get("insight_summary") or episode_content.get("episode_outline") or ""
+            ).strip(),
+            "context_long": str(payload.get("context_long", "")).strip(),
+            "context_brief": str(payload.get("context_brief", "")).strip(),
+            "context_candidate": payload.get("context_candidate")
+            if isinstance(payload.get("context_candidate"), dict)
+            else {},
+            "locations": self._coerce_string_list(payload.get("locations")),
+            "organizations": self._coerce_string_list(payload.get("organizations")),
+            "importance_score": payload.get("importance_score"),
+        }
+        summary["context_candidate"] = build_episode_context_candidate(episode_content, summary)
+        summary["estimated_context_tokens"] = estimate_context_tokens(
+            summary["context_candidate"]
+        )
+        kb.save_episode_summary(project_id, season_id, episode_id, summary)
         return result.token_usage
 
     def _finalize_formal_season_context(
@@ -1886,7 +2001,7 @@ class Extractor(QObject):
                         emit_progress(5 + int(processed * 90 / total_chunks))
 
             if current_episode_chunks:
-                episode_usage = self._finalize_formal_episode_context(
+                episode_context_ready, episode_usage = self._finalize_formal_episode_context(
                     config.project_id,
                     manifest,
                     season_id,
@@ -1901,11 +2016,11 @@ class Extractor(QObject):
                     api_key=api_key,
                     context_window_tokens=context_window_tokens,
                 )
-                if episode_usage is not None:
-                    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-                        usage_total[key] += episode_usage.get(key, 0)
-                    if emit_token_usage is not None and any(usage_total.values()):
-                        emit_token_usage(usage_total)
+                for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                    usage_total[key] += episode_usage.get(key, 0)
+                if emit_token_usage is not None and any(usage_total.values()):
+                    emit_token_usage(usage_total)
+                if episode_context_ready:
                     completed_episode_ids_by_season.setdefault(season_id, []).append(episode_id)
                     season_has_context = True
 
