@@ -14,6 +14,7 @@
 ## 关键文件
 
 - `build_meta.py`：解析命令行参数、Git tag、平台和架构，输出 `VERSION`、`STAGE`、`PLATFORM_TAG`、`ARCH_TAG` 等构建变量；默认版本和阶段来自 `utils.app_metadata`。
+- `validate_formal_extraction_workflow.py`：执行不联网的正式提取流程边界验证，覆盖 FAST 并发数归一化、正式 JSON 三次重试，以及 FAST episode/season 无输入跳过策略。
 
 ## 与其他目录的关系
 
