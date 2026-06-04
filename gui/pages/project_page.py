@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, QRegularExpression, QSignalBlocker, QSize, Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QFontMetrics, QKeySequence, QRegularExpressionValidator, QShortcut
+from PyQt6.QtGui import QFontMetrics, QIntValidator, QKeySequence, QRegularExpressionValidator, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -119,6 +119,15 @@ from utils.whispercpp_downloader import (
 LOGGER = logging.getLogger(__name__)
 MM_SS_VALIDATOR = QRegularExpressionValidator(QRegularExpression(r"[0-5]\d:[0-5]\d"))
 HH_MM_SS_VALIDATOR = QRegularExpressionValidator(QRegularExpression(r"\d\d:[0-5]\d:[0-5]\d"))
+EXTRACTION_MODE_ITEMS = (
+    (ExtractionMode.PREVIEW, "project.mode.preview"),
+    (ExtractionMode.FULL, "project.mode.full"),
+    (ExtractionMode.CLEAN, "project.mode.clean"),
+    (ExtractionMode.FAST, "project.mode.fast"),
+)
+FAST_EXTRACTION_DEFAULT_CONCURRENCY = 3
+FAST_EXTRACTION_MIN_CONCURRENCY = 1
+FAST_EXTRACTION_MAX_CONCURRENCY = 500
 SOURCE_KIND_ROLE = int(Qt.ItemDataRole.UserRole)
 SOURCE_PATH_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 SOURCE_STATUS_ROLE = int(Qt.ItemDataRole.UserRole) + 2
@@ -686,6 +695,67 @@ class NewProjectDialog(FluentDialog):
             self.accept()
 
 
+class FastExtractionDialog(FluentDialog):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(t("project.fast.dialog.title"), parent, width=520, height=270)
+
+        description = BodyLabel(t("project.fast.dialog.content"), self.dialog_card)
+        description.setWordWrap(True)
+        self.content_layout.addWidget(description)
+
+        self.content_layout.addWidget(BodyLabel(t("project.fast.dialog.concurrency"), self.dialog_card))
+        self.concurrency_edit = LineEdit(self.dialog_card)
+        self.concurrency_edit.setValidator(
+            QIntValidator(
+                FAST_EXTRACTION_MIN_CONCURRENCY,
+                FAST_EXTRACTION_MAX_CONCURRENCY,
+                self.concurrency_edit,
+            )
+        )
+        self.concurrency_edit.setPlaceholderText(t("project.fast.dialog.concurrency.placeholder"))
+        self.concurrency_edit.setText(str(FAST_EXTRACTION_DEFAULT_CONCURRENCY))
+        self.content_layout.addWidget(self.concurrency_edit)
+
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        cancel_button = PushButton(t("project.fast.dialog.cancel"), self.dialog_card)
+        self.start_button = PrimaryPushButton(t("project.fast.dialog.confirm"), self.dialog_card)
+        actions.addWidget(cancel_button)
+        actions.addWidget(self.start_button)
+        self.content_layout.addLayout(actions)
+
+        cancel_button.clicked.connect(self.reject)
+        self.start_button.clicked.connect(self._accept_if_ready)
+        self.concurrency_edit.textChanged.connect(self._sync_start_button)
+        self.concurrency_edit.returnPressed.connect(self._accept_if_ready)
+        self.concurrency_edit.selectAll()
+        self._sync_start_button(self.concurrency_edit.text())
+
+    def concurrency(self) -> int:
+        try:
+            value = int(self.concurrency_edit.text().strip())
+        except ValueError:
+            value = FAST_EXTRACTION_DEFAULT_CONCURRENCY
+        return max(
+            FAST_EXTRACTION_MIN_CONCURRENCY,
+            min(FAST_EXTRACTION_MAX_CONCURRENCY, value),
+        )
+
+    def _sync_start_button(self, text: str) -> None:
+        try:
+            value = int(text.strip())
+        except ValueError:
+            self.start_button.setEnabled(False)
+            return
+        self.start_button.setEnabled(
+            FAST_EXTRACTION_MIN_CONCURRENCY <= value <= FAST_EXTRACTION_MAX_CONCURRENCY
+        )
+
+    def _accept_if_ready(self) -> None:
+        if self.start_button.isEnabled():
+            self.accept()
+
+
 class SourceListRow(QWidget):
     def __init__(self, text: str, status: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -724,7 +794,7 @@ class SourceListRow(QWidget):
 
 
 class ProjectPage(QWidget):
-    extractionRequested = pyqtSignal(ProjectConfig)
+    extractionRequested = pyqtSignal(ProjectConfig, int)
     configSaved = pyqtSignal(ProjectConfig)
     projectChanged = pyqtSignal(object)
 
@@ -1002,8 +1072,9 @@ class ProjectPage(QWidget):
             Qt.AlignmentFlag.AlignVCenter,
         )
         self.mode_combo = ComboBox(insight_card)
-        self.mode_combo.addItems([t("project.mode.preview"), t("project.mode.full")])
-        self.mode_combo.setFixedWidth(150)
+        for mode, label_key in EXTRACTION_MODE_ITEMS:
+            self.mode_combo.addItem(t(label_key), userData=mode.value)
+        self.mode_combo.setFixedWidth(180)
         insight_controls.addWidget(self.mode_combo, 0, Qt.AlignmentFlag.AlignVCenter)
         self.skip_provider_rejected_chunk_check = CheckBox(
             t("project.option.skipProviderRejectedChunk"),
@@ -1070,7 +1141,7 @@ class ProjectPage(QWidget):
             for index in range(self.sources_list.count())
             if self.sources_list.item(index).data(SOURCE_KIND_ROLE) == SOURCE_KIND_EXTERNAL
         ]
-        mode = ExtractionMode.PREVIEW if self.mode_combo.currentIndex() == 0 else ExtractionMode.FULL
+        mode = self._current_extraction_mode()
         return ProjectConfig(
             project_id=project.project_id,
             name=project.name,
@@ -1082,6 +1153,20 @@ class ProjectPage(QWidget):
             raw_cleaned_paths=project.raw_cleaned_paths,
             created_at=project.created_at,
         )
+
+    def _current_extraction_mode(self) -> ExtractionMode:
+        value = str(self.mode_combo.currentData() or ExtractionMode.PREVIEW.value)
+        try:
+            return ExtractionMode(value)
+        except ValueError:
+            return ExtractionMode.PREVIEW
+
+    def _set_extraction_mode(self, mode: ExtractionMode) -> None:
+        for index in range(self.mode_combo.count()):
+            if self.mode_combo.itemData(index) == mode.value:
+                self.mode_combo.setCurrentIndex(index)
+                return
+        self.mode_combo.setCurrentIndex(0)
 
     def append_event(self, event: dict) -> None:
         self.stream_panel.append_event(event)
@@ -1181,10 +1266,29 @@ class ProjectPage(QWidget):
     def _emit_extraction(self) -> None:
         if not self._has_project() or self._extraction_running:
             return
-        self.extractionRequested.emit(self.current_config())
+        config = self.current_config()
+        fast_concurrency = 1
+        if config.extraction_mode == ExtractionMode.CLEAN and not self._confirm_clean_extraction():
+            return
+        if config.extraction_mode == ExtractionMode.FAST:
+            dialog = FastExtractionDialog(self.window())
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            fast_concurrency = dialog.concurrency()
+        self.extractionRequested.emit(config, fast_concurrency)
+
+    def _confirm_clean_extraction(self) -> bool:
+        dialog = MessageBox(
+            t("project.clean.dialog.title"),
+            t("project.clean.dialog.content"),
+            self.window(),
+        )
+        dialog.yesButton.setText(t("project.clean.dialog.confirm"))
+        dialog.cancelButton.setText(t("project.clean.dialog.cancel"))
+        return bool(dialog.exec())
 
     def _sync_extraction_button_text(self) -> None:
-        is_preview_mode = self.mode_combo.currentIndex() == 0
+        is_preview_mode = self._current_extraction_mode() == ExtractionMode.PREVIEW
         button_key = "project.preview" if is_preview_mode else "project.fullExtraction"
         empty_key = "insight.empty.preview" if is_preview_mode else "insight.empty.fullExtraction"
         self.preview_button.setText(t(button_key))
@@ -1806,7 +1910,7 @@ class ProjectPage(QWidget):
             self.clear_events()
             self.projectChanged.emit(None)
             return
-        self.mode_combo.setCurrentIndex(0 if project.extraction_mode == ExtractionMode.PREVIEW else 1)
+        self._set_extraction_mode(project.extraction_mode)
         self.skip_provider_rejected_chunk_check.setChecked(project.allow_provider_rejected_chunk_skip)
         self._apply_processing_config(project.source_processing)
         self._sync_extraction_button_text()

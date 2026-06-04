@@ -89,17 +89,20 @@ class FullExtractionWorker(QObject):
         extractor: Extractor,
         config: ProjectConfig,
         cloud_preset: CloudModelPreset | None = None,
+        fast_concurrency: int = 1,
     ) -> None:
         super().__init__()
         self.extractor = extractor
         self.config = config
         self.cloud_preset = cloud_preset
+        self.fast_concurrency = fast_concurrency
 
     def run(self) -> None:
         try:
             chunks = self.extractor.run_full_extraction_streaming(
                 self.config,
                 cloud_preset=self.cloud_preset,
+                fast_concurrency=self.fast_concurrency,
                 emit_event=lambda event: self.insightGenerated.emit(event),
                 emit_progress=lambda value: self.progressChanged.emit(value),
                 emit_token_usage=lambda usage: self.tokenUsageChanged.emit(usage),
@@ -221,9 +224,13 @@ class MainWindow(FluentWindow):
         )
         return confirmed
 
-    def run_extraction(self, config: ProjectConfig) -> None:
-        if config.extraction_mode == ExtractionMode.FULL:
-            self.run_full_extraction(config)
+    def run_extraction(self, config: ProjectConfig, fast_concurrency: int = 1) -> None:
+        if config.extraction_mode in {
+            ExtractionMode.FULL,
+            ExtractionMode.CLEAN,
+            ExtractionMode.FAST,
+        }:
+            self.run_full_extraction(config, fast_concurrency=fast_concurrency)
             return
         self.run_preview(config)
 
@@ -265,13 +272,15 @@ class MainWindow(FluentWindow):
         self._extraction_thread.finished.connect(self._extraction_thread.deleteLater)
         self._extraction_thread.start()
 
-    def run_full_extraction(self, config: ProjectConfig) -> None:
+    def run_full_extraction(self, config: ProjectConfig, *, fast_concurrency: int = 1) -> None:
         if self._extraction_thread is not None:
             return
         LOGGER.info(
-            "Full extraction requested from UI; project_id=%s sources=%s",
+            "Full extraction requested from UI; project_id=%s sources=%s mode=%s fast_concurrency=%s",
             config.project_id,
             len(config.source_paths),
+            config.extraction_mode.value,
+            fast_concurrency,
         )
         cloud_preset = self.model_page.current_cloud_video_preset()
         self.switchTo(self.project_page)
@@ -287,7 +296,12 @@ class MainWindow(FluentWindow):
                 cloud_preset.max_output_tokens,
             )
         self._extraction_thread = QThread(self)
-        self._full_extraction_worker = FullExtractionWorker(self.extractor, config, cloud_preset)
+        self._full_extraction_worker = FullExtractionWorker(
+            self.extractor,
+            config,
+            cloud_preset,
+            fast_concurrency=fast_concurrency,
+        )
         self._full_extraction_worker.moveToThread(self._extraction_thread)
         self._extraction_thread.started.connect(self._full_extraction_worker.run)
         self._full_extraction_worker.insightGenerated.connect(self.project_page.append_event)
