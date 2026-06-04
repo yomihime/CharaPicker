@@ -26,6 +26,7 @@ from core.extraction_budget import (
     FORMAL_EPISODE_CONTENT_MERGE,
     FORMAL_EPISODE_SUMMARY,
     FORMAL_SEASON_CONTENT_MERGE,
+    FORMAL_SEASON_SUMMARY,
     resolve_text_merge_output_tokens,
     text_merge_budget_warning,
 )
@@ -1401,20 +1402,26 @@ class Extractor(QObject):
             return (False, {})
 
         try:
-            self.generate_season_summary(
+            summary_usage = self._generate_season_summary_with_ai(
                 project_id,
+                manifest,
                 season_id,
                 extraction_run_id=extraction_run_id,
+                backend=backend,
+                model_name=model_name,
+                base_url=base_url,
+                api_key=api_key,
+                context_window_tokens=context_window_tokens,
             )
         except Exception:  # noqa: BLE001
             LOGGER.warning(
-                "Formal local season summary after AI merge failed; project_id=%s season_id=%s",
+                "Formal season AI summary after AI merge failed; project_id=%s season_id=%s",
                 project_id,
                 season_id,
                 exc_info=True,
             )
             return (False, merge_usage)
-        return (True, merge_usage)
+        return (True, total_token_usage([merge_usage, summary_usage]))
 
     def _merge_season_content_with_ai(
         self,
@@ -1549,6 +1556,127 @@ class Extractor(QObject):
             "evidence_refs": self._coerce_string_list(payload.get("evidence_refs")),
         }
         kb.save_season_content(project_id, season_id, season_content)
+        return result.token_usage
+
+    def _generate_season_summary_with_ai(
+        self,
+        project_id: str,
+        manifest: dict[str, Any],
+        season_id: str,
+        *,
+        extraction_run_id: str,
+        backend: ModelBackend,
+        model_name: str,
+        base_url: str,
+        api_key: str,
+        context_window_tokens: int | None,
+    ) -> dict[str, int]:
+        season_content = kb.load_season_content(project_id, season_id)
+        if not kb.is_full_artifact_payload_for_run(season_content, extraction_run_id):
+            raise ValueError("season content does not match current extraction run")
+
+        previous_series_background = self._load_previous_season_backgrounds_for_run(
+            project_id,
+            manifest,
+            season_id,
+            extraction_run_id=extraction_run_id,
+        )
+        variables = {
+            "season_id": season_id,
+            "season_content": season_content,
+            "previous_series_background": previous_series_background,
+        }
+        estimated_input_tokens = estimate_context_tokens(variables)
+        requested_output_tokens = resolve_text_merge_output_tokens(
+            FORMAL_SEASON_SUMMARY,
+            source_item_count=1,
+            estimated_input_tokens=estimated_input_tokens,
+            context_window_tokens=context_window_tokens,
+            reserved_input_tokens=estimated_input_tokens,
+        )
+        aggregation_warnings = list(season_content.get("aggregation_warnings", []))
+        budget_warning = text_merge_budget_warning(
+            FORMAL_SEASON_SUMMARY,
+            requested_output_tokens=requested_output_tokens,
+            context_window_tokens=context_window_tokens,
+            reserved_input_tokens=estimated_input_tokens,
+        )
+        if budget_warning:
+            aggregation_warnings.append(budget_warning)
+        request = build_formal_text_json_request(
+            purpose=FORMAL_SEASON_SUMMARY,
+            backend=backend,
+            model_name=model_name,
+            base_url=base_url,
+            api_key=api_key,
+            variables=variables,
+            max_tokens=requested_output_tokens,
+            metadata={
+                "project_id": project_id,
+                "stage": "formal_season_summary",
+                "season_id": season_id,
+                "extraction_run_id": extraction_run_id,
+                "previous_series_background_count": len(previous_series_background),
+            },
+        )
+        result = call_formal_text_json_model(
+            request,
+            estimated_context_tokens=estimated_input_tokens,
+        )
+        payload = result.payload
+        source_counts = season_content.get("source_counts", {})
+        if not isinstance(source_counts, dict):
+            source_counts = {}
+        summary = {
+            "season_id": season_id,
+            "extraction_stage": kb.FULL_EXTRACTION_STAGE,
+            "extraction_run_id": extraction_run_id,
+            "run_type": FULL_EXTRACTION_RUN_TYPE,
+            "source_kind": "video",
+            "schema_version": 1,
+            "source_counts": {
+                **source_counts,
+                "previous_series_backgrounds": len(previous_series_background),
+            },
+            "aggregation_warnings": aggregation_warnings
+            + self._coerce_string_list(payload.get("aggregation_warnings")),
+            "model_profile_id": model_name,
+            "model_metadata": result.model_metadata,
+            "token_usage": result.token_usage,
+            "estimated_context_tokens": result.estimated_context_tokens,
+            "requested_output_tokens": result.requested_output_tokens,
+            "finish_reason": result.finish_reason,
+            "final_character_states": self._coerce_string_list(
+                payload.get("final_character_states")
+            ),
+            "relationship_baseline": self._coerce_string_list(
+                payload.get("relationship_baseline")
+            ),
+            "major_conflicts": self._coerce_string_list(payload.get("major_conflicts")),
+            "unresolved_threads": self._coerce_string_list(payload.get("unresolved_threads")),
+            "growth_trajectory": self._coerce_string_list(
+                payload.get("growth_trajectory")
+                or payload.get("final_character_states")
+                or season_content.get("character_arcs")
+            ),
+            "background_summary": str(
+                payload.get("context_long")
+                or payload.get("background_summary")
+                or season_content.get("season_outline")
+                or ""
+            ).strip(),
+            "series_background_summary": str(
+                payload.get("series_background_summary")
+                or payload.get("context_long")
+                or ""
+            ).strip(),
+            "context_long": str(payload.get("context_long", "")).strip(),
+            "context_brief": str(payload.get("context_brief", "")).strip(),
+            "major_characters": self._coerce_string_list(payload.get("major_characters")),
+            "world_context": payload.get("world_context"),
+            "uncertainties": self._coerce_string_list(payload.get("uncertainties")),
+        }
+        kb.save_season_summary(project_id, season_id, summary)
         return result.token_usage
 
     def _collect_formal_episode_ids_from_manifest(self, manifest: dict[str, Any]) -> list[tuple[str, str]]:
