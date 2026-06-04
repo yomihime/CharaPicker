@@ -775,13 +775,8 @@ def _apply_quality_checks(
     }
     _write_quality_checks(card, quality_checks)
 
-    reason_messages = [
-        _review_reason_message(reason)
-        for reason in needs_review_reasons
-        if isinstance(reason, dict)
-    ]
     card.quality.needs_review = bool(needs_review_reasons)
-    card.quality.warnings = _unique([*card.quality.warnings, *reason_messages])
+    card.quality.warnings = _unique(card.quality.warnings)
     card.evidence.warnings = collect_compile_warnings(card)
 
 
@@ -824,12 +819,6 @@ def _unique_reason_payloads(reasons: list[dict[str, Any]]) -> list[dict[str, Any
         output.append(item)
         seen.add(key)
     return output
-
-
-def _review_reason_message(reason: dict[str, Any]) -> str:
-    key = str(reason.get("reason") or "")
-    detail = str(reason.get("detail") or "").strip()
-    return f"{key}: {detail}" if detail else key
 
 
 def _evidence_layers_have_warnings(evidence_layers: dict[str, list[dict[str, Any]]]) -> bool:

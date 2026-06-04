@@ -86,6 +86,49 @@ class CharacterCardQualityTests(unittest.TestCase):
         self.assertIn("code_block", repairs)
         self.assertIn("trailing_comma", repairs)
 
+    def test_structured_review_reasons_do_not_enter_plain_warnings(self) -> None:
+        card = CharacterCard(project_id="project-test", card_id="card-test")
+        card.quality.warnings = ["visible model warning"]
+        evidence_layers = {
+            "direct_evidence_episodes": [
+                {
+                    "season_id": "season_001",
+                    "episode_id": "episode_001",
+                    "warnings": ["chunk_missing_or_failed:chunk_0001"],
+                }
+            ],
+            "mention_evidence_episodes": [],
+            "causal_context_episodes": [],
+            "season_context": [],
+        }
+        episode_payloads = [
+            (
+                "season_001",
+                "episode_001",
+                {"conflicts": ["Lala has an unresolved cultural conflict"]},
+            )
+        ]
+
+        compiler._apply_quality_checks(
+            card,
+            evidence_layers,
+            episode_payloads,
+            ["Lala"],
+            compiler.AliasResolutionResult(source="local"),
+            [],
+        )
+
+        self.assertTrue(card.quality.needs_review)
+        self.assertIn("visible model warning", card.quality.warnings)
+        self.assertNotIn(compiler.REVIEW_REASON_KNOWLEDGE_WARNINGS, card.quality.warnings)
+        self.assertNotIn(compiler.REVIEW_REASON_CONFLICT_REVIEW, card.quality.warnings)
+        reasons = {
+            item["reason"]
+            for item in card.extensions["charapicker"]["quality_checks"]["needs_review_reasons"]
+        }
+        self.assertIn(compiler.REVIEW_REASON_KNOWLEDGE_WARNINGS, reasons)
+        self.assertIn(compiler.REVIEW_REASON_CONFLICT_REVIEW, reasons)
+
     def _build_layers(
         self,
         match_terms: list[str],
