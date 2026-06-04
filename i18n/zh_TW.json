@@ -360,6 +360,7 @@
   "cards.compile.stage.preparing": "準備編譯任務",
   "cards.compile.stage.collecting": "讀取正式知識庫",
   "cards.compile.stage.local_compile": "整理本地角色狀態",
+  "cards.compile.stage.resolving_alias": "識別知識庫中的角色別名",
   "cards.compile.stage.ai_review": "請求模型複核並生成角色卡",
   "cards.compile.stage.parsing": "解析模型結果",
   "cards.compile.stage.finalizing": "收尾生成角色卡",

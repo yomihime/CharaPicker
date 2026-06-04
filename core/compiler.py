@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from core import knowledge_base as kb
@@ -47,10 +47,15 @@ def compile_character_state(character: str) -> CharacterState:
     )
 
 
-def compile_character_state_by_season_episode(project_id: str, character: str) -> dict:
+def compile_character_state_by_season_episode(
+    project_id: str,
+    character: str,
+    aliases: Iterable[str] | None = None,
+) -> dict:
     return _compile_character_state_by_season_episode(
         project_id,
         character,
+        aliases=aliases,
         content_path=kb.episode_content_path,
         load_content=kb.load_episode_content,
         log_label="Episode content",
@@ -65,6 +70,7 @@ def compile_preview_character_state_from_knowledge_base(
     compiled = _compile_character_state_by_season_episode(
         project_id,
         character,
+        aliases=None,
         content_path=kb.preview_episode_content_path,
         load_content=kb.load_preview_episode_content,
         log_label="Preview episode content",
@@ -76,6 +82,7 @@ def _compile_character_state_by_season_episode(
     project_id: str,
     character: str,
     *,
+    aliases: Iterable[str] | None,
     content_path: Callable[[str, str, str], Path],
     load_content: Callable[[str, str, str], dict],
     log_label: str,
@@ -83,6 +90,7 @@ def _compile_character_state_by_season_episode(
 ) -> dict:
     state = CharacterState(character=character, summary="", evidence_count=0, conflicts=[])
     timeline: list[dict] = []
+    match_terms = _character_match_terms(character, aliases)
 
     for season_dir in kb.list_season_dirs(project_id):
         for episode_dir in kb.list_episode_dirs(project_id, season_dir.name):
@@ -112,10 +120,10 @@ def _compile_character_state_by_season_episode(
                     kb.artifact_stage_from_payload(payload),
                 )
                 continue
-            if not _episode_targets_character(payload, character):
+            if not _episode_targets_character(payload, match_terms):
                 continue
 
-            state = _apply_episode_payload_to_state(state, payload)
+            state = _apply_episode_payload_to_state(state, payload, match_terms)
             timeline.append(
                 {
                     "season_id": season_dir.name,
@@ -198,19 +206,23 @@ def final_polish_character_state(project_id: str, character: str) -> CharacterSt
     )
 
 
-def _apply_episode_payload_to_state(state: CharacterState, payload: dict) -> CharacterState:
-    facts = _character_related_items(payload.get("facts", []), state.character)
-    behavior_traits = _character_related_items(payload.get("behavior_traits", []), state.character)
-    dialogue_style = _character_related_items(payload.get("dialogue_style", []), state.character)
+def _apply_episode_payload_to_state(
+    state: CharacterState,
+    payload: dict,
+    match_terms: list[str],
+) -> CharacterState:
+    facts = _character_related_items(payload.get("facts", []), match_terms)
+    behavior_traits = _character_related_items(payload.get("behavior_traits", []), match_terms)
+    dialogue_style = _character_related_items(payload.get("dialogue_style", []), match_terms)
     relationship_interactions = _character_related_items(
         payload.get("relationship_interactions", []),
-        state.character,
+        match_terms,
     )
     character_state_changes = _character_related_items(
         payload.get("character_state_changes", []),
-        state.character,
+        match_terms,
     )
-    conflicts = _character_related_items(payload.get("conflicts", []), state.character)
+    conflicts = _character_related_items(payload.get("conflicts", []), match_terms)
     if not any(
         [
             facts,
@@ -239,26 +251,56 @@ def _apply_episode_payload_to_state(state: CharacterState, payload: dict) -> Cha
     )
 
 
-def _episode_targets_character(payload: dict, character: str) -> bool:
+def _episode_targets_character(payload: dict, match_terms: list[str]) -> bool:
     targets = payload.get("targets", [])
     if not isinstance(targets, list) or not targets:
         return True
-    normalized_character = character.strip()
-    return any(isinstance(item, str) and item.strip() == normalized_character for item in targets)
+    return any(isinstance(item, str) and _text_matches_any_term(item, match_terms) for item in targets)
 
 
-def _character_related_items(value: object, character: str) -> list[str]:
-    normalized_character = character.strip().casefold()
-    if not normalized_character or not isinstance(value, list):
+def _character_related_items(value: object, match_terms: list[str]) -> list[str]:
+    if not match_terms or not isinstance(value, list):
         return []
     output: list[str] = []
     for item in value:
         if not isinstance(item, str):
             continue
         text = item.strip()
-        if text and normalized_character in text.casefold():
+        if text and _text_matches_any_term(text, match_terms):
             output.append(text)
     return output
+
+
+def _character_match_terms(character: str, aliases: Iterable[str] | None) -> list[str]:
+    alias_values = [aliases] if isinstance(aliases, str) else list(aliases or [])
+    values = [character, *alias_values]
+    terms: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        text = value.strip()
+        if not text:
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        terms.append(text)
+        seen.add(key)
+    return terms
+
+
+def _text_matches_any_term(text: str, match_terms: list[str]) -> bool:
+    normalized_text = text.strip().casefold()
+    if not normalized_text:
+        return False
+    for term in match_terms:
+        normalized_term = term.strip().casefold()
+        if len(normalized_term) < 2:
+            continue
+        if normalized_term in normalized_text:
+            return True
+    return False
 
 
 def _polish_summary(summary: str) -> str:

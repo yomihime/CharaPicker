@@ -29,7 +29,9 @@ from utils.cloud_model_presets import CloudModelPreset, cloud_model_provider
 
 LOGGER = logging.getLogger(__name__)
 CHARACTER_CARD_COMPILE_PROMPT = "character_card_compile"
+CHARACTER_ALIAS_RESOLVE_PROMPT = "character_alias_resolve"
 CHARACTER_CARD_COMPILE_TIMEOUT_SECONDS = 300
+CHARACTER_ALIAS_RESOLVE_TIMEOUT_SECONDS = 120
 JSON_CODE_BLOCK_PATTERN = re.compile(r"```(?:json)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
 EXPECTED_AI_RESPONSE_KEYS = (
     "profile",
@@ -75,8 +77,33 @@ def compile_card_from_knowledge_base(
         raise ValueError("formal knowledge base is not available")
 
     _emit_stage(on_stage, "local_compile")
-    compiled = compile_character_state_by_season_episode(target.project_id, target.character_name)
+    match_aliases = _card_match_terms(card)
+    resolved_aliases: list[str] = []
+    compiled = compile_character_state_by_season_episode(
+        target.project_id,
+        target.character_name,
+        aliases=match_aliases,
+    )
     timeline = compiled.get("timeline", [])
+    if not timeline and cloud_preset is not None:
+        _emit_stage(on_stage, "resolving_alias")
+        resolved_aliases = _resolve_character_aliases_with_ai(card, episode_payloads, cloud_preset)
+        if resolved_aliases:
+            LOGGER.info(
+                "Character card compile aliases resolved; project_id=%s card_id=%s character=%s aliases=%s",
+                target.project_id,
+                target.card_id,
+                target.character_name,
+                resolved_aliases,
+            )
+            match_aliases = _unique([*match_aliases, *resolved_aliases])
+            _emit_stage(on_stage, "local_compile")
+            compiled = compile_character_state_by_season_episode(
+                target.project_id,
+                target.character_name,
+                aliases=match_aliases,
+            )
+            timeline = compiled.get("timeline", [])
     if not timeline:
         raise ValueError("character was not found in the formal knowledge base")
 
@@ -93,6 +120,7 @@ def compile_card_from_knowledge_base(
     output.compiled_at = datetime.now()
     output.source_context.compiled_from_preview = False
     output.source_context.knowledge_base_ref = "seasons"
+    _append_identity_aliases(output, resolved_aliases)
     _apply_compiled_state(output, final_state, timeline, episode_payloads)
     _emit_stage(on_stage, "ai_review")
     _review_card_with_ai(
@@ -152,6 +180,163 @@ def collect_compile_warnings(card: CharacterCard) -> list[str]:
     return list(dict.fromkeys(warnings))
 
 
+def _card_match_terms(card: CharacterCard) -> list[str]:
+    identity = card.identity
+    terms = [
+        identity.character_name,
+        identity.display_name,
+        *identity.aliases,
+        *identity.original_names,
+        *identity.romanized_names,
+    ]
+    return _unique([str(term) for term in terms if str(term).strip()])
+
+
+def _append_identity_aliases(card: CharacterCard, aliases: list[str]) -> None:
+    if not aliases:
+        return
+    protected_names = {
+        card.identity.character_name.strip().casefold(),
+        card.identity.display_name.strip().casefold(),
+    }
+    existing = {item.strip().casefold() for item in card.identity.aliases}
+    for alias in aliases:
+        text = alias.strip()
+        key = text.casefold()
+        if not text or key in protected_names or key in existing:
+            continue
+        card.identity.aliases.append(text)
+        existing.add(key)
+
+
+def _resolve_character_aliases_with_ai(
+    card: CharacterCard,
+    episode_payloads: list[tuple[str, str, dict]],
+    cloud_preset: CloudModelPreset,
+) -> list[str]:
+    target_entries = _collect_target_entries(episode_payloads)
+    if not target_entries:
+        return []
+    request = build_model_call_request(
+        purpose=CHARACTER_ALIAS_RESOLVE_PROMPT,
+        backend=cloud_model_provider(cloud_preset.provider).backend_for("text"),
+        model_name=cloud_preset.model_name,
+        base_url=cloud_preset.base_url,
+        api_key=cloud_preset.api_key,
+        max_tokens=min(cloud_preset.max_output_tokens or 1024, 1024),
+        variables={
+            "character_identity": _build_alias_identity_payload(card),
+            "existing_card_context": _build_alias_context_payload(card),
+            "knowledge_targets": target_entries,
+            "response_schema": {
+                "matched_aliases": ["string copied from knowledge_targets"],
+                "confidence": "high|medium|low|none",
+                "reason": "string",
+            },
+        },
+        metadata={
+            "project_id": card.project_id,
+            "card_id": card.card_id,
+            "character": card.identity.character_name,
+        },
+    )
+    request = request.model_copy(update={"timeout_seconds": CHARACTER_ALIAS_RESOLVE_TIMEOUT_SECONDS})
+    try:
+        result = call_text_model(request)
+        payload = _parse_json_object(result.content)
+    except Exception:  # noqa: BLE001
+        LOGGER.warning(
+            "Character alias resolution failed; project_id=%s card_id=%s character=%s",
+            card.project_id,
+            card.card_id,
+            card.identity.character_name,
+            exc_info=True,
+        )
+        return []
+    aliases = payload.get("matched_aliases", [])
+    if not isinstance(aliases, list):
+        return []
+    return _validated_resolved_aliases(aliases, target_entries)
+
+
+def _build_alias_identity_payload(card: CharacterCard) -> dict[str, Any]:
+    return {
+        "character_name": card.identity.character_name,
+        "display_name": card.identity.display_name,
+        "aliases": card.identity.aliases,
+        "original_names": card.identity.original_names,
+        "romanized_names": card.identity.romanized_names,
+        "source_work": card.identity.source_work,
+        "role_titles": card.identity.role_titles,
+        "species": card.identity.species,
+    }
+
+
+def _build_alias_context_payload(card: CharacterCard) -> dict[str, Any]:
+    return {
+        "summary": _clip_text(card.profile.summary, 800),
+        "appearance": _clip_text(card.profile.appearance, 500),
+        "personality": _clip_text(card.profile.personality, 500),
+        "personality_traits": card.profile.personality_traits,
+        "current_state": _clip_text(card.profile.current_state, 500),
+        "notes": _clip_text(card.user_metadata.notes, 500),
+        "tags": card.user_metadata.tags,
+    }
+
+
+def _collect_target_entries(
+    episode_payloads: list[tuple[str, str, dict]],
+) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for season_id, episode_id, payload in episode_payloads:
+        targets = payload.get("targets", [])
+        if not isinstance(targets, list):
+            continue
+        for item in targets:
+            text = str(item).strip()
+            if not text:
+                continue
+            key = text.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            entries.append(
+                {
+                    "season_id": season_id,
+                    "episode_id": episode_id,
+                    "candidate_name": _target_candidate_name(text),
+                    "target": _clip_text(text, 400),
+                }
+            )
+    return entries[:120]
+
+
+def _target_candidate_name(text: str) -> str:
+    return re.split(r"[:：(<（]", text, maxsplit=1)[0].strip()
+
+
+def _validated_resolved_aliases(
+    aliases: list[object],
+    target_entries: list[dict[str, str]],
+) -> list[str]:
+    target_texts = [
+        f"{entry.get('candidate_name', '')} {entry.get('target', '')}".casefold()
+        for entry in target_entries
+    ]
+    output: list[str] = []
+    seen: set[str] = set()
+    for alias in aliases:
+        text = str(alias).strip()
+        key = text.casefold()
+        if not text or key in seen:
+            continue
+        if any(key in target_text for target_text in target_texts):
+            output.append(text)
+            seen.add(key)
+    return output[:8]
+
+
 def _emit_stage(callback: CompileStageCallback | None, stage: str) -> None:
     if callback is not None:
         callback(stage)
@@ -175,6 +360,7 @@ def _apply_compiled_state(
     episode_payloads: list[tuple[str, str, dict]],
 ) -> None:
     character = str(final_state.get("character") or card.identity.character_name or card.identity.display_name)
+    match_terms = _card_match_terms(card)
     summary = str(final_state.get("summary") or "")
     conflicts = [str(item) for item in final_state.get("conflicts", []) if str(item).strip()]
     evidence_count = int(final_state.get("evidence_count") or 0)
@@ -189,9 +375,9 @@ def _apply_compiled_state(
         included_seasons.append(season_id)
         included_episodes.append(f"{season_id}/{episode_id}")
         refs.extend(str(item) for item in payload.get("evidence_refs", []) if str(item).strip())
-        behavior.extend(_related_items(payload.get("behavior_traits", []), character))
-        speech.extend(_related_items(payload.get("dialogue_style", []), character))
-        for item in _related_items(payload.get("relationship_interactions", []), character):
+        behavior.extend(_related_items(payload.get("behavior_traits", []), match_terms))
+        speech.extend(_related_items(payload.get("dialogue_style", []), match_terms))
+        for item in _related_items(payload.get("relationship_interactions", []), match_terms):
             relationships.append({"description": item, "season_id": season_id, "episode_id": episode_id})
         for chunk in payload.get("chunk_results", []):
             if isinstance(chunk, dict):
@@ -273,34 +459,34 @@ def _build_ai_knowledge_summary(
     timeline: list[dict],
     episode_payloads: list[tuple[str, str, dict]],
 ) -> dict[str, Any]:
-    character = card.identity.character_name
+    match_terms = _card_match_terms(card)
     episodes: list[dict[str, Any]] = []
     for season_id, episode_id, payload in episode_payloads:
         episodes.append(
             {
                 "season_id": season_id,
                 "episode_id": episode_id,
-                "facts": _compact_items(_related_items(payload.get("facts", []), character), 24),
+                "facts": _compact_items(_related_items(payload.get("facts", []), match_terms), 24),
                 "behavior_traits": _compact_items(
-                    _related_items(payload.get("behavior_traits", []), character),
+                    _related_items(payload.get("behavior_traits", []), match_terms),
                     24,
                 ),
                 "dialogue_style": _compact_items(
-                    _related_items(payload.get("dialogue_style", []), character),
+                    _related_items(payload.get("dialogue_style", []), match_terms),
                     16,
                 ),
                 "relationships": _compact_items(
                     _related_items(
-                    payload.get("relationship_interactions", payload.get("relationships", [])),
-                    character,
+                        payload.get("relationship_interactions", payload.get("relationships", [])),
+                        match_terms,
                     ),
                     16,
                 ),
                 "state_changes": _compact_items(
-                    _related_items(payload.get("character_state_changes", []), character),
+                    _related_items(payload.get("character_state_changes", []), match_terms),
                     16,
                 ),
-                "conflicts": _compact_items(_related_items(payload.get("conflicts", []), character), 12),
+                "conflicts": _compact_items(_related_items(payload.get("conflicts", []), match_terms), 12),
                 "insight_summary": _clip_text(str(payload.get("insight_summary", "")), 500),
                 "evidence_refs": _compact_items(
                     [str(item) for item in payload.get("evidence_refs", []) if str(item).strip()],
@@ -781,13 +967,23 @@ def _guess_preview_character(project_id: str) -> str:
     return "Preview Character"
 
 
-def _related_items(value: object, character: str) -> list[str]:
+def _related_items(value: object, character: str | list[str]) -> list[str]:
     if not isinstance(value, list):
         return []
-    normalized = character.strip().casefold()
-    if not normalized:
+    match_terms = character if isinstance(character, list) else [character]
+    normalized_terms = [
+        term.strip().casefold()
+        for term in match_terms
+        if isinstance(term, str) and len(term.strip()) >= 2
+    ]
+    if not normalized_terms:
         return [str(item).strip() for item in value if str(item).strip()]
-    return [str(item).strip() for item in value if normalized in str(item).casefold() and str(item).strip()]
+    return [
+        str(item).strip()
+        for item in value
+        if str(item).strip()
+        and any(term in str(item).casefold() for term in normalized_terms)
+    ]
 
 
 def _build_system_prompt(card: CharacterCard) -> str:

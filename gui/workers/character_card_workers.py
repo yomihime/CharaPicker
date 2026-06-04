@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -13,6 +14,9 @@ from core.character_card_exporter import export_selected_targets
 from core.character_card_importer import import_charapicker_card
 from core.models import CharacterCard, CharacterCardExportTarget
 from utils.cloud_model_presets import CloudModelPreset
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class CharacterCardCompileWorker(QObject):
@@ -40,6 +44,12 @@ class CharacterCardCompileWorker(QObject):
             self.stageChanged.emit("done")
             self.succeeded.emit(compiled)
         except Exception as exc:  # noqa: BLE001
+            LOGGER.warning(
+                "Character card compile worker failed; project_id=%s card_id=%s",
+                self.card.project_id,
+                self.card.card_id,
+                exc_info=True,
+            )
             self.stageChanged.emit("failed")
             self.failed.emit(str(exc))
         finally:
@@ -62,6 +72,12 @@ class CharacterCardPreviewWorker(QObject):
             store.save_preview_card(card)
             self.succeeded.emit(card)
         except Exception as exc:  # noqa: BLE001
+            LOGGER.warning(
+                "Character card preview worker failed; project_id=%s character=%s",
+                self.project_id,
+                self.character_name,
+                exc_info=True,
+            )
             self.failed.emit(str(exc))
         finally:
             self.finished.emit()
@@ -81,6 +97,12 @@ class CharacterCardImportWorker(QObject):
         try:
             self.succeeded.emit(import_charapicker_card(self.project_id, self.path))
         except Exception as exc:  # noqa: BLE001
+            LOGGER.warning(
+                "Character card import worker failed; project_id=%s path=%s",
+                self.project_id,
+                self.path,
+                exc_info=True,
+            )
             self.failed.emit(str(exc))
         finally:
             self.finished.emit()
@@ -106,6 +128,12 @@ class CharacterCardExportWorker(QObject):
         try:
             self.succeeded.emit(export_selected_targets(self.card, self.targets, output_dir=self.output_dir))
         except Exception as exc:  # noqa: BLE001
+            LOGGER.warning(
+                "Character card export worker failed; project_id=%s card_id=%s",
+                self.card.project_id,
+                self.card.card_id,
+                exc_info=True,
+            )
             self.failed.emit(str(exc))
         finally:
             self.finished.emit()

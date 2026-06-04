@@ -360,6 +360,7 @@
   "cards.compile.stage.preparing": "編纂タスクを準備中",
   "cards.compile.stage.collecting": "正式知識ベースを読み込み中",
   "cards.compile.stage.local_compile": "ローカルのキャラクター状態を整理中",
+  "cards.compile.stage.resolving_alias": "知識ベース内のキャラクター別名を照合中",
   "cards.compile.stage.ai_review": "モデルに確認とカード生成を依頼中",
   "cards.compile.stage.parsing": "モデル結果を解析中",
   "cards.compile.stage.finalizing": "キャラクターカードを仕上げ中",

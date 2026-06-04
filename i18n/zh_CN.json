@@ -360,6 +360,7 @@
   "cards.compile.stage.preparing": "准备编译任务",
   "cards.compile.stage.collecting": "读取正式知识库",
   "cards.compile.stage.local_compile": "整理本地角色状态",
+  "cards.compile.stage.resolving_alias": "识别知识库中的角色别名",
   "cards.compile.stage.ai_review": "请求模型复核并生成角色卡",
   "cards.compile.stage.parsing": "解析模型结果",
   "cards.compile.stage.finalizing": "收尾生成角色卡",
