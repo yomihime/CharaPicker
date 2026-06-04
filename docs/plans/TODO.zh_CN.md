@@ -39,7 +39,7 @@
 
 - 整理输出角色卡空间：基础版已完成，详细计划归档到 [角色卡最终编译与角色卡页面计划](../archive/character-card-compilation-plan.completed.zh_CN.md)。
 - 目标角色移动到角色卡页面，提取只提取素材信息，角色卡页面编译角色卡：基础版已完成，主页不再编辑目标角色，预览完成不再自动生成角色卡。
-- 正式提取模式、洁净提取、快速提取和线性上下文主线：阶段性完成，详细记录见 [正式素材详细提取流程与模式计划](formal-extraction-modes-and-context-plan.zh_CN.md)。
+- 正式提取模式、洁净提取、快速提取和线性上下文主线：阶段性完成，详细记录已归档到 [正式素材详细提取流程与模式计划完成记录](../archive/formal-extraction-modes-and-context-plan.completed.zh_CN.md)。
 - 内置 proxy 设置：基础版已完成，设置页支持 HTTP、HTTPS、SOCKS5、SOCKS5 远程 DNS、固定三站点连通性测试和自定义 URL 测试；模型请求、模型列表、FFmpeg 下载和 llama.cpp 下载统一走网络中间件，日志和错误摘要需保持敏感信息脱敏。
 - Proxy 运行时网络能力计划：已归档到 [Proxy 运行时网络能力计划完成记录](../archive/proxy-runtime-network-plan.completed.zh_CN.md)，未发现需迁入当前 TODO 的独立残项。
 
