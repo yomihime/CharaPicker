@@ -120,6 +120,10 @@ def compile_card_from_knowledge_base(
     output.compiled_at = datetime.now()
     output.source_context.compiled_from_preview = False
     output.source_context.knowledge_base_ref = "seasons"
+    output.quality.last_error = ""
+    output.quality.needs_review = False
+    output.quality.warnings = []
+    output.evidence.warnings = []
     _append_identity_aliases(output, resolved_aliases)
     _apply_compiled_state(output, final_state, timeline, episode_payloads)
     _emit_stage(on_stage, "ai_review")

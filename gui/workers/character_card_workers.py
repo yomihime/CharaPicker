@@ -41,6 +41,13 @@ class CharacterCardCompileWorker(QObject):
             )
             self.stageChanged.emit("saving")
             store.save_card(compiled)
+            LOGGER.info(
+                "Character card compile worker succeeded; project_id=%s card_id=%s status=%s evidence_count=%s",
+                compiled.project_id,
+                compiled.card_id,
+                compiled.compile_status.value,
+                compiled.evidence.evidence_count,
+            )
             self.stageChanged.emit("done")
             self.succeeded.emit(compiled)
         except Exception as exc:  # noqa: BLE001
