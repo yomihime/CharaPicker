@@ -15,8 +15,8 @@
 
 | 顺序 | 待办 | 优先级 | 规模 | 主要验收点 |
 | --- | --- | --- | --- | --- |
-| 3 | 角色卡编译上下文分层 | 高 | 中/大 | 在直接证据之外，明确拆出 `direct_evidence_episodes`、`mention_evidence_episodes`、`causal_context_episodes` 和 `season_context`；角色没出现但解释其行动动机的 episode 不能因 `targets` 或直接证据缺失而被丢掉。 |
-| 4 | 角色卡冲突消解与质量评估强化 | 中 | 中/大 | 在已完成角色卡页面和正式知识库编译链路基础上，继续增强冲突证据保留、质量警告、`needs_review` 判断和输出可解释性；不得回退为重新分析原始素材。 |
+| 3 | 角色卡编译上下文分层 | 高 | 中/大 | 在直接证据之外，明确拆出 `direct_evidence_episodes`、`mention_evidence_episodes`、`causal_context_episodes` 和 `season_context`；角色没出现但解释其行动动机的 episode 不能因 `targets` 或直接证据缺失而被丢掉。详见 [角色卡质量后续临时计划](character-card-quality-followup-plan.zh_CN.md)。 |
+| 4 | 角色卡冲突消解与质量评估强化 | 中 | 中/大 | 在已完成角色卡页面和正式知识库编译链路基础上，继续增强冲突证据保留、质量警告、`needs_review` 判断和输出可解释性；不得回退为重新分析原始素材。详见 [角色卡质量后续临时计划](character-card-quality-followup-plan.zh_CN.md)。 |
 
 ## P2：提取质量与可观测性
 

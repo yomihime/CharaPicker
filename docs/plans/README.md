@@ -10,6 +10,7 @@
 | --- | --- | --- | --- |
 | `TODO.zh_CN.md` | 当前队列 | 可用 | 当前剩余任务总表，按优先级组织执行入口。 |
 | `preview-real-result-ingestion-plan.zh_CN.md` | 待执行专项 | 可用，但实施前需复核代码 | 非视频素材接入、预览知识库覆盖和角色卡质量强化的后续专项计划。 |
+| `character-card-quality-followup-plan.zh_CN.md` | 待执行临时专项 | 临时可用，实施前需复核代码 | TODO P1 第 3、4 项的角色卡编译上下文分层、冲突消解和质量评估计划。 |
 | `extraction-development-roadmap.zh_CN.md` | 长期路线基准 | 可用作验收框架，不是当前任务清单 | Extract Once、知识库和角色成长编译的长期目标与验收基准。 |
 
 ## 维护规则
