@@ -8,6 +8,16 @@
 
 暂无。
 
+## v0.6.0-beta.1 - 2026-06-05
+
+### 修复
+
+- 修复 GitHub Release 发布流程未显示自动 `What's Changed`、完整 changelog 链接和 contributors 区域的问题；workflow 现在保留 `CHANGELOG.md` 版本段落作为正文开头，同时启用 GitHub 自动 release notes。
+
+### 构建
+
+- 默认构建阶段更新为 `beta.1`，用于重新发布 `v0.6.0-beta` 的 release notes 修正补包。
+
 ## v0.6.0-beta - 2026-06-04
 
 ### 新增
