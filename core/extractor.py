@@ -12,6 +12,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 from core import knowledge_base as kb
 from core import source_scanner
+from core.character_card_store import mark_compiled_official_cards_stale
 from core.extraction_ai import (
     FormalExtractionJsonError,
     FormalExtractionOutputTruncatedError,
@@ -1941,6 +1942,19 @@ class Extractor(QObject):
     def _manifest_string(self, value: Any) -> str:
         return value.strip() if isinstance(value, str) else ""
 
+    def _empty_full_extraction_stats(self, *, total_chunks: int = 0) -> dict[str, int]:
+        return {
+            "total_chunks": total_chunks,
+            "succeeded_chunks": 0,
+            "skipped_chunks": 0,
+            "failed_chunks": 0,
+            "succeeded_episodes": 0,
+            "failed_episodes": 0,
+            "succeeded_seasons": 0,
+            "failed_seasons": 0,
+            "stale_cards": 0,
+        }
+
     def _extract_full_chunk_json_from_manifest(
         self,
         config: ProjectConfig,
@@ -1960,11 +1974,12 @@ class Extractor(QObject):
         emit_token_usage: Callable[[dict[str, int]], None] | None = None,
         emit_event: Callable[[dict], None] | None = None,
         emit_progress: Callable[[int], None] | None = None,
-    ) -> tuple[int, dict[str, int], list[ChunkExtractionResult]]:
+    ) -> tuple[int, dict[str, int], list[ChunkExtractionResult], dict[str, int]]:
         if chunk_inputs is None:
             chunk_inputs = self._collect_formal_video_chunk_inputs(config.project_id, manifest)
+        stats = self._empty_full_extraction_stats(total_chunks=len(chunk_inputs))
         if not chunk_inputs:
-            return (0, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, [])
+            return (0, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, [], stats)
 
         episode_groups = self._group_formal_video_chunk_inputs_by_episode(chunk_inputs)
         created = 0
@@ -2013,6 +2028,10 @@ class Extractor(QObject):
                     usage_total[key] += season_usage.get(key, 0)
                 if emit_token_usage is not None and any(usage_total.values()):
                     emit_token_usage(usage_total)
+                if _season_context_ready:
+                    stats["succeeded_seasons"] += 1
+                else:
+                    stats["failed_seasons"] += 1
                 season_has_context = False
             current_season_id = season_id
             current_episode_chunks: list[ChunkExtractionResult] = []
@@ -2029,6 +2048,7 @@ class Extractor(QObject):
                             emit_event,
                             t("extractor.full.chunkMissing", path=source_path),
                         )
+                        stats["skipped_chunks"] += 1
                         continue
 
                     duration_seconds = self._video_duration_seconds(video_path)
@@ -2104,6 +2124,7 @@ class Extractor(QObject):
                                     chunk=chunk_input["chunk_id"],
                                 ),
                             )
+                            stats["skipped_chunks"] += 1
                             continue
 
                     chunk_context = self._build_formal_chunk_context_payload(
@@ -2178,6 +2199,7 @@ class Extractor(QObject):
                     extracted_chunks.append(chunk)
                     current_episode_chunks.append(chunk)
                     created += 1
+                    stats["succeeded_chunks"] += 1
                     if emit_event is not None:
                         emit_event(
                             InsightEvent(
@@ -2214,6 +2236,7 @@ class Extractor(QObject):
                             duration_seconds=duration_seconds,
                         ),
                     )
+                    stats["failed_chunks"] += 1
                     continue
                 except FormalExtractionJsonError as exc:
                     LOGGER.warning(
@@ -2241,6 +2264,7 @@ class Extractor(QObject):
                                 status=InsightStatus.WARNING,
                             ).model_dump(mode="json")
                         )
+                    stats["failed_chunks"] += 1
                     continue
                 except ModelCallError as exc:
                     error_kind = (
@@ -2268,6 +2292,10 @@ class Extractor(QObject):
                         )
                         self._emit_full_warning(emit_event, description)
                         raise ExtractionStoppedError(description) from exc
+                    if self._provider_rejected_video(exc):
+                        stats["skipped_chunks"] += 1
+                    else:
+                        stats["failed_chunks"] += 1
                     LOGGER.warning(
                         "Full extraction chunk skipped after model service error; "
                         "project_id=%s season_id=%s episode_id=%s chunk_id=%s source_path=%s "
@@ -2295,6 +2323,7 @@ class Extractor(QObject):
                         )
                     continue
                 except Exception as exc:  # noqa: BLE001
+                    stats["failed_chunks"] += 1
                     LOGGER.warning(
                         "Full extraction chunk failed; project_id=%s source_path=%s",
                         config.project_id,
@@ -2343,6 +2372,9 @@ class Extractor(QObject):
                 if episode_context_ready:
                     completed_episode_ids_by_season.setdefault(season_id, []).append(episode_id)
                     season_has_context = True
+                    stats["succeeded_episodes"] += 1
+                else:
+                    stats["failed_episodes"] += 1
 
         if current_season_id and season_has_context:
             _season_context_ready, season_usage = self._finalize_formal_season_context(
@@ -2360,7 +2392,11 @@ class Extractor(QObject):
                 usage_total[key] += season_usage.get(key, 0)
             if emit_token_usage is not None and any(usage_total.values()):
                 emit_token_usage(usage_total)
-        return (created, usage_total, extracted_chunks)
+            if _season_context_ready:
+                stats["succeeded_seasons"] += 1
+            else:
+                stats["failed_seasons"] += 1
+        return (created, usage_total, extracted_chunks, stats)
 
     def _build_full_video_chunk_request(
         self,
@@ -2464,6 +2500,26 @@ class Extractor(QObject):
                 title=t("extractor.full.chunk.title"),
                 description=description,
                 status=InsightStatus.WARNING,
+            ).model_dump(mode="json")
+        )
+
+    def _emit_full_event(
+        self,
+        emit_event: Callable[[dict], None] | None,
+        *,
+        description: str,
+        status: InsightStatus,
+        title: str = "",
+        meta: dict[str, Any] | None = None,
+    ) -> None:
+        if emit_event is None:
+            return
+        emit_event(
+            InsightEvent(
+                title=title or t("extractor.full.chunk.title"),
+                description=description,
+                status=status,
+                meta=meta or {},
             ).model_dump(mode="json")
         )
 
@@ -2878,7 +2934,41 @@ class Extractor(QObject):
         )
         emit_progress(5)
 
-        manifest = self.prepare_formal_video_extraction_plan(config.project_id)
+        is_clean_mode = config.extraction_mode == ExtractionMode.CLEAN
+        if is_clean_mode:
+            try:
+                self._emit_full_event(
+                    emit_event,
+                    description=t("extractor.clean.started"),
+                    status=InsightStatus.RUNNING,
+                    title=t("extractor.clean.title"),
+                )
+                cleanup_result = kb.clean_regenerable_extraction_artifacts(config.project_id)
+            except Exception as exc:  # noqa: BLE001
+                self._emit_full_event(
+                    emit_event,
+                    description=t("extractor.clean.failed", error=self._compact_exception_message(exc)),
+                    status=InsightStatus.WARNING,
+                    title=t("extractor.clean.title"),
+                )
+                raise
+            self._emit_full_event(
+                emit_event,
+                description=t(
+                    "extractor.clean.finished",
+                    deleted=len(cleanup_result.get("deleted_paths", [])),
+                    warnings=len(cleanup_result.get("warnings", [])),
+                ),
+                status=InsightStatus.DONE,
+                title=t("extractor.clean.title"),
+                meta=cleanup_result,
+            )
+
+        extraction_mode = ExtractionMode.CLEAN if is_clean_mode else ExtractionMode.FULL
+        manifest = self.prepare_formal_video_extraction_plan(
+            config.project_id,
+            mode=extraction_mode,
+        )
         chunk_inputs = self._collect_formal_video_chunk_inputs(config.project_id, manifest)
         if not chunk_inputs:
             message = t("extractor.full.noVideoMaterials")
@@ -2910,7 +3000,8 @@ class Extractor(QObject):
 
         video_input_mode = normalize_video_input_mode(preset.video_input_mode, preset.provider)
         provider_profile = cloud_model_provider(preset.provider)
-        created_count, extraction_usage, extracted_chunks = self._extract_full_chunk_json_from_manifest(
+        created_count, extraction_usage, extracted_chunks, run_stats = (
+            self._extract_full_chunk_json_from_manifest(
             config,
             manifest,
             chunk_inputs=chunk_inputs,
@@ -2927,12 +3018,20 @@ class Extractor(QObject):
             emit_token_usage=emit_token_usage,
             emit_event=emit_event,
             emit_progress=emit_progress,
+            )
         )
         emit_progress(96)
+        stale_card_ids: list[str] = []
+        if extracted_chunks:
+            stale_card_ids = mark_compiled_official_cards_stale(
+                config.project_id,
+                reason="formal_extraction_updated",
+            )
+        run_stats["stale_cards"] = len(stale_card_ids)
         LOGGER.info(
-            "Full extraction serial aggregation finished; project_id=%s created_chunks=%s",
+            "Full extraction serial aggregation finished; project_id=%s stats=%s",
             config.project_id,
-            created_count,
+            run_stats,
         )
         if extracted_chunks:
             emit_event(
@@ -2953,6 +3052,18 @@ class Extractor(QObject):
         emit_progress(100)
         if emit_token_usage is not None and not any(extraction_usage.values()):
             emit_token_usage({})
+        self._emit_full_event(
+            emit_event,
+            description=t(
+                "extractor.full.summary",
+                succeeded=run_stats.get("succeeded_chunks", 0),
+                skipped=run_stats.get("skipped_chunks", 0),
+                failed=run_stats.get("failed_chunks", 0),
+                stale=run_stats.get("stale_cards", 0),
+            ),
+            status=InsightStatus.DONE if extracted_chunks else InsightStatus.WARNING,
+            meta={**run_stats, "stale_card_ids": stale_card_ids},
+        )
         LOGGER.info(
             "Full extraction finished; project_id=%s created_chunks=%s",
             config.project_id,
