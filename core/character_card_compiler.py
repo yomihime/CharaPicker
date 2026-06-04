@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -44,6 +45,66 @@ EXPECTED_AI_RESPONSE_KEYS = (
 CompileStageCallback = Callable[[str], None]
 StreamDeltaCallback = Callable[[str], None]
 
+CHARAPICKER_EXTENSION_KEY = "charapicker"
+DIRECT_EVIDENCE_FIELDS = (
+    "facts",
+    "behavior_traits",
+    "dialogue_style",
+    "character_state_changes",
+)
+MENTION_EVIDENCE_FIELDS = (
+    "relationship_interactions",
+    "relationships",
+    "conflicts",
+    "uncertainties",
+    "insight_summary",
+)
+CONTEXT_CAUSAL_KEYWORDS = (
+    "动机",
+    "原因",
+    "背景",
+    "误解",
+    "约束",
+    "任务",
+    "冲突",
+    "影响",
+    "cause",
+    "motive",
+    "reason",
+    "background",
+    "misunderstanding",
+    "constraint",
+    "conflict",
+)
+REVIEW_REASON_NO_DIRECT_EVIDENCE = "no_direct_evidence"
+REVIEW_REASON_ALIAS_LOW_CONFIDENCE = "alias_resolution_low_confidence"
+REVIEW_REASON_KNOWLEDGE_WARNINGS = "knowledge_base_has_warnings"
+REVIEW_REASON_CONFLICT_REVIEW = "conflict_requires_review"
+REVIEW_REASON_JSON_REPAIRED = "ai_json_repaired"
+
+
+@dataclass
+class AliasResolutionResult:
+    aliases: list[str] = field(default_factory=list)
+    confidence: str = "none"
+    reason: str = ""
+    source: str = "none"
+    diagnostics: list[dict[str, Any]] = field(default_factory=list)
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "matched_aliases": self.aliases,
+            "confidence": self.confidence,
+            "reason": self.reason,
+            "source": self.source,
+        }
+
+
+@dataclass
+class JsonParseResult:
+    payload: dict[str, Any]
+    diagnostics: list[dict[str, Any]] = field(default_factory=list)
+
 
 def build_compile_target(card: CharacterCard) -> CharacterCardCompileTarget:
     character_name = card.identity.character_name.strip()
@@ -78,32 +139,38 @@ def compile_card_from_knowledge_base(
 
     _emit_stage(on_stage, "local_compile")
     match_aliases = _card_match_terms(card)
-    resolved_aliases: list[str] = []
+    alias_resolution = AliasResolutionResult(source="local")
+    evidence_layers = _build_compile_evidence_layers(
+        target.project_id,
+        match_aliases,
+        episode_payloads,
+    )
+    if not _has_direct_evidence(evidence_layers) and cloud_preset is not None:
+        _emit_stage(on_stage, "resolving_alias")
+        alias_resolution = _resolve_character_aliases_with_ai(card, episode_payloads, cloud_preset)
+        if alias_resolution.aliases:
+            LOGGER.info(
+                "Character card compile aliases resolved; project_id=%s card_id=%s character=%s aliases=%s",
+                target.project_id,
+                target.card_id,
+                target.character_name,
+                alias_resolution.aliases,
+            )
+            match_aliases = _unique([*match_aliases, *alias_resolution.aliases])
+            evidence_layers = _build_compile_evidence_layers(
+                target.project_id,
+                match_aliases,
+                episode_payloads,
+            )
+    if not _has_direct_evidence(evidence_layers):
+        raise ValueError("character was not found in the formal knowledge base")
+
     compiled = compile_character_state_by_season_episode(
         target.project_id,
         target.character_name,
         aliases=match_aliases,
     )
     timeline = compiled.get("timeline", [])
-    if not timeline and cloud_preset is not None:
-        _emit_stage(on_stage, "resolving_alias")
-        resolved_aliases = _resolve_character_aliases_with_ai(card, episode_payloads, cloud_preset)
-        if resolved_aliases:
-            LOGGER.info(
-                "Character card compile aliases resolved; project_id=%s card_id=%s character=%s aliases=%s",
-                target.project_id,
-                target.card_id,
-                target.character_name,
-                resolved_aliases,
-            )
-            match_aliases = _unique([*match_aliases, *resolved_aliases])
-            _emit_stage(on_stage, "local_compile")
-            compiled = compile_character_state_by_season_episode(
-                target.project_id,
-                target.character_name,
-                aliases=match_aliases,
-            )
-            timeline = compiled.get("timeline", [])
     if not timeline:
         raise ValueError("character was not found in the formal knowledge base")
 
@@ -124,18 +191,29 @@ def compile_card_from_knowledge_base(
     output.quality.needs_review = False
     output.quality.warnings = []
     output.evidence.warnings = []
-    _append_identity_aliases(output, resolved_aliases)
+    _append_identity_aliases(output, alias_resolution.aliases)
+    _write_compile_evidence_layers(output, evidence_layers)
+    _write_quality_checks(output, {"alias_resolution": alias_resolution.to_payload()})
     _apply_compiled_state(output, final_state, timeline, episode_payloads)
     _emit_stage(on_stage, "ai_review")
-    _review_card_with_ai(
+    parse_diagnostics = _review_card_with_ai(
         output,
         final_state,
         timeline,
         episode_payloads,
+        evidence_layers,
         cloud_preset,
         target.compile_variant,
         on_stage=on_stage,
         on_stream_delta=on_stream_delta,
+    )
+    _apply_quality_checks(
+        output,
+        evidence_layers,
+        episode_payloads,
+        match_aliases,
+        alias_resolution,
+        [*alias_resolution.diagnostics, *parse_diagnostics],
     )
     _record_last_compile_variant(output, target.compile_variant)
     _emit_stage(on_stage, "finalizing")
@@ -217,10 +295,10 @@ def _resolve_character_aliases_with_ai(
     card: CharacterCard,
     episode_payloads: list[tuple[str, str, dict]],
     cloud_preset: CloudModelPreset,
-) -> list[str]:
+) -> AliasResolutionResult:
     target_entries = _collect_target_entries(episode_payloads)
     if not target_entries:
-        return []
+        return AliasResolutionResult(source="none")
     request = build_model_call_request(
         purpose=CHARACTER_ALIAS_RESOLVE_PROMPT,
         backend=cloud_model_provider(cloud_preset.provider).backend_for("text"),
@@ -247,7 +325,11 @@ def _resolve_character_aliases_with_ai(
     request = request.model_copy(update={"timeout_seconds": CHARACTER_ALIAS_RESOLVE_TIMEOUT_SECONDS})
     try:
         result = call_text_model(request)
-        payload = _parse_json_object(result.content)
+        parse_result = _parse_json_object_with_diagnostics(
+            result.content,
+            source=CHARACTER_ALIAS_RESOLVE_PROMPT,
+        )
+        payload = parse_result.payload
     except Exception:  # noqa: BLE001
         LOGGER.warning(
             "Character alias resolution failed; project_id=%s card_id=%s character=%s",
@@ -256,11 +338,20 @@ def _resolve_character_aliases_with_ai(
             card.identity.character_name,
             exc_info=True,
         )
-        return []
+        return AliasResolutionResult(source="ai")
     aliases = payload.get("matched_aliases", [])
     if not isinstance(aliases, list):
-        return []
-    return _validated_resolved_aliases(aliases, target_entries)
+        aliases = []
+    confidence = str(payload.get("confidence") or "none").strip().lower()
+    if confidence not in {"high", "medium", "low", "none"}:
+        confidence = "none"
+    return AliasResolutionResult(
+        aliases=_validated_resolved_aliases(aliases, target_entries),
+        confidence=confidence,
+        reason=_clip_text(str(payload.get("reason") or ""), 500),
+        source="ai",
+        diagnostics=parse_result.diagnostics,
+    )
 
 
 def _build_alias_identity_payload(card: CharacterCard) -> dict[str, Any]:
@@ -350,11 +441,458 @@ def _record_last_compile_variant(
     card: CharacterCard,
     compile_variant: CharacterCardCompileVariant,
 ) -> None:
-    extension = card.extensions.get("charapicker")
-    if not isinstance(extension, dict):
-        extension = {}
+    extension = _charapicker_extension(card)
     extension["last_compile_variant"] = compile_variant.value
-    card.extensions["charapicker"] = extension
+    card.extensions[CHARAPICKER_EXTENSION_KEY] = extension
+
+
+def _charapicker_extension(card: CharacterCard) -> dict[str, Any]:
+    extension = card.extensions.get(CHARAPICKER_EXTENSION_KEY)
+    return extension if isinstance(extension, dict) else {}
+
+
+def _write_compile_evidence_layers(
+    card: CharacterCard,
+    evidence_layers: dict[str, list[dict[str, Any]]],
+) -> None:
+    extension = _charapicker_extension(card)
+    extension["compile_evidence_layers"] = evidence_layers
+    card.extensions[CHARAPICKER_EXTENSION_KEY] = extension
+
+
+def _write_quality_checks(card: CharacterCard, updates: dict[str, Any]) -> None:
+    extension = _charapicker_extension(card)
+    quality_checks = extension.get("quality_checks")
+    if not isinstance(quality_checks, dict):
+        quality_checks = {}
+    quality_checks.update(updates)
+    extension["quality_checks"] = quality_checks
+    card.extensions[CHARAPICKER_EXTENSION_KEY] = extension
+
+
+def _build_compile_evidence_layers(
+    project_id: str,
+    match_terms: list[str],
+    episode_payloads: list[tuple[str, str, dict]],
+) -> dict[str, list[dict[str, Any]]]:
+    direct_entries: list[dict[str, Any]] = []
+    mention_entries: list[dict[str, Any]] = []
+    causal_entries: list[dict[str, Any]] = []
+    season_ids: list[str] = []
+
+    for season_id, episode_id, payload in episode_payloads:
+        season_ids.append(season_id)
+        direct_items = _related_items_by_field(payload, match_terms, DIRECT_EVIDENCE_FIELDS)
+        if direct_items:
+            direct_entries.append(
+                _evidence_entry(
+                    season_id,
+                    episode_id,
+                    layer="direct",
+                    match_terms=match_terms,
+                    items_by_field=direct_items,
+                    reason="matched character name or verified alias in episode evidence fields",
+                    refs=_payload_refs(payload),
+                    warnings=_payload_warnings(payload),
+                )
+            )
+            continue
+
+        mention_items = _related_items_by_field(payload, match_terms, MENTION_EVIDENCE_FIELDS)
+        if _episode_targets_character(payload, match_terms):
+            target_matches = _matching_targets(payload, match_terms)
+            if target_matches:
+                mention_items.setdefault("targets", target_matches)
+        if mention_items:
+            if _looks_causal_context(mention_items):
+                causal_entries.append(
+                    _evidence_entry(
+                        season_id,
+                        episode_id,
+                        layer="causal",
+                        match_terms=match_terms,
+                        items_by_field=mention_items,
+                        reason="matched contextual fields with causal or conflict language",
+                        refs=_payload_refs(payload),
+                        warnings=_payload_warnings(payload),
+                    )
+                )
+            else:
+                mention_entries.append(
+                    _evidence_entry(
+                        season_id,
+                        episode_id,
+                        layer="mention",
+                        match_terms=match_terms,
+                        items_by_field=mention_items,
+                        reason="matched mention or target candidate without direct evidence",
+                        refs=_payload_refs(payload),
+                        warnings=_payload_warnings(payload),
+                    )
+                )
+
+    return {
+        "direct_evidence_episodes": direct_entries,
+        "mention_evidence_episodes": mention_entries,
+        "causal_context_episodes": causal_entries,
+        "season_context": _build_season_context(project_id, _unique(season_ids), match_terms),
+    }
+
+
+def _has_direct_evidence(evidence_layers: dict[str, list[dict[str, Any]]]) -> bool:
+    return bool(evidence_layers.get("direct_evidence_episodes"))
+
+
+def _related_items_by_field(
+    payload: dict,
+    match_terms: list[str],
+    fields: tuple[str, ...],
+) -> dict[str, list[str]]:
+    output: dict[str, list[str]] = {}
+    for field_name in fields:
+        values = payload.get(field_name, [])
+        if isinstance(values, str):
+            values = [values]
+        elif isinstance(values, dict):
+            values = _flatten_text_values(values)
+        related = _related_items(values, match_terms)
+        if related:
+            output[field_name] = related
+    return output
+
+
+def _flatten_text_values(value: dict[str, Any]) -> list[str]:
+    output: list[str] = []
+    for item in value.values():
+        if isinstance(item, str):
+            output.append(item)
+        elif isinstance(item, list):
+            output.extend(str(entry) for entry in item if str(entry).strip())
+        elif isinstance(item, dict):
+            output.extend(_flatten_text_values(item))
+    return output
+
+
+def _evidence_entry(
+    season_id: str,
+    episode_id: str,
+    *,
+    layer: str,
+    match_terms: list[str],
+    items_by_field: dict[str, list[str]],
+    reason: str,
+    refs: list[str],
+    warnings: list[str],
+) -> dict[str, Any]:
+    source_fields = list(items_by_field.keys())
+    evidence_items = [item for values in items_by_field.values() for item in values]
+    return {
+        "season_id": season_id,
+        "episode_id": episode_id,
+        "layer": layer,
+        "match_terms": _matched_terms_in_values(evidence_items, match_terms),
+        "classification_reason": reason,
+        "source_fields": source_fields,
+        "evidence_summary": _clip_text("; ".join(_compact_items(evidence_items, 6)), 900),
+        "refs": refs,
+        "warnings": warnings,
+    }
+
+
+def _matched_terms_in_values(values: list[str], match_terms: list[str]) -> list[str]:
+    output: list[str] = []
+    for term in match_terms:
+        if any(_text_matches_term(value, term) for value in values):
+            output.append(term)
+    return _unique(output)
+
+
+def _text_matches_term(value: str, term: str) -> bool:
+    normalized_term = term.strip().casefold()
+    return len(normalized_term) >= 2 and normalized_term in value.strip().casefold()
+
+
+def _matching_targets(payload: dict, match_terms: list[str]) -> list[str]:
+    targets = payload.get("targets", [])
+    if not isinstance(targets, list):
+        return []
+    return [
+        str(item).strip()
+        for item in targets
+        if str(item).strip() and any(_text_matches_term(str(item), term) for term in match_terms)
+    ]
+
+
+def _episode_targets_character(payload: dict, match_terms: list[str]) -> bool:
+    return bool(_matching_targets(payload, match_terms))
+
+
+def _text_matches_any_term(text: str, match_terms: list[str]) -> bool:
+    return any(_text_matches_term(text, term) for term in match_terms)
+
+
+def _looks_causal_context(items_by_field: dict[str, list[str]]) -> bool:
+    text = " ".join(item for values in items_by_field.values() for item in values).casefold()
+    return any(keyword.casefold() in text for keyword in CONTEXT_CAUSAL_KEYWORDS)
+
+
+def _payload_refs(payload: dict) -> list[str]:
+    return _compact_items([str(item) for item in payload.get("evidence_refs", [])], 20)
+
+
+def _payload_warnings(payload: dict) -> list[str]:
+    warnings = [str(item) for item in payload.get("aggregation_warnings", [])]
+    source_counts = payload.get("source_counts", {})
+    if isinstance(source_counts, dict):
+        for key in ("skipped_chunks", "skipped_episodes", "skipped_seasons"):
+            value = source_counts.get(key)
+            if isinstance(value, int) and value > 0:
+                warnings.append(f"{key}:{value}")
+    return _unique(warnings)
+
+
+def _build_season_context(
+    project_id: str,
+    season_ids: list[str],
+    match_terms: list[str],
+) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    for season_id in season_ids:
+        entry: dict[str, Any] = {"season_id": season_id, "warnings": []}
+        summary = _load_full_season_summary(project_id, season_id)
+        if summary:
+            entry["season_summary"] = {
+                "context_brief": _clip_text(str(summary.get("context_brief", "")), 1200),
+                "context_long": _clip_text(str(summary.get("context_long", "")), 2400),
+                "background_summary": _clip_text(str(summary.get("background_summary", "")), 1200),
+                "series_background_summary": _clip_text(
+                    str(summary.get("series_background_summary", "")),
+                    1200,
+                ),
+                "final_character_states": _compact_items(
+                    _related_items(summary.get("final_character_states", []), match_terms),
+                    10,
+                    max_chars=500,
+                ),
+                "major_conflicts": _compact_items(
+                    _related_items(summary.get("major_conflicts", []), match_terms),
+                    10,
+                    max_chars=500,
+                ),
+                "unresolved_threads": _compact_items(
+                    _related_items(summary.get("unresolved_threads", []), match_terms),
+                    10,
+                    max_chars=500,
+                ),
+            }
+        stage_state = _character_stage_state_for_terms(project_id, season_id, match_terms)
+        if stage_state:
+            entry["character_stage_state"] = stage_state
+        if "season_summary" in entry or "character_stage_state" in entry:
+            output.append(entry)
+    return output
+
+
+def _load_full_season_summary(project_id: str, season_id: str) -> dict[str, Any] | None:
+    path = kb.season_summary_path(project_id, season_id)
+    if not path.exists():
+        return None
+    try:
+        payload = kb.load_season_summary(project_id, season_id)
+    except (OSError, ValueError, json.JSONDecodeError):
+        LOGGER.warning(
+            "Season summary skipped during card evidence layering; project_id=%s season_id=%s",
+            project_id,
+            season_id,
+            exc_info=True,
+        )
+        return None
+    return payload if kb.is_full_artifact_payload(payload) else None
+
+
+def _character_stage_state_for_terms(
+    project_id: str,
+    season_id: str,
+    match_terms: list[str],
+) -> dict[str, Any] | None:
+    try:
+        payload = kb.load_character_stage_states(project_id, season_id)
+    except (OSError, ValueError, json.JSONDecodeError):
+        LOGGER.warning(
+            "Character stage states skipped during card evidence layering; project_id=%s season_id=%s",
+            project_id,
+            season_id,
+            exc_info=True,
+        )
+        return None
+    characters = payload.get("characters", {})
+    if not isinstance(characters, dict):
+        return None
+    for character, state_payload in characters.items():
+        if not isinstance(character, str) or not _text_matches_any_term(character, match_terms):
+            continue
+        if not isinstance(state_payload, dict):
+            continue
+        final_state = state_payload.get("final_state", {})
+        return {
+            "character": character,
+            "final_state": _compact_state_payload(final_state if isinstance(final_state, dict) else {}),
+            "stage_count": len(state_payload.get("stage_states", []))
+            if isinstance(state_payload.get("stage_states"), list)
+            else 0,
+        }
+    return None
+
+
+def _compact_state_payload(state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "summary": _clip_text(str(state.get("summary", "")), 1200),
+        "evidence_count": state.get("evidence_count", 0),
+        "conflicts": _compact_items([str(item) for item in state.get("conflicts", [])], 10),
+    }
+
+
+def _apply_quality_checks(
+    card: CharacterCard,
+    evidence_layers: dict[str, list[dict[str, Any]]],
+    episode_payloads: list[tuple[str, str, dict]],
+    match_terms: list[str],
+    alias_resolution: AliasResolutionResult,
+    parse_diagnostics: list[dict[str, Any]],
+) -> None:
+    conflict_groups = _build_conflict_groups(episode_payloads, match_terms)
+    needs_review_reasons = _build_needs_review_reasons(
+        evidence_layers,
+        alias_resolution,
+        conflict_groups,
+        parse_diagnostics,
+    )
+    quality_checks = {
+        "needs_review_reasons": needs_review_reasons,
+        "conflict_groups": conflict_groups,
+        "alias_resolution": alias_resolution.to_payload(),
+        "parse_diagnostics": parse_diagnostics,
+    }
+    _write_quality_checks(card, quality_checks)
+
+    reason_messages = [
+        _review_reason_message(reason)
+        for reason in needs_review_reasons
+        if isinstance(reason, dict)
+    ]
+    card.quality.needs_review = bool(needs_review_reasons)
+    card.quality.warnings = _unique([*card.quality.warnings, *reason_messages])
+    card.evidence.warnings = collect_compile_warnings(card)
+
+
+def _build_needs_review_reasons(
+    evidence_layers: dict[str, list[dict[str, Any]]],
+    alias_resolution: AliasResolutionResult,
+    conflict_groups: list[dict[str, Any]],
+    parse_diagnostics: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    reasons: list[dict[str, Any]] = []
+    if not _has_direct_evidence(evidence_layers):
+        reasons.append(_review_reason(REVIEW_REASON_NO_DIRECT_EVIDENCE))
+    if alias_resolution.source == "ai" and alias_resolution.confidence in {"low", "none"}:
+        reasons.append(
+            _review_reason(
+                REVIEW_REASON_ALIAS_LOW_CONFIDENCE,
+                detail=alias_resolution.reason,
+            )
+        )
+    if _evidence_layers_have_warnings(evidence_layers):
+        reasons.append(_review_reason(REVIEW_REASON_KNOWLEDGE_WARNINGS))
+    if any(group.get("needs_review") for group in conflict_groups):
+        reasons.append(_review_reason(REVIEW_REASON_CONFLICT_REVIEW))
+    if parse_diagnostics:
+        reasons.append(_review_reason(REVIEW_REASON_JSON_REPAIRED))
+    return _unique_reason_payloads(reasons)
+
+
+def _review_reason(reason: str, *, detail: str = "") -> dict[str, Any]:
+    return {"reason": reason, "detail": _clip_text(detail, 500), "severity": "review"}
+
+
+def _unique_reason_payloads(reasons: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in reasons:
+        key = str(item.get("reason", ""))
+        if not key or key in seen:
+            continue
+        output.append(item)
+        seen.add(key)
+    return output
+
+
+def _review_reason_message(reason: dict[str, Any]) -> str:
+    key = str(reason.get("reason") or "")
+    detail = str(reason.get("detail") or "").strip()
+    return f"{key}: {detail}" if detail else key
+
+
+def _evidence_layers_have_warnings(evidence_layers: dict[str, list[dict[str, Any]]]) -> bool:
+    for entries in evidence_layers.values():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if isinstance(entry, dict) and entry.get("warnings"):
+                return True
+    return False
+
+
+def _build_conflict_groups(
+    episode_payloads: list[tuple[str, str, dict]],
+    match_terms: list[str],
+) -> list[dict[str, Any]]:
+    groups: list[dict[str, Any]] = []
+    for season_id, episode_id, payload in episode_payloads:
+        conflicts = _related_items(payload.get("conflicts", []), match_terms)
+        for conflict in conflicts:
+            severity = "review" if _looks_dynamic_or_unresolved(conflict) else "info"
+            groups.append(
+                {
+                    "description": _clip_text(conflict, 500),
+                    "severity": severity,
+                    "source_episodes": [f"{season_id}/{episode_id}"],
+                    "candidate_explanations": _conflict_candidate_explanations(conflict),
+                    "needs_review": severity != "info",
+                }
+            )
+    return _deduplicate_conflict_groups(groups)
+
+
+def _looks_dynamic_or_unresolved(text: str) -> bool:
+    keywords = ("冲突", "矛盾", "不一致", "误解", "未确认", "复核", "uncertain", "conflict")
+    normalized = text.casefold()
+    return any(keyword in normalized for keyword in keywords)
+
+
+def _conflict_candidate_explanations(text: str) -> list[str]:
+    normalized = text.casefold()
+    candidates: list[str] = []
+    for label, keywords in {
+        "misunderstanding": ("误解", "misunderstanding"),
+        "relationship_shift": ("关系", "转折", "relationship"),
+        "growth_or_change": ("成长", "变化", "黑化", "change"),
+        "knowledge_inconsistency": ("矛盾", "不一致", "conflict", "inconsistent"),
+    }.items():
+        if any(keyword in normalized for keyword in keywords):
+            candidates.append(label)
+    return candidates or ["needs_human_review"]
+
+
+def _deduplicate_conflict_groups(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for group in groups:
+        key = str(group.get("description", "")).casefold()
+        if not key or key in seen:
+            continue
+        output.append(group)
+        seen.add(key)
+    return output[:20]
 
 
 def _apply_compiled_state(
@@ -416,12 +954,13 @@ def _review_card_with_ai(
     final_state: dict,
     timeline: list[dict],
     episode_payloads: list[tuple[str, str, dict]],
+    evidence_layers: dict[str, list[dict[str, Any]]],
     cloud_preset: CloudModelPreset,
     compile_variant: CharacterCardCompileVariant,
     *,
     on_stage: CompileStageCallback | None = None,
     on_stream_delta: StreamDeltaCallback | None = None,
-) -> None:
+) -> list[dict[str, Any]]:
     request = build_model_call_request(
         purpose=CHARACTER_CARD_COMPILE_PROMPT,
         backend=cloud_model_provider(cloud_preset.provider).backend_for("text"),
@@ -433,6 +972,7 @@ def _review_card_with_ai(
             "character": card.identity.character_name,
             "current_card": _build_ai_card_draft_payload(card),
             "knowledge_summary": _build_ai_knowledge_summary(card, final_state, timeline, episode_payloads),
+            "evidence_layers": evidence_layers,
             "extra_requirements": _build_extra_requirements_prompt(card, compile_variant),
             "compile_variant": compile_variant.value,
             "compile_variant_instruction": _compile_variant_instruction(compile_variant),
@@ -451,10 +991,15 @@ def _review_card_with_ai(
     request = request.model_copy(update={"timeout_seconds": CHARACTER_CARD_COMPILE_TIMEOUT_SECONDS})
     result = call_text_model(request, on_stream_delta=on_stream_delta)
     _emit_stage(on_stage, "parsing")
-    payload = _parse_json_object(result.content)
+    parse_result = _parse_json_object_with_diagnostics(
+        result.content,
+        source=CHARACTER_CARD_COMPILE_PROMPT,
+    )
+    payload = parse_result.payload
     _apply_ai_card_payload(card, payload)
     card.source_context.prompt_profile_id = CHARACTER_CARD_COMPILE_PROMPT
     card.source_context.model_profile_id = cloud_preset.name
+    return parse_result.diagnostics
 
 
 def _build_ai_knowledge_summary(
@@ -835,15 +1380,27 @@ def _normalize_dialogue_roles(payload: dict[str, Any]) -> None:
 
 
 def _parse_json_object(text: str) -> dict[str, Any]:
-    payloads: list[tuple[tuple[int, int, int], dict[str, Any]]] = []
+    return _parse_json_object_with_diagnostics(text).payload
+
+
+def _parse_json_object_with_diagnostics(
+    text: str,
+    *,
+    source: str = "",
+) -> JsonParseResult:
+    payloads: list[tuple[tuple[int, int, int], dict[str, Any], list[dict[str, Any]]]] = []
     last_error: json.JSONDecodeError | None = None
-    for candidate in _iter_json_candidate_texts(text):
-        candidate_payloads, error = _parse_json_candidate_payloads(candidate)
-        payloads.extend(candidate_payloads)
+    for candidate, candidate_diagnostics in _iter_json_candidate_texts(text, source=source):
+        candidate_payloads, error = _parse_json_candidate_payloads(candidate, source=source)
+        payloads.extend(
+            (score, payload, [*candidate_diagnostics, *diagnostics])
+            for score, payload, diagnostics in candidate_payloads
+        )
         if error is not None:
             last_error = error
     if payloads:
-        return max(payloads, key=lambda item: item[0])[1]
+        _score, payload, diagnostics = max(payloads, key=lambda item: item[0])
+        return JsonParseResult(payload=payload, diagnostics=_unique_diagnostics(diagnostics))
     if "{" not in text or "}" not in text:
         raise ValueError("character card model response did not contain a JSON object")
     detail = ""
@@ -852,24 +1409,44 @@ def _parse_json_object(text: str) -> dict[str, Any]:
     raise ValueError(f"character card model response was not valid JSON{detail}") from last_error
 
 
-def _iter_json_candidate_texts(text: str) -> list[str]:
+def _iter_json_candidate_texts(
+    text: str,
+    *,
+    source: str,
+) -> list[tuple[str, list[dict[str, Any]]]]:
     stripped = text.strip().lstrip("\ufeff")
-    candidates = [match.group(1).strip() for match in JSON_CODE_BLOCK_PATTERN.finditer(stripped)]
-    candidates.append(stripped)
-    return [candidate for candidate in candidates if candidate]
+    candidates = [
+        (
+            match.group(1).strip(),
+            [_parse_diagnostic(source, "code_block", "extracted JSON from a code block")],
+        )
+        for match in JSON_CODE_BLOCK_PATTERN.finditer(stripped)
+    ]
+    candidates.append((stripped, []))
+    return [(candidate, diagnostics) for candidate, diagnostics in candidates if candidate]
 
 
 def _parse_json_candidate_payloads(
     candidate: str,
-) -> tuple[list[tuple[tuple[int, int, int], dict[str, Any]]], json.JSONDecodeError | None]:
-    payloads: list[tuple[tuple[int, int, int], dict[str, Any]]] = []
+    *,
+    source: str,
+) -> tuple[
+    list[tuple[tuple[int, int, int], dict[str, Any], list[dict[str, Any]]]],
+    json.JSONDecodeError | None,
+]:
+    payloads: list[tuple[tuple[int, int, int], dict[str, Any], list[dict[str, Any]]]] = []
     last_error: json.JSONDecodeError | None = None
-    variants = [_strip_json_language_prefix(candidate)]
-    without_trailing_commas = _remove_trailing_json_commas(variants[0])
-    if without_trailing_commas != variants[0]:
-        variants.append(without_trailing_commas)
+    variants: list[tuple[str, list[dict[str, Any]]]] = [(_strip_json_language_prefix(candidate), [])]
+    without_trailing_commas = _remove_trailing_json_commas(variants[0][0])
+    if without_trailing_commas != variants[0][0]:
+        variants.append(
+            (
+                without_trailing_commas,
+                [_parse_diagnostic(source, "trailing_comma", "removed trailing JSON commas")],
+            )
+        )
 
-    for variant in variants:
+    for variant, variant_diagnostics in variants:
         stripped = variant.strip()
         try:
             payload = json.loads(stripped)
@@ -877,7 +1454,13 @@ def _parse_json_candidate_payloads(
             last_error = exc
         else:
             if isinstance(payload, dict):
-                payloads.append((_json_payload_score(payload, 0, len(stripped)), payload))
+                payloads.append(
+                    (
+                        _json_payload_score(payload, 0, len(stripped)),
+                        payload,
+                        variant_diagnostics,
+                    )
+                )
 
         decoder = json.JSONDecoder()
         for match in re.finditer(r"{", stripped):
@@ -888,8 +1471,36 @@ def _parse_json_candidate_payloads(
                 last_error = exc
                 continue
             if isinstance(payload, dict):
-                payloads.append((_json_payload_score(payload, start, end), payload))
+                diagnostics = list(variant_diagnostics)
+                if start > 0 or end < len(stripped):
+                    diagnostics.append(
+                        _parse_diagnostic(source, "embedded_json", "decoded JSON object from surrounding text")
+                    )
+                payloads.append((_json_payload_score(payload, start, end), payload, diagnostics))
     return payloads, last_error
+
+
+def _parse_diagnostic(source: str, repair: str, message: str) -> dict[str, Any]:
+    return {
+        "source": source or CHARACTER_CARD_COMPILE_PROMPT,
+        "repair": repair,
+        "needs_review": True,
+        "message": message,
+    }
+
+
+def _unique_diagnostics(diagnostics: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in diagnostics:
+        source = str(item.get("source") or "")
+        repair = str(item.get("repair") or "")
+        key = (source, repair)
+        if not repair or key in seen:
+            continue
+        output.append(item)
+        seen.add(key)
+    return output
 
 
 def _strip_json_language_prefix(text: str) -> str:
@@ -907,7 +1518,7 @@ def _remove_trailing_json_commas(text: str) -> str:
 
 def _json_payload_score(payload: dict[str, Any], start: int, span: int) -> tuple[int, int, int]:
     expected_key_count = sum(1 for key in EXPECTED_AI_RESPONSE_KEYS if key in payload)
-    return (expected_key_count, start, span)
+    return (expected_key_count, -start, span)
 
 
 def _collect_episode_payloads(

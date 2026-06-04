@@ -259,7 +259,7 @@ This better represents a character growth path. The character is not treated as 
 
 If information conflicts over time, the system should preserve it as dynamic change, such as disguise, misunderstanding, corruption, growth, or relationship shift, rather than simply overwriting old information.
 
-Current limitation: the AI review input for character cards has not yet been split into `direct_evidence_episodes`, `mention_evidence_episodes`, `causal_context_episodes`, and `season_context`. Episodes where the character does not appear but explain later motivation may still enter compilation only as thin summaries.
+Current baseline implementation: the AI review input for character cards now includes `direct_evidence_episodes`, `mention_evidence_episodes`, `causal_context_episodes`, and `season_context`. Direct evidence is formed by character-name or verified-alias matches in episode content fields; `targets` is only an alias candidate and supporting signal, not direct evidence by itself. Mention, causal, and season context can supplement motivation, relationship chains, and continuity, but must not override direct evidence.
 
 ## 8. Current Limitations
 
@@ -271,7 +271,7 @@ This design intentionally stays transparent: users can understand why the system
 
 Current follow-up work:
 
-- Split character card compilation context into direct evidence, mention evidence, causal context, and season-level background.
+- Continue validating and tuning character card context layering: direct evidence, mention evidence, causal context, and season-level background are connected in the baseline implementation, but real material still needs to verify the classification boundaries.
 - Bring text, subtitles, transcription results, images, manga pages, and mixed media into the unified preview/knowledge-base consumption path.
 - Add automated regression coverage. The formal extraction mainline is still mainly verified through static checks, manual runs, and log review.
 - Reduce and redact model DEBUG logs so complete request/response bodies and temporary material URLs are not expanded.

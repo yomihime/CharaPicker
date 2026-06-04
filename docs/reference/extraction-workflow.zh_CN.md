@@ -259,7 +259,7 @@ flowchart TD
 
 如果前后信息出现矛盾，系统应记录为角色的动态变化，例如伪装、误解、黑化、成长或关系转折，而不是简单覆盖旧信息。
 
-当前限制：角色卡 AI 复核输入还没有正式拆成 `direct_evidence_episodes`、`mention_evidence_episodes`、`causal_context_episodes` 和 `season_context`。因此，角色没有出现但解释其后续行动动机的 episode 可能只以很薄的摘要进入角色卡编译，仍需后续专项强化。
+当前基础实现：角色卡 AI 复核输入已经接入 `direct_evidence_episodes`、`mention_evidence_episodes`、`causal_context_episodes` 和 `season_context`。direct 证据由 episode 内容字段中的角色名或已验证别名命中形成；`targets` 只作为别名候选和辅助信息，不单独算 direct。mention、causal 和 season_context 用于补充动机、关系链和连续性，不能覆盖 direct 证据。
 
 ## 8. 当前限制
 
@@ -271,7 +271,7 @@ flowchart TD
 
 当前仍需后续完善：
 
-- 角色卡编译上下文分层：直接证据、提及证据、因果上下文和季级背景需要分离。
+- 角色卡编译上下文分层仍需继续验收和调优：直接证据、提及证据、因果上下文和季级背景已经接入基础实现，但仍要通过真实素材验证分类边界。
 - 文本、字幕、转写结果、图片、漫画和混合媒体还没有完整进入统一预览/知识库消费路径。
 - 自动化回归仍不足，正式提取主线目前主要依赖静态检查、手动试跑和日志复核。
 - 模型 DEBUG 日志需要继续脱敏和降噪，避免完整请求/响应正文或临时素材 URL 展开。

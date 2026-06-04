@@ -33,6 +33,7 @@ PROMPT_VARIABLES = {
         "character",
         "current_card",
         "knowledge_summary",
+        "evidence_layers",
         "extra_requirements",
         "compile_variant",
         "compile_variant_instruction",
