@@ -46,9 +46,14 @@
 
 - 新增证据分层与质量细节第一版写入 `CharacterCard.extensions["charapicker"]`，不立即提升 `CharacterCard.schema_version`。
 - `needs_review` 第一版使用确定性规则设置，不做 UI 可配置阈值。
-- 角色完全没有 direct 证据时，正式角色卡编译继续失败；mention 和 causal 只用于补充已有角色证据，不生成“未直接出场资料卡”。
+- 角色完全没有 direct 证据时，正式角色卡编译继续失败；mention 和 causal 只用于补充已有角色证据，不生成“未直接出场资料卡”。direct 证据必须来自 episode 内容字段中的角色名或别名命中，`targets` 只能作为别名解析候选和辅助信息，不能单独算 direct。
+- direct 匹配词集合应包含角色卡身份字段和 AI 已验证别名；例如用户填写“菈菈”或“拉拉”，知识库写作 `Lala` 时，可先通过 `episode_content.targets` 解析出 `Lala`，再用 `Lala` 对 episode 内容字段重新分类。
+- `season_context` 第一版只读取 `season_summary.json` 与 `character_stage_states.json`，并且只作为低优先级背景。
+- 别名解析结果需要保留 AI 返回的 `matched_aliases`、`confidence` 和 `reason`；低置信度别名解析应进入 `needs_review_reasons`。
 - 冲突不默认等于错误。可解释为伪装、误解、黑化、成长、关系转折或时间推进的信息，应作为动态变化候选保留。
-- prompt 修改只维护 `res/default_prompts.json` 和用户 prompt override 机制，不把长 prompt 硬编码进业务代码。
+- prompt 修改只维护 `res/default_prompts.json` 和用户 prompt override 机制，不把长 prompt 硬编码进业务代码。第一版可新增 `evidence_layers` 变量；beta 阶段允许旧用户 prompt override 因变量变化而需要用户重置。
+- `mark_card_stale(reason)` 应把 stale reason 写入 warning，并在成功重编译后清理。
+- AI JSON 解析成功但经过代码块提取、尾逗号修复或文本中截取 JSON 等修复路径时，应返回 diagnostics 并写入质量提示。
 
 ## 5. 当前状态与缺口
 
@@ -106,7 +111,8 @@ AI 复核必须知道各层证据优先级：
   "quality_checks": {
     "needs_review_reasons": [],
     "conflict_groups": [],
-    "alias_resolution": {}
+    "alias_resolution": {},
+    "parse_diagnostics": []
   }
 }
 ```
@@ -136,6 +142,28 @@ AI 复核必须知道各层证据优先级：
   "source_episodes": [],
   "candidate_explanations": [],
   "needs_review": false
+}
+```
+
+建议 `alias_resolution` 至少包含：
+
+```json
+{
+  "matched_aliases": [],
+  "confidence": "high|medium|low|none",
+  "reason": "",
+  "source": "local|ai|none"
+}
+```
+
+建议 `parse_diagnostics` 条目至少包含：
+
+```json
+{
+  "source": "character_card_compile",
+  "repair": "code_block|trailing_comma|embedded_json",
+  "needs_review": true,
+  "message": ""
 }
 ```
 
@@ -178,12 +206,14 @@ AI 复核必须知道各层证据优先级：
 - 明确 direct、mention、causal、season 四层的分类条件和优先级。
 - 设计本地分类 helper 的输入输出，建议先形成私有 helper，不急于暴露公共 API。
 - 写清 `targets` 为空、别名未解析、episode 缺字段、跳过片段和 refs 缺失时的处理方式。
+- 写清 direct 证据的硬门槛：必须命中 episode 内容字段中的角色名或已验证别名；`targets` 命中只可触发别名解析或分类复核，不可单独形成 direct。
 
 验收：
 
 - 四层证据能覆盖“角色出现、被提到、因果相关、完全无关”四类 episode。
 - `targets` 缺失不会直接丢掉潜在上下文。
 - 完全无关 episode 不会被当成角色证据。
+- 用户填写“菈菈/拉拉”而知识库使用 `Lala` 时，AI 验证别名后可以用 `Lala` 重新分类 direct 证据。
 
 边界：
 
@@ -197,6 +227,7 @@ AI 复核必须知道各层证据优先级：
 - 在 core 层收集 episode 时生成 `direct_evidence_episodes`、`mention_evidence_episodes`、`causal_context_episodes` 和 `season_context`。
 - 每个条目保留 `season_id`、`episode_id`、命中理由、来源字段、证据摘要、refs 和 warnings。
 - 将分层包写入 `card.extensions["charapicker"]["compile_evidence_layers"]`。
+- `season_context` 只读取 full 阶段的 `season_summary.json` 和 `character_stage_states.json`；跳过缺失、损坏、preview 或非 full 产物，并在必要时记录 warning。
 
 验收：
 
@@ -214,13 +245,14 @@ AI 复核必须知道各层证据优先级：
 
 交付：
 
-- `_build_ai_knowledge_summary()` 或替代函数向 `character_card_compile` prompt 传入分层证据。
+- `_build_ai_knowledge_summary()` 或替代函数向 `character_card_compile` prompt 传入分层证据，并新增 `evidence_layers` 变量承载完整分层包。
 - prompt 明确四层证据的使用边界，避免把因果背景写成角色亲历事实。
 - `current_card`、`extra_requirements` 和编译目标相关变量保持现有机制。
+- 提示词页已有用户 override 时，不自动清除；beta 阶段允许用户手动重置旧 override 以使用新变量。
 
 验收：
 
-- AI 请求变量中能看到分层结构。
+- AI 请求变量中能看到 `evidence_layers` 分层结构。
 - 无 direct 证据时仍保持当前失败保护。
 - 有 direct 证据时，mention 和 causal 能帮助补全动机、关系和误解来源。
 
@@ -236,6 +268,7 @@ AI 复核必须知道各层证据优先级：
 - 将冲突拆成来源明确的 `conflict_groups`，至少记录描述、涉及 episode、可能解释、严重度和是否需要复核。
 - 形成 `needs_review_reasons`。
 - 由确定性规则设置 `card.quality.needs_review`。
+- 将 AI 别名解析结果写入 `alias_resolution`，保存 `matched_aliases`、`confidence` 和 `reason`；低置信度或无别名时按规则加入 `needs_review_reasons`。
 
 验收：
 
@@ -255,12 +288,15 @@ AI 复核必须知道各层证据优先级：
 - 成功重新编译时，清理上一轮 stale、失败和质量降级相关 warning。
 - 编译失败时，保留现有失败写回行为，并补充可追踪失败原因。
 - 明确 AI 解析修复或降级时如何写入 warning 与 `needs_review_reasons`。
+- 修正 `mark_card_stale(reason)`：传入 reason 时应写入 `card.quality.warnings`，并避免重复写入 stale reason。
+- AI JSON 解析函数应返回解析 diagnostics，至少能区分代码块提取、尾逗号修复和文本内截取 JSON。
 
 验收：
 
 - stale 卡重新编译成功后，不再残留上一轮失败原因。
 - AI 复核 JSON 被修复或解析降级时，用户能看到需复核原因。
 - `quality.last_error` 只表示最近失败，不被成功编译长期污染。
+- 手动修改已编译卡片导致 stale 时，warning 中能看到对应 stale reason。
 
 边界：
 
@@ -293,12 +329,14 @@ AI 复核必须知道各层证据优先级：
 - 增加最小可重复验证，覆盖直接出现、只被提到、因果相关、无关 episode 的分类。
 - 覆盖冲突保留、`needs_review`、stale 卡重新编译后 warning 清理。
 - 记录无法自动化的手动验证步骤。
+- 第一版验证落点为新增 `tests/`，优先覆盖纯 core helper，不依赖 PyQt 页面启动。
 
 验收：
 
 - 静态检查通过。
 - 手动或脚本验证能证明 TODO P1 第 3、4 项不再只停留在文档层。
 - 验证样例不依赖用户私有 `projects/` 数据。
+- `tests/` 中的样例使用临时项目树或内存构造数据，覆盖“用户名与知识库别名不一致”的 direct 重分类场景。
 
 边界：
 
@@ -348,6 +386,8 @@ conda run -n CharaPicker python -m ruff check core gui utils res
 - 是否避免在日志中输出完整模型请求、响应正文或大段素材内容。
 - 是否没有把 causal 或 season 背景写成角色亲历事实。
 - 是否清理或保留 stale warning 的规则清楚可解释。
+- 是否保存了别名解析的置信度与原因。
+- 是否记录了 AI JSON 解析修复 diagnostics。
 
 ## 11. 提交分组建议
 
@@ -380,7 +420,12 @@ conda run -n CharaPicker python -m ruff check core gui utils res
 
 如果收尾时发现行为 bug，应回到对应里程碑修复，不把 bug 修复塞进收尾说明。
 
-## 13. 待确认问题
+## 13. 已确认决策
 
-- causal 分类第一版是否完全使用本地启发式，还是允许在 direct 已存在后增加一次轻量 AI 辅助分类。当前建议先本地启发式，避免增加额外模型成本。
-- UI 是否只展示汇总 warning，还是允许用户展开查看 episode 级证据层。当前建议第一版只展示汇总，episode 级证据先保存在 `extensions`。
+- direct 证据必须命中 episode 内容字段中的角色名或已验证别名；`targets` 不单独算 direct。
+- `season_context` 第一版读取 `season_summary.json` 与 `character_stage_states.json`。
+- 别名解析保存 `matched_aliases`、`confidence` 和 `reason`。
+- prompt 可新增 `evidence_layers` 变量；beta 阶段允许旧 prompt override 被破坏后由用户重置。
+- `mark_card_stale(reason)` 应写入 stale reason，并在成功重编译后清理。
+- AI JSON 解析修复路径需要返回 diagnostics。
+- 验证样例第一版落在 `tests/`，以纯 core helper 测试为主。
