@@ -1950,8 +1950,10 @@ class Extractor(QObject):
             "skipped_chunks": 0,
             "failed_chunks": 0,
             "succeeded_episodes": 0,
+            "skipped_episodes": 0,
             "failed_episodes": 0,
             "succeeded_seasons": 0,
+            "skipped_seasons": 0,
             "failed_seasons": 0,
             "stale_cards": 0,
         }
@@ -1978,6 +1980,8 @@ class Extractor(QObject):
         video_fps: float,
         max_output_tokens: int,
         video_input_mode: VideoInputMode,
+        progress_base: int = 5,
+        progress_span: int = 90,
         emit_token_usage: Callable[[dict[str, int]], None] | None = None,
         emit_event: Callable[[dict], None] | None = None,
         emit_progress: Callable[[int], None] | None = None,
@@ -2329,12 +2333,222 @@ class Extractor(QObject):
 
                 processed += 1
                 if emit_progress is not None:
-                    emit_progress(5 + int(processed * 90 / total_chunks))
+                    emit_progress(progress_base + int(processed * progress_span / total_chunks))
 
         extracted_chunks = [
             chunk for _index, chunk in sorted(extracted_chunks_with_index, key=lambda item: item[0])
         ]
         return (len(extracted_chunks), usage_total, extracted_chunks, stats)
+
+    def _finalize_fast_episode_contexts_from_chunks(
+        self,
+        config: ProjectConfig,
+        manifest: dict[str, Any],
+        *,
+        chunk_inputs: list[dict[str, Any]],
+        extracted_chunks: list[ChunkExtractionResult],
+        concurrency: int,
+        backend: ModelBackend,
+        model_name: str,
+        base_url: str,
+        api_key: str,
+        context_window_tokens: int | None,
+        base_usage: dict[str, int] | None = None,
+        progress_base: int = 80,
+        progress_span: int = 10,
+        emit_token_usage: Callable[[dict[str, int]], None] | None = None,
+        emit_event: Callable[[dict], None] | None = None,
+        emit_progress: Callable[[int], None] | None = None,
+    ) -> tuple[dict[str, int], dict[str, int]]:
+        episode_groups = self._group_formal_video_chunk_inputs_by_episode(chunk_inputs)
+        episode_groups = [
+            group
+            for group in episode_groups
+            if self._manifest_string(group.get("season_id"))
+            and self._manifest_string(group.get("episode_id"))
+        ]
+        usage_total = {
+            "prompt_tokens": int((base_usage or {}).get("prompt_tokens", 0)),
+            "completion_tokens": int((base_usage or {}).get("completion_tokens", 0)),
+            "total_tokens": int((base_usage or {}).get("total_tokens", 0)),
+        }
+        stats = {"succeeded_episodes": 0, "skipped_episodes": 0, "failed_episodes": 0}
+        if not episode_groups:
+            return (usage_total, stats)
+
+        chunks_by_episode: dict[tuple[str, str], list[ChunkExtractionResult]] = {}
+        for chunk in extracted_chunks:
+            chunks_by_episode.setdefault((chunk.season_id, chunk.episode_id), []).append(chunk)
+        order_by_chunk_key = {
+            (
+                self._manifest_string(item.get("season_id")),
+                self._manifest_string(item.get("episode_id")),
+                self._manifest_string(item.get("chunk_id")),
+            ): index
+            for index, item in enumerate(chunk_inputs)
+        }
+        for chunks in chunks_by_episode.values():
+            chunks.sort(
+                key=lambda chunk: order_by_chunk_key.get(
+                    (chunk.season_id, chunk.episode_id, chunk.chunk_id),
+                    len(order_by_chunk_key),
+                )
+            )
+
+        total_episodes = len(episode_groups)
+        worker_count = min(self._normalize_fast_concurrency(concurrency), total_episodes)
+        extraction_run_id = self._manifest_string(manifest.get("extraction_run_id"))
+        LOGGER.info(
+            "Fast extraction episode merge pool started; project_id=%s total_episodes=%s concurrency=%s",
+            config.project_id,
+            total_episodes,
+            worker_count,
+        )
+
+        def finalize_one(index: int, episode_group: dict[str, Any]) -> dict[str, Any]:
+            season_id = self._manifest_string(episode_group.get("season_id"))
+            episode_id = self._manifest_string(episode_group.get("episode_id"))
+            episode_label = f"{season_id}/{episode_id}"
+            episode_chunks = chunks_by_episode.get((season_id, episode_id), [])
+            if not episode_chunks:
+                self._emit_full_event(
+                    emit_event,
+                    title=t("extractor.fast.episode.title"),
+                    description=t("extractor.fast.episode.skipped", episode=episode_label),
+                    status=InsightStatus.WARNING,
+                    meta={
+                        "mode": ExtractionMode.FAST.value,
+                        "season_id": season_id,
+                        "episode_id": episode_id,
+                    },
+                )
+                return {"index": index, "status": "skipped"}
+
+            self._emit_full_event(
+                emit_event,
+                title=t("extractor.fast.episode.title"),
+                description=t(
+                    "extractor.fast.episode.started",
+                    current=index,
+                    total=total_episodes,
+                    episode=episode_label,
+                ),
+                status=InsightStatus.RUNNING,
+                meta={
+                    "mode": ExtractionMode.FAST.value,
+                    "season_id": season_id,
+                    "episode_id": episode_id,
+                    "successful_chunks": len(episode_chunks),
+                },
+            )
+            ready, token_usage = self._finalize_formal_episode_context(
+                config.project_id,
+                manifest,
+                season_id,
+                episode_id,
+                chunk_inputs=episode_group.get("chunks", []),
+                episode_chunks=episode_chunks,
+                previous_episode_id="",
+                extraction_run_id=extraction_run_id,
+                backend=backend,
+                model_name=model_name,
+                base_url=base_url,
+                api_key=api_key,
+                context_window_tokens=context_window_tokens,
+            )
+            if ready:
+                self._emit_full_event(
+                    emit_event,
+                    title=t("extractor.fast.episode.title"),
+                    description=t(
+                        "extractor.fast.episode.saved",
+                        current=index,
+                        total=total_episodes,
+                        episode=episode_label,
+                    ),
+                    status=InsightStatus.DONE,
+                    meta={
+                        "mode": ExtractionMode.FAST.value,
+                        "season_id": season_id,
+                        "episode_id": episode_id,
+                    },
+                )
+                return {"index": index, "status": "succeeded", "usage": token_usage}
+
+            self._emit_full_event(
+                emit_event,
+                title=t("extractor.fast.episode.title"),
+                description=t("extractor.fast.episode.failed", episode=episode_label),
+                status=InsightStatus.WARNING,
+                meta={
+                    "mode": ExtractionMode.FAST.value,
+                    "season_id": season_id,
+                    "episode_id": episode_id,
+                },
+            )
+            return {"index": index, "status": "failed", "usage": token_usage}
+
+        processed = 0
+        futures: dict[Any, tuple[int, dict[str, Any]]] = {}
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            for index, episode_group in enumerate(episode_groups, start=1):
+                futures[executor.submit(finalize_one, index, episode_group)] = (
+                    index,
+                    episode_group,
+                )
+            for future in as_completed(futures):
+                index, episode_group = futures[future]
+                try:
+                    result = future.result()
+                except Exception:  # noqa: BLE001
+                    season_id = self._manifest_string(episode_group.get("season_id"))
+                    episode_id = self._manifest_string(episode_group.get("episode_id"))
+                    LOGGER.warning(
+                        "Fast extraction episode merge worker failed unexpectedly; "
+                        "project_id=%s season_id=%s episode_id=%s",
+                        config.project_id,
+                        season_id,
+                        episode_id,
+                        exc_info=True,
+                    )
+                    self._emit_full_event(
+                        emit_event,
+                        title=t("extractor.fast.episode.title"),
+                        description=t(
+                            "extractor.fast.episode.failed",
+                            episode=f"{season_id}/{episode_id}",
+                        ),
+                        status=InsightStatus.WARNING,
+                        meta={
+                            "mode": ExtractionMode.FAST.value,
+                            "season_id": season_id,
+                            "episode_id": episode_id,
+                        },
+                    )
+                    result = {"index": index, "status": "failed"}
+
+                status = result.get("status")
+                if status == "succeeded":
+                    stats["succeeded_episodes"] += 1
+                elif status == "skipped":
+                    stats["skipped_episodes"] += 1
+                else:
+                    stats["failed_episodes"] += 1
+
+                token_usage = result.get("usage")
+                if isinstance(token_usage, dict):
+                    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                        value = token_usage.get(key)
+                        if isinstance(value, int):
+                            usage_total[key] += value
+                    if emit_token_usage is not None and any(usage_total.values()):
+                        emit_token_usage(usage_total)
+
+                processed += 1
+                if emit_progress is not None:
+                    emit_progress(progress_base + int(processed * progress_span / total_episodes))
+
+        return (usage_total, stats)
 
     def _extract_full_chunk_json_from_manifest(
         self,
@@ -3403,6 +3617,8 @@ class Extractor(QObject):
                     video_fps=preset.video_fps,
                     max_output_tokens=preset.max_output_tokens,
                     video_input_mode=video_input_mode,
+                    progress_base=5,
+                    progress_span=75,
                     emit_token_usage=emit_token_usage,
                     emit_event=emit_event,
                     emit_progress=emit_progress,
@@ -3429,6 +3645,25 @@ class Extractor(QObject):
                     emit_progress=emit_progress,
                 )
             )
+        if is_fast_mode:
+            extraction_usage, episode_stats = self._finalize_fast_episode_contexts_from_chunks(
+                config,
+                manifest,
+                chunk_inputs=chunk_inputs,
+                extracted_chunks=extracted_chunks,
+                concurrency=fast_concurrency,
+                backend=provider_profile.backend_for("text"),
+                model_name=preset.model_name,
+                base_url=preset.base_url,
+                api_key=preset.api_key,
+                context_window_tokens=context_window_budget_tokens(preset),
+                base_usage=extraction_usage,
+                emit_token_usage=emit_token_usage,
+                emit_event=emit_event,
+                emit_progress=emit_progress,
+            )
+            for key, value in episode_stats.items():
+                run_stats[key] = run_stats.get(key, 0) + value
         emit_progress(96)
         stale_card_ids: list[str] = []
         if extracted_chunks and not is_fast_mode:
