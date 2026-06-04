@@ -1381,6 +1381,7 @@ class Extractor(QObject):
         base_url: str,
         api_key: str,
         context_window_tokens: int | None,
+        include_previous_season_backgrounds: bool = True,
     ) -> tuple[bool, dict[str, int]]:
         try:
             merge_usage = self._merge_season_content_with_ai(
@@ -1393,6 +1394,7 @@ class Extractor(QObject):
                 base_url=base_url,
                 api_key=api_key,
                 context_window_tokens=context_window_tokens,
+                include_previous_season_backgrounds=include_previous_season_backgrounds,
             )
         except Exception:  # noqa: BLE001
             LOGGER.warning(
@@ -1414,6 +1416,7 @@ class Extractor(QObject):
                 base_url=base_url,
                 api_key=api_key,
                 context_window_tokens=context_window_tokens,
+                include_previous_season_backgrounds=include_previous_season_backgrounds,
             )
         except Exception:  # noqa: BLE001
             LOGGER.warning(
@@ -1437,6 +1440,7 @@ class Extractor(QObject):
         base_url: str,
         api_key: str,
         context_window_tokens: int | None,
+        include_previous_season_backgrounds: bool = True,
     ) -> dict[str, int]:
         episode_contents: list[dict[str, Any]] = []
         episode_summaries: list[dict[str, Any]] = []
@@ -1461,11 +1465,15 @@ class Extractor(QObject):
         if not episode_contents:
             raise ValueError("season AI merge requires at least one completed episode")
 
-        previous_season_backgrounds = self._load_previous_season_backgrounds_for_run(
-            project_id,
-            manifest,
-            season_id,
-            extraction_run_id=extraction_run_id,
+        previous_season_backgrounds = (
+            self._load_previous_season_backgrounds_for_run(
+                project_id,
+                manifest,
+                season_id,
+                extraction_run_id=extraction_run_id,
+            )
+            if include_previous_season_backgrounds
+            else []
         )
         aggregation_warnings = [
             f"episode_missing_or_incomplete:{episode_id}" for episode_id in missing_episode_ids
@@ -1572,16 +1580,21 @@ class Extractor(QObject):
         base_url: str,
         api_key: str,
         context_window_tokens: int | None,
+        include_previous_season_backgrounds: bool = True,
     ) -> dict[str, int]:
         season_content = kb.load_season_content(project_id, season_id)
         if not kb.is_full_artifact_payload_for_run(season_content, extraction_run_id):
             raise ValueError("season content does not match current extraction run")
 
-        previous_series_background = self._load_previous_season_backgrounds_for_run(
-            project_id,
-            manifest,
-            season_id,
-            extraction_run_id=extraction_run_id,
+        previous_series_background = (
+            self._load_previous_season_backgrounds_for_run(
+                project_id,
+                manifest,
+                season_id,
+                extraction_run_id=extraction_run_id,
+            )
+            if include_previous_season_backgrounds
+            else []
         )
         variables = {
             "season_id": season_id,
@@ -1721,6 +1734,18 @@ class Extractor(QObject):
                     episode_ids.append(episode_id)
             break
         return episode_ids
+
+    def _season_ids_from_manifest(self, manifest: dict[str, Any]) -> list[str]:
+        season_ids: list[str] = []
+        seen: set[str] = set()
+        for season in manifest.get("seasons", []):
+            if not isinstance(season, dict):
+                continue
+            season_id = self._manifest_string(season.get("season_id"))
+            if season_id and season_id not in seen:
+                seen.add(season_id)
+                season_ids.append(season_id)
+        return season_ids
 
     def transcribe_episode_audio(
         self,
@@ -2547,6 +2572,166 @@ class Extractor(QObject):
                 processed += 1
                 if emit_progress is not None:
                     emit_progress(progress_base + int(processed * progress_span / total_episodes))
+
+        return (usage_total, stats)
+
+    def _finalize_fast_season_contexts_from_episodes(
+        self,
+        config: ProjectConfig,
+        manifest: dict[str, Any],
+        *,
+        concurrency: int,
+        backend: ModelBackend,
+        model_name: str,
+        base_url: str,
+        api_key: str,
+        context_window_tokens: int | None,
+        base_usage: dict[str, int] | None = None,
+        progress_base: int = 90,
+        progress_span: int = 5,
+        emit_token_usage: Callable[[dict[str, int]], None] | None = None,
+        emit_event: Callable[[dict], None] | None = None,
+        emit_progress: Callable[[int], None] | None = None,
+    ) -> tuple[dict[str, int], dict[str, int]]:
+        season_ids = self._season_ids_from_manifest(manifest)
+        usage_total = {
+            "prompt_tokens": int((base_usage or {}).get("prompt_tokens", 0)),
+            "completion_tokens": int((base_usage or {}).get("completion_tokens", 0)),
+            "total_tokens": int((base_usage or {}).get("total_tokens", 0)),
+        }
+        stats = {"succeeded_seasons": 0, "skipped_seasons": 0, "failed_seasons": 0}
+        if not season_ids:
+            return (usage_total, stats)
+
+        total_seasons = len(season_ids)
+        worker_count = min(self._normalize_fast_concurrency(concurrency), total_seasons)
+        extraction_run_id = self._manifest_string(manifest.get("extraction_run_id"))
+        LOGGER.info(
+            "Fast extraction season merge pool started; project_id=%s total_seasons=%s concurrency=%s",
+            config.project_id,
+            total_seasons,
+            worker_count,
+        )
+
+        def has_completed_episode_context(season_id: str) -> bool:
+            for episode_id in self._season_episode_ids_from_manifest(manifest, season_id):
+                try:
+                    episode_content = kb.load_episode_content(config.project_id, season_id, episode_id)
+                    episode_summary = kb.load_episode_summary(config.project_id, season_id, episode_id)
+                except (OSError, ValueError, json.JSONDecodeError):
+                    continue
+                if kb.is_full_artifact_payload_for_run(
+                    episode_content,
+                    extraction_run_id,
+                ) and kb.is_full_artifact_payload_for_run(episode_summary, extraction_run_id):
+                    return True
+            return False
+
+        def finalize_one(index: int, season_id: str) -> dict[str, Any]:
+            if not has_completed_episode_context(season_id):
+                self._emit_full_event(
+                    emit_event,
+                    title=t("extractor.fast.season.title"),
+                    description=t("extractor.fast.season.skipped", season=season_id),
+                    status=InsightStatus.WARNING,
+                    meta={"mode": ExtractionMode.FAST.value, "season_id": season_id},
+                )
+                return {"index": index, "status": "skipped"}
+
+            self._emit_full_event(
+                emit_event,
+                title=t("extractor.fast.season.title"),
+                description=t(
+                    "extractor.fast.season.started",
+                    current=index,
+                    total=total_seasons,
+                    season=season_id,
+                ),
+                status=InsightStatus.RUNNING,
+                meta={"mode": ExtractionMode.FAST.value, "season_id": season_id},
+            )
+            ready, token_usage = self._finalize_formal_season_context(
+                config.project_id,
+                manifest,
+                season_id,
+                extraction_run_id=extraction_run_id,
+                backend=backend,
+                model_name=model_name,
+                base_url=base_url,
+                api_key=api_key,
+                context_window_tokens=context_window_tokens,
+                include_previous_season_backgrounds=False,
+            )
+            if ready:
+                self._emit_full_event(
+                    emit_event,
+                    title=t("extractor.fast.season.title"),
+                    description=t(
+                        "extractor.fast.season.saved",
+                        current=index,
+                        total=total_seasons,
+                        season=season_id,
+                    ),
+                    status=InsightStatus.DONE,
+                    meta={"mode": ExtractionMode.FAST.value, "season_id": season_id},
+                )
+                return {"index": index, "status": "succeeded", "usage": token_usage}
+
+            self._emit_full_event(
+                emit_event,
+                title=t("extractor.fast.season.title"),
+                description=t("extractor.fast.season.failed", season=season_id),
+                status=InsightStatus.WARNING,
+                meta={"mode": ExtractionMode.FAST.value, "season_id": season_id},
+            )
+            return {"index": index, "status": "failed", "usage": token_usage}
+
+        processed = 0
+        futures: dict[Any, tuple[int, str]] = {}
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+            for index, season_id in enumerate(season_ids, start=1):
+                futures[executor.submit(finalize_one, index, season_id)] = (index, season_id)
+            for future in as_completed(futures):
+                index, season_id = futures[future]
+                try:
+                    result = future.result()
+                except Exception:  # noqa: BLE001
+                    LOGGER.warning(
+                        "Fast extraction season merge worker failed unexpectedly; "
+                        "project_id=%s season_id=%s",
+                        config.project_id,
+                        season_id,
+                        exc_info=True,
+                    )
+                    self._emit_full_event(
+                        emit_event,
+                        title=t("extractor.fast.season.title"),
+                        description=t("extractor.fast.season.failed", season=season_id),
+                        status=InsightStatus.WARNING,
+                        meta={"mode": ExtractionMode.FAST.value, "season_id": season_id},
+                    )
+                    result = {"index": index, "status": "failed"}
+
+                status = result.get("status")
+                if status == "succeeded":
+                    stats["succeeded_seasons"] += 1
+                elif status == "skipped":
+                    stats["skipped_seasons"] += 1
+                else:
+                    stats["failed_seasons"] += 1
+
+                token_usage = result.get("usage")
+                if isinstance(token_usage, dict):
+                    for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                        value = token_usage.get(key)
+                        if isinstance(value, int):
+                            usage_total[key] += value
+                    if emit_token_usage is not None and any(usage_total.values()):
+                        emit_token_usage(usage_total)
+
+                processed += 1
+                if emit_progress is not None:
+                    emit_progress(progress_base + int(processed * progress_span / total_seasons))
 
         return (usage_total, stats)
 
@@ -3664,9 +3849,25 @@ class Extractor(QObject):
             )
             for key, value in episode_stats.items():
                 run_stats[key] = run_stats.get(key, 0) + value
+            extraction_usage, season_stats = self._finalize_fast_season_contexts_from_episodes(
+                config,
+                manifest,
+                concurrency=fast_concurrency,
+                backend=provider_profile.backend_for("text"),
+                model_name=preset.model_name,
+                base_url=preset.base_url,
+                api_key=preset.api_key,
+                context_window_tokens=context_window_budget_tokens(preset),
+                base_usage=extraction_usage,
+                emit_token_usage=emit_token_usage,
+                emit_event=emit_event,
+                emit_progress=emit_progress,
+            )
+            for key, value in season_stats.items():
+                run_stats[key] = run_stats.get(key, 0) + value
         emit_progress(96)
         stale_card_ids: list[str] = []
-        if extracted_chunks and not is_fast_mode:
+        if extracted_chunks and (not is_fast_mode or run_stats.get("succeeded_seasons", 0) > 0):
             stale_card_ids = mark_compiled_official_cards_stale(
                 config.project_id,
                 reason="formal_extraction_updated",
