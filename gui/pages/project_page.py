@@ -1049,7 +1049,7 @@ class ProjectPage(QWidget):
         progress_header = QHBoxLayout()
         progress_header.addWidget(BodyLabel(t("project.progress.label"), insight_card))
         progress_header.addStretch(1)
-        self.token_usage_label = CaptionLabel(t("model.cloud.test.tokenUsage.empty"), insight_card)
+        self.token_usage_label = CaptionLabel(t("project.extraction.tokenUsage.empty"), insight_card)
         progress_header.addWidget(self.token_usage_label, 0, Qt.AlignmentFlag.AlignRight)
         insight_layout.addLayout(progress_header)
         self.progress = ProgressBar(insight_card)
@@ -1173,7 +1173,7 @@ class ProjectPage(QWidget):
 
     def clear_events(self) -> None:
         self.progress.setValue(0)
-        self.token_usage_label.setText(t("model.cloud.test.tokenUsage.empty"))
+        self.token_usage_label.setText(t("project.extraction.tokenUsage.empty"))
         self.stream_panel.clear_events()
 
     def set_progress(self, value: int) -> None:
@@ -1183,17 +1183,17 @@ class ProjectPage(QWidget):
         usage = token_usage if isinstance(token_usage, dict) else {}
         char_count = usage.get("char_count")
         if isinstance(char_count, int):
-            self.token_usage_label.setText(t("model.cloud.test.tokenUsage.pending"))
+            self.token_usage_label.setText(t("project.extraction.tokenUsage.pending"))
             return
         prompt_tokens = usage.get("prompt_tokens")
         completion_tokens = usage.get("completion_tokens")
         total_tokens = usage.get("total_tokens")
         if not any(isinstance(value, int) for value in (prompt_tokens, completion_tokens, total_tokens)):
-            self.token_usage_label.setText(t("model.cloud.test.tokenUsage.empty"))
+            self.token_usage_label.setText(t("project.extraction.tokenUsage.empty"))
             return
         self.token_usage_label.setText(
             t(
-                "model.cloud.test.tokenUsage",
+                "project.extraction.tokenUsage",
                 prompt_tokens=prompt_tokens if isinstance(prompt_tokens, int) else "-",
                 completion_tokens=completion_tokens if isinstance(completion_tokens, int) else "-",
                 total_tokens=total_tokens if isinstance(total_tokens, int) else "-",
