@@ -88,6 +88,7 @@ from utils.model_preferences import (
     set_last_local_model_path,
     set_last_model_page_mode,
 )
+from utils.network_middleware import sanitize_url
 from utils.paths import APP_ROOT
 from utils.ffmpeg_tool import FfmpegProcessError, probe_video_duration_seconds
 from utils.ai_model_middleware import (
@@ -117,13 +118,17 @@ LOGGER = logging.getLogger(__name__)
 EASTER_TAP_TARGET = 9
 
 
+def _safe_log_url(url: str) -> str:
+    return sanitize_url(url.strip()) if url else ""
+
+
 def _video_max_output_tokens(max_output_tokens_per_minute: int, video_path: Path) -> int:
     try:
         duration_seconds = probe_video_duration_seconds(video_path)
     except (FfmpegProcessError, OSError):
         LOGGER.warning(
             "Cloud video test duration probe failed; video=%s",
-            video_path,
+            video_path.name,
             exc_info=True,
         )
         duration_seconds = 60.0
@@ -241,7 +246,7 @@ class LlamaCppDownloadWorker(QObject):
             LOGGER.info("llama.cpp download cancelled")
             self.cancelled.emit()
         except LlamaCppDownloadError as exc:
-            LOGGER.warning("llama.cpp download failed", exc_info=True)
+            LOGGER.error("llama.cpp download failed", exc_info=True)
             self.failed.emit(str(exc))
         else:
             LOGGER.info("llama.cpp download succeeded; binary=%s", binary)
@@ -263,14 +268,15 @@ class CloudModelListWorker(QObject):
         self.api_schema = api_schema
 
     def run(self) -> None:
-        LOGGER.info("Cloud model list worker started; base_url=%s", self.base_url)
+        safe_base_url = _safe_log_url(self.base_url)
+        LOGGER.info("Cloud model list worker started; base_url=%s", safe_base_url)
         try:
             models = fetch_cloud_models(self.provider, self.base_url, self.api_key, self.api_schema)
         except CloudModelListError as exc:
-            LOGGER.warning("Cloud model list worker failed; base_url=%s", self.base_url, exc_info=True)
+            LOGGER.error("Cloud model list worker failed; base_url=%s", safe_base_url, exc_info=True)
             self.failed.emit(str(exc))
         else:
-            LOGGER.info("Cloud model list worker succeeded; base_url=%s count=%s", self.base_url, len(models))
+            LOGGER.info("Cloud model list worker succeeded; base_url=%s count=%s", safe_base_url, len(models))
             self.succeeded.emit(models)
         finally:
             self.finished.emit()
@@ -303,7 +309,7 @@ class CloudTextTestWorker(QObject):
     def run(self) -> None:
         LOGGER.info(
             "Cloud text understanding test started; base_url=%s model=%s",
-            self.base_url,
+            _safe_log_url(self.base_url),
             self.model_name,
         )
         try:
@@ -336,7 +342,7 @@ class CloudTextTestWorker(QObject):
                 on_stream_delta=lambda delta: self.progressChanged.emit(delta),
             )
         except (ModelMiddlewareError, ValueError) as exc:
-            LOGGER.warning("Cloud text understanding test failed", exc_info=True)
+            LOGGER.error("Cloud text understanding test failed", exc_info=True)
             self.failed.emit(str(exc))
         else:
             prompt_tokens, completion_tokens, total_tokens = _token_usage_log_fields(result.metadata)
@@ -380,9 +386,9 @@ class CloudImageTestWorker(QObject):
     def run(self) -> None:
         LOGGER.info(
             "Cloud image understanding test started; base_url=%s model=%s image=%s",
-            self.base_url,
+            _safe_log_url(self.base_url),
             self.model_name,
-            self.image_path,
+            self.image_path.name,
         )
         try:
             image_data_url = _build_data_url(self.image_path, "image/jpeg")
@@ -419,7 +425,7 @@ class CloudImageTestWorker(QObject):
                 on_stream_delta=lambda delta: self.progressChanged.emit(delta),
             )
         except (ModelMiddlewareError, OSError, ValueError) as exc:
-            LOGGER.warning("Cloud image understanding test failed", exc_info=True)
+            LOGGER.error("Cloud image understanding test failed", exc_info=True)
             self.failed.emit(str(exc))
         else:
             prompt_tokens, completion_tokens, total_tokens = _token_usage_log_fields(result.metadata)
@@ -465,9 +471,9 @@ class CloudAudioTestWorker(QObject):
     def run(self) -> None:
         LOGGER.info(
             "Cloud audio understanding test started; base_url=%s model=%s audio=%s",
-            self.base_url,
+            _safe_log_url(self.base_url),
             self.model_name,
-            self.audio_path,
+            self.audio_path.name,
         )
         try:
             unsupported = _audio_input_support_status(
@@ -516,7 +522,7 @@ class CloudAudioTestWorker(QObject):
                 on_stream_delta=lambda delta: self.progressChanged.emit(delta),
             )
         except (ModelMiddlewareError, OSError, ValueError) as exc:
-            LOGGER.warning("Cloud audio understanding test failed", exc_info=True)
+            LOGGER.error("Cloud audio understanding test failed", exc_info=True)
             self.failed.emit(str(exc))
         else:
             prompt_tokens, completion_tokens, total_tokens = _token_usage_log_fields(result.metadata)
@@ -564,9 +570,9 @@ class CloudVideoTestWorker(QObject):
     def run(self) -> None:
         LOGGER.info(
             "Cloud video understanding test started; base_url=%s model=%s video=%s",
-            self.base_url,
+            _safe_log_url(self.base_url),
             self.model_name,
-            self.video_path,
+            self.video_path.name,
         )
         try:
             unsupported = _video_mode_support_status(self.provider, self.video_input_mode)
@@ -608,7 +614,7 @@ class CloudVideoTestWorker(QObject):
                 on_stream_delta=lambda delta: self.progressChanged.emit(delta),
             )
         except (ModelMiddlewareError, OSError, ValueError) as exc:
-            LOGGER.warning("Cloud video understanding test failed", exc_info=True)
+            LOGGER.error("Cloud video understanding test failed", exc_info=True)
             self.failed.emit(str(exc))
         else:
             prompt_tokens, completion_tokens, total_tokens = _token_usage_log_fields(result.metadata)
@@ -664,7 +670,11 @@ class CloudAllTestWorker(QObject):
         self.text_prompt_override = text_prompt_override
 
     def run(self) -> None:
-        LOGGER.info("Cloud all-modal test started; base_url=%s model=%s", self.base_url, self.model_name)
+        LOGGER.info(
+            "Cloud all-modal test started; base_url=%s model=%s",
+            _safe_log_url(self.base_url),
+            self.model_name,
+        )
         try:
             results = {
                 "text": self._run_text_test(),
@@ -674,7 +684,7 @@ class CloudAllTestWorker(QObject):
             }
             self.succeeded.emit(results)
         except (ModelMiddlewareError, OSError, ValueError) as exc:
-            LOGGER.warning("Cloud all-modal test failed", exc_info=True)
+            LOGGER.error("Cloud all-modal test failed", exc_info=True)
             self.failed.emit(str(exc))
         finally:
             self.finished.emit()
@@ -1606,7 +1616,11 @@ class ModelPage(QWidget):
             return
         api_key = self.cloud_api_key.text().strip()
 
-        LOGGER.info("Cloud model fetch requested; base_url=%s has_api_key=%s", base_url, bool(api_key))
+        LOGGER.info(
+            "Cloud model fetch requested; base_url=%s has_api_key=%s",
+            _safe_log_url(base_url),
+            bool(api_key),
+        )
         self.fetch_cloud_models_button.setEnabled(False)
         self.fetch_cloud_models_button.setText(t("model.cloud.models.fetching"))
         self._cloud_models_thread = QThread(self)

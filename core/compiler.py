@@ -91,15 +91,32 @@ def _compile_character_state_by_season_episode(
     state = CharacterState(character=character, summary="", evidence_count=0, conflicts=[])
     timeline: list[dict] = []
     match_terms = _character_match_terms(character, aliases)
+    total_episode_files = 0
+    read_failed = 0
+    skipped_stage = 0
+    no_match = 0
+    no_new_evidence = 0
+    matched = 0
+    LOGGER.debug(
+        "Character state compilation scan started; project_id=%s character=%s match_term_count=%s "
+        "log_label=%s required_stage=%s",
+        project_id,
+        character,
+        len(match_terms),
+        log_label,
+        required_stage or "",
+    )
 
     for season_dir in kb.list_season_dirs(project_id):
         for episode_dir in kb.list_episode_dirs(project_id, season_dir.name):
             episode_content_path = content_path(project_id, season_dir.name, episode_dir.name)
             if not episode_content_path.exists():
                 continue
+            total_episode_files += 1
             try:
                 payload = load_content(project_id, season_dir.name, episode_dir.name)
             except (OSError, ValueError):
+                read_failed += 1
                 LOGGER.warning(
                     "%s read failed; project_id=%s season_id=%s episode_id=%s",
                     log_label,
@@ -110,6 +127,7 @@ def _compile_character_state_by_season_episode(
                 )
                 continue
             if required_stage is not None and kb.artifact_stage_from_payload(payload) != required_stage:
+                skipped_stage += 1
                 LOGGER.warning(
                     "%s skipped because it is not a %s artifact; project_id=%s season_id=%s episode_id=%s stage=%s",
                     log_label,
@@ -124,12 +142,15 @@ def _compile_character_state_by_season_episode(
                 payload,
                 match_terms,
             ):
+                no_match += 1
                 continue
 
             updated_state = _apply_episode_payload_to_state(state, payload, match_terms)
             if not _state_has_new_evidence(state, updated_state):
+                no_new_evidence += 1
                 continue
             state = updated_state
+            matched += 1
             timeline.append(
                 {
                     "season_id": season_dir.name,
@@ -138,6 +159,27 @@ def _compile_character_state_by_season_episode(
                 }
             )
 
+    LOGGER.info(
+        "Character state compilation scan finished; project_id=%s character=%s timeline_steps=%s "
+        "evidence_count=%s conflicts=%s",
+        project_id,
+        character,
+        len(timeline),
+        state.evidence_count,
+        len(state.conflicts),
+    )
+    LOGGER.debug(
+        "Character state compilation scan summary; project_id=%s character=%s total_files=%s "
+        "matched=%s no_match=%s no_new_evidence=%s skipped_stage=%s read_failed=%s",
+        project_id,
+        character,
+        total_episode_files,
+        matched,
+        no_match,
+        no_new_evidence,
+        skipped_stage,
+        read_failed,
+    )
     return {
         "character": character,
         "final_state": state.model_dump(mode="json"),

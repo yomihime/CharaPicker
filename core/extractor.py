@@ -178,11 +178,11 @@ class Extractor(QObject):
                 warning = f"chunk_read_failed:{chunk_path.name}"
                 aggregation_warnings.append(warning)
                 LOGGER.warning(
-                    "Chunk JSON read failed during episode merge; project_id=%s season_id=%s episode_id=%s path=%s",
+                    "Chunk JSON read failed during episode merge; project_id=%s season_id=%s episode_id=%s file_name=%s",
                     project_id,
                     season_id,
                     episode_id,
-                    chunk_path,
+                    chunk_path.name,
                     exc_info=True,
                 )
                 continue
@@ -201,11 +201,11 @@ class Extractor(QObject):
                 warning = f"chunk_validation_failed:{chunk_path.name}"
                 aggregation_warnings.append(warning)
                 LOGGER.warning(
-                    "Full chunk validation failed during episode merge; project_id=%s season_id=%s episode_id=%s path=%s",
+                    "Full chunk validation failed during episode merge; project_id=%s season_id=%s episode_id=%s file_name=%s",
                     project_id,
                     season_id,
                     episode_id,
-                    chunk_path,
+                    chunk_path.name,
                     exc_info=True,
                 )
                 continue
@@ -552,7 +552,7 @@ class Extractor(QObject):
             try:
                 chunk = kb.load_chunk_result(chunk_path)
             except (OSError, json.JSONDecodeError, ValueError):
-                LOGGER.warning("Preview chunk JSON read failed; path=%s", chunk_path, exc_info=True)
+                LOGGER.warning("Preview chunk JSON read failed; file_name=%s", chunk_path.name, exc_info=True)
                 continue
             if chunk.season_id == "season_000" or chunk.episode_id == "episode_000":
                 continue
@@ -2286,7 +2286,7 @@ class Extractor(QObject):
                 )
                 return {"index": index, "status": status}
             except Exception as exc:  # noqa: BLE001
-                LOGGER.warning(
+                LOGGER.error(
                     "Fast extraction chunk failed; project_id=%s source_path=%s",
                     config.project_id,
                     source_path,
@@ -2314,7 +2314,7 @@ class Extractor(QObject):
                 try:
                     result = future.result()
                 except Exception:  # noqa: BLE001
-                    LOGGER.warning(
+                    LOGGER.error(
                         "Fast extraction worker failed unexpectedly; "
                         "project_id=%s season_id=%s episode_id=%s chunk_id=%s",
                         config.project_id,
@@ -3104,7 +3104,7 @@ class Extractor(QObject):
                     continue
                 except Exception as exc:  # noqa: BLE001
                     stats["failed_chunks"] += 1
-                    LOGGER.warning(
+                    LOGGER.error(
                         "Full extraction chunk failed; project_id=%s source_path=%s",
                         config.project_id,
                         source_path,
@@ -3990,7 +3990,7 @@ class Extractor(QObject):
         except ExtractionStoppedError:
             raise
         except Exception:  # noqa: BLE001
-            LOGGER.warning("Preview chunk extraction from video failed; project_id=%s", config.project_id, exc_info=True)
+            LOGGER.error("Preview chunk extraction from video failed; project_id=%s", config.project_id, exc_info=True)
             created_count = 0
             extraction_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
             extracted_chunks = []

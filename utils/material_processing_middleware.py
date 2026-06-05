@@ -57,8 +57,31 @@ def process_source_request(
     progress: ProgressCallback | None = None,
     cancelled: CancelledCallback | None = None,
 ) -> SourceProcessingResult:
+    LOGGER.info(
+        "Source processing request started; project_id=%s source_count=%s preset=%s "
+        "trim_enabled=%s transcode_enabled=%s segment_enabled=%s segment_mode=%s "
+        "codec=%s encoder_configured=%s resolution=%s",
+        config.project_id,
+        len(config.source_paths),
+        config.source_processing.preset.value,
+        config.source_processing.trim_enabled,
+        config.source_processing.transcode_enabled,
+        config.source_processing.segment_enabled,
+        config.source_processing.segment_mode.value,
+        config.source_processing.codec,
+        bool(config.source_processing.encoder),
+        config.source_processing.resolution,
+    )
     validation = validate_source_processing_tools(config.source_processing)
     if not validation.is_valid:
+        LOGGER.warning(
+            "Source processing tool validation failed; project_id=%s missing_tools=%s "
+            "requires_ffmpeg=%s ffmpeg_ready=%s",
+            config.project_id,
+            validation.missing_tools,
+            validation.requires_ffmpeg,
+            validation.ffmpeg_ready,
+        )
         raise MaterialProcessingError("Required source processing tools are unavailable.")
 
     raw_sources = import_sources_to_raw(
@@ -75,7 +98,9 @@ def process_source_request(
     if reimported_paths:
         updated_config = config.model_copy(
             update={
-                "raw_cleaned_paths": [path for path in config.raw_cleaned_paths if path not in reimported_paths]
+                "raw_cleaned_paths": [
+                    path for path in config.raw_cleaned_paths if path not in reimported_paths
+                ]
             }
         )
 
@@ -99,8 +124,10 @@ def process_source_request(
 
     save_project_config(updated_config)
     LOGGER.info(
-        "Source processing request completed through middleware; project_id=%s linked_count=%s uses_original_sources=%s",
+        "Source processing request completed through middleware; project_id=%s raw_count=%s "
+        "linked_count=%s uses_original_sources=%s",
         config.project_id,
+        len(raw_sources),
         linked_count,
         uses_original_sources,
     )

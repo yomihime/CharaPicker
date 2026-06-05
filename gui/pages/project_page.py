@@ -213,7 +213,7 @@ class FfmpegDownloadWorker(QObject):
             LOGGER.info("ffmpeg download cancelled")
             self.cancelled.emit()
         except FfmpegDownloadError as exc:
-            LOGGER.warning("ffmpeg download failed", exc_info=True)
+            LOGGER.error("ffmpeg download failed", exc_info=True)
             self.failed.emit(str(exc))
         else:
             LOGGER.info("ffmpeg download succeeded; binary=%s", binary)
@@ -305,7 +305,7 @@ class WhisperDownloadWorker(QObject):
             LOGGER.info("whisper.cpp download cancelled")
             self.cancelled.emit()
         except WhisperCppDownloadError as exc:
-            LOGGER.warning("whisper.cpp download failed", exc_info=True)
+            LOGGER.error("whisper.cpp download failed", exc_info=True)
             self.failed.emit(str(exc))
         else:
             LOGGER.info("whisper.cpp download succeeded; runtime=%s model=%s", runtime_path, model_path)
@@ -513,17 +513,17 @@ class SourceProcessingWorker(QObject):
             )
             self.succeeded.emit(result.config, result.linked_count, result.uses_original_sources)
         except MaterialProcessingError as exc:
-            LOGGER.warning("Source processing failed because required tools are unavailable", exc_info=True)
+            LOGGER.warning("Source processing failed because required tools are unavailable")
             self.failed.emit(str(exc))
         except RuntimeError as exc:
             if str(exc) == SOURCE_PROCESSING_CANCELLED_MESSAGE:
                 LOGGER.info("source processing worker cancelled")
                 self.cancelled.emit()
                 return
-            LOGGER.warning("Source processing failed", exc_info=True)
+            LOGGER.error("Source processing failed", exc_info=True)
             self.failed.emit(str(exc))
         except Exception as exc:
-            LOGGER.warning("Source processing failed", exc_info=True)
+            LOGGER.error("Source processing failed", exc_info=True)
             self.failed.emit(str(exc))
         finally:
             self.finished.emit()

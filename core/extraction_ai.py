@@ -128,6 +128,15 @@ def call_formal_json_model(
         prompt_estimate = estimate_context_tokens(_request_text_for_estimate(request))
 
     for attempt in range(1, attempts + 1):
+        LOGGER.debug(
+            "Formal extraction JSON model attempt started; purpose=%s attempt=%s/%s "
+            "estimated_prompt_tokens=%s requested_output_tokens=%s",
+            request.purpose,
+            attempt,
+            attempts,
+            prompt_estimate,
+            request.max_tokens,
+        )
         result = call_model(request)
         content = result.content if isinstance(result.content, str) else ""
         last_content = content
@@ -142,8 +151,28 @@ def call_formal_json_model(
             estimated_context_tokens=prompt_estimate,
         )
         attempt_metadata.append(metadata)
+        LOGGER.debug(
+            "Formal extraction JSON model attempt received; purpose=%s attempt=%s/%s "
+            "finish_reason=%s content_chars=%s token_usage=%s",
+            request.purpose,
+            attempt,
+            attempts,
+            finish_reason,
+            len(content),
+            token_usage,
+        )
 
         if model_stopped_by_output_limit(result):
+            LOGGER.warning(
+                "Formal extraction JSON model response truncated; purpose=%s attempt=%s/%s "
+                "finish_reason=%s content_chars=%s requested_output_tokens=%s",
+                request.purpose,
+                attempt,
+                attempts,
+                finish_reason,
+                len(content),
+                request.max_tokens,
+            )
             raise FormalExtractionOutputTruncatedError(
                 "formal extraction model response was truncated",
                 attempts=attempt,
@@ -179,6 +208,15 @@ def call_formal_json_model(
             "estimated_prompt_tokens": prompt_estimate,
             "response_content_chars": len(content),
         }
+        LOGGER.debug(
+            "Formal extraction JSON parsed; purpose=%s attempt=%s/%s token_usage_total=%s "
+            "response_content_chars=%s",
+            request.purpose,
+            attempt,
+            attempts,
+            token_usage_total,
+            len(content),
+        )
         return FormalExtractionJsonResult(
             payload=payload,
             content=content,

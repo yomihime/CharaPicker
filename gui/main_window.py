@@ -70,7 +70,7 @@ class PreviewWorker(QObject):
             LOGGER.warning("Preview worker stopped; reason=%s", exc)
             self.failed.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
-            LOGGER.warning("Preview worker failed", exc_info=True)
+            LOGGER.error("Preview worker failed", exc_info=True)
             self.failed.emit(str(exc))
         finally:
             self.finished.emit()
@@ -112,7 +112,7 @@ class FullExtractionWorker(QObject):
             LOGGER.warning("Full extraction worker stopped; reason=%s", exc)
             self.failed.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
-            LOGGER.warning("Full extraction worker failed", exc_info=True)
+            LOGGER.error("Full extraction worker failed", exc_info=True)
             self.failed.emit(str(exc))
         finally:
             self.finished.emit()

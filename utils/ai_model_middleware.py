@@ -24,6 +24,7 @@ from utils.network_middleware import (
     open_response,
     redact_sensitive_text,
     run_with_proxy_environment,
+    sanitize_url,
 )
 
 
@@ -60,6 +61,35 @@ def _compact_error_text(value: object, *, max_length: int = 500) -> str:
     if len(text) <= max_length:
         return text
     return f"{text[: max_length - 3]}..."
+
+
+def _safe_log_url(url: str) -> str:
+    return sanitize_url(url.strip()) if url else ""
+
+
+def _request_message_summary(messages: list["ModelMessage"]) -> dict[str, Any]:
+    part_counts: dict[str, int] = {}
+    text_messages = 0
+    list_messages = 0
+    for message in messages:
+        content = message.content
+        if isinstance(content, str):
+            text_messages += 1
+            continue
+        list_messages += 1
+        for part in content:
+            if not isinstance(part, dict):
+                part_type = "unknown"
+            else:
+                part_type = str(part.get("type") or "unknown")
+            part_counts[part_type] = part_counts.get(part_type, 0) + 1
+    return {
+        "messages": len(messages),
+        "text_messages": text_messages,
+        "list_messages": list_messages,
+        "content_parts": sum(part_counts.values()),
+        "part_counts": part_counts,
+    }
 
 
 class ModelMessage(BaseModel):
@@ -160,10 +190,15 @@ def build_model_call_request(
 ) -> ModelCallRequest:
     system_prompt, rendered_user = render_prompt_texts(purpose=purpose, variables=variables)
     LOGGER.debug(
-        "Model call request built; purpose=%s backend=%s model=%s has_api_key=%s",
+        "Model call request built; purpose=%s backend=%s model=%s stream=%s max_tokens=%s "
+        "variable_keys=%s metadata_keys=%s has_api_key=%s",
         purpose,
         backend,
         model_name,
+        stream,
+        max_tokens,
+        sorted(variables.keys()),
+        sorted((metadata or {}).keys()),
         bool(api_key),
     )
     return ModelCallRequest(
@@ -322,12 +357,23 @@ def _call_dashscope(request: ModelCallRequest) -> ModelCallResult:
     api_key = request.api_key.strip()
     dashscope.base_http_api_url = _dashscope_api_url(request.base_url)
     messages = [_to_dashscope_message(message) for message in request.messages]
+    safe_endpoint = _safe_log_url(dashscope.base_http_api_url)
     LOGGER.info(
         "Calling model through DashScope SDK; purpose=%s endpoint=%s model=%s has_api_key=%s",
         request.purpose,
-        dashscope.base_http_api_url,
+        safe_endpoint,
         request.model_name,
         bool(api_key),
+    )
+    LOGGER.debug(
+        "DashScope model call request summary; purpose=%s message_summary=%s max_tokens=%s "
+        "timeout_seconds=%s extra_body_keys=%s metadata_keys=%s",
+        request.purpose,
+        _request_message_summary(request.messages),
+        request.max_tokens,
+        request.timeout_seconds,
+        sorted(request.extra_body.keys()),
+        sorted(request.metadata.keys()),
     )
     try:
         call_kwargs: dict[str, Any] = {
@@ -346,13 +392,13 @@ def _call_dashscope(request: ModelCallRequest) -> ModelCallResult:
         LOGGER.warning(
             "DashScope model call failed; purpose=%s endpoint=%s error=%s",
             request.purpose,
-            dashscope.base_http_api_url,
+            safe_endpoint,
             _compact_error_text(exc),
         )
         LOGGER.debug(
             "DashScope model call traceback; purpose=%s endpoint=%s",
             request.purpose,
-            dashscope.base_http_api_url,
+            safe_endpoint,
             exc_info=True,
         )
         raise ModelCallError(redact_sensitive_text(exc)) from exc
@@ -686,15 +732,29 @@ def _call_openai_compatible(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
+    safe_endpoint = _safe_log_url(endpoint)
     LOGGER.info(
         "Calling model through middleware; "
         "purpose=%s backend=%s endpoint=%s model=%s stream=%s has_api_key=%s",
         request.purpose,
         request.backend,
-        endpoint,
+        safe_endpoint,
         request.model_name,
         request.stream,
         bool(api_key),
+    )
+    LOGGER.debug(
+        "Model call request summary; purpose=%s backend=%s message_summary=%s temperature=%s "
+        "max_tokens=%s timeout_seconds=%s response_format=%s extra_body_keys=%s metadata_keys=%s",
+        request.purpose,
+        request.backend,
+        _request_message_summary(request.messages),
+        request.temperature,
+        request.max_tokens,
+        request.timeout_seconds,
+        bool(request.response_format),
+        sorted(request.extra_body.keys()),
+        sorted(request.metadata.keys()),
     )
     try:
         with open_response(
@@ -710,7 +770,7 @@ def _call_openai_compatible(
                 LOGGER.warning(
                     "Model call failed; purpose=%s endpoint=%s status=%s body_chars=%s",
                     request.purpose,
-                    endpoint,
+                    safe_endpoint,
                     response.status_code,
                     len(error_body),
                 )
@@ -718,7 +778,7 @@ def _call_openai_compatible(
                     LOGGER.debug(
                         "Model call HTTP error body; purpose=%s endpoint=%s status=%s body=%s",
                         request.purpose,
-                        endpoint,
+                        safe_endpoint,
                         response.status_code,
                         _compact_error_text(error_body, max_length=2000),
                     )
@@ -735,13 +795,13 @@ def _call_openai_compatible(
         LOGGER.warning(
             "Model call failed; purpose=%s endpoint=%s error=%s",
             request.purpose,
-            endpoint,
+            safe_endpoint,
             _compact_error_text(exc),
         )
         LOGGER.debug(
             "Model call traceback; purpose=%s endpoint=%s",
             request.purpose,
-            endpoint,
+            safe_endpoint,
             exc_info=True,
         )
         raise ModelCallError(redact_sensitive_text(exc)) from exc
@@ -760,6 +820,13 @@ def _call_openai_compatible(
     metadata = dict(request.metadata)
     if usage:
         metadata["token_usage"] = usage
+    LOGGER.debug(
+        "Model call response summary; purpose=%s model=%s content_chars=%s usage_present=%s",
+        request.purpose,
+        request.model_name,
+        len(content),
+        bool(usage),
+    )
     return ModelCallResult(content=content, raw=raw, metadata=metadata)
 
 
@@ -815,6 +882,14 @@ def _read_streamed_response(
     metadata = dict(request.metadata)
     if usage:
         metadata["token_usage"] = usage
+    LOGGER.debug(
+        "Streamed model call response summary; purpose=%s model=%s chunks=%s content_chars=%s usage_present=%s",
+        request.purpose,
+        request.model_name,
+        len(chunks),
+        len(content),
+        bool(usage),
+    )
     return ModelCallResult(
         content=content,
         raw={"stream": True, "chunks": chunks},

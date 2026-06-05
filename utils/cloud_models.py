@@ -8,7 +8,7 @@ from utils.cloud_model_presets import (
     base_url_has_unresolved_placeholder,
     cloud_model_provider,
 )
-from utils.network_middleware import NetworkMiddlewareError, read_json, redact_sensitive_text
+from utils.network_middleware import NetworkMiddlewareError, read_json, redact_sensitive_text, sanitize_url
 
 LOGGER = logging.getLogger(__name__)
 
@@ -28,7 +28,8 @@ def _models_endpoint(base_url: str) -> str:
 
 def fetch_openai_compatible_models(base_url: str, api_key: str) -> list[str]:
     endpoint = _models_endpoint(base_url)
-    LOGGER.info("Fetching cloud model list; endpoint=%s has_api_key=%s", endpoint, bool(api_key.strip()))
+    safe_endpoint = sanitize_url(endpoint)
+    LOGGER.info("Fetching cloud model list; endpoint=%s has_api_key=%s", safe_endpoint, bool(api_key.strip()))
     headers = {"User-Agent": HTTP_USER_AGENT}
     api_key = api_key.strip()
     if api_key:
@@ -39,10 +40,10 @@ def fetch_openai_compatible_models(base_url: str, api_key: str) -> list[str]:
     except (NetworkMiddlewareError, OSError, ValueError, json.JSONDecodeError) as exc:
         LOGGER.warning(
             "Cloud model list fetch failed; endpoint=%s error=%s",
-            endpoint,
+            safe_endpoint,
             redact_sensitive_text(exc),
-            exc_info=True,
         )
+        LOGGER.debug("Cloud model list fetch traceback; endpoint=%s", safe_endpoint, exc_info=True)
         raise CloudModelListError(redact_sensitive_text(exc)) from exc
 
     data = payload.get("data")
@@ -57,9 +58,9 @@ def fetch_openai_compatible_models(base_url: str, api_key: str) -> list[str]:
         }
     )
     if not models:
-        LOGGER.warning("Cloud model list response contained no usable models; endpoint=%s", endpoint)
+        LOGGER.warning("Cloud model list response contained no usable models; endpoint=%s", safe_endpoint)
         raise CloudModelListError("No models were returned.")
-    LOGGER.info("Cloud model list fetched; endpoint=%s count=%s", endpoint, len(models))
+    LOGGER.info("Cloud model list fetched; endpoint=%s count=%s", safe_endpoint, len(models))
     return models
 
 

@@ -51,7 +51,7 @@ class CharacterCardCompileWorker(QObject):
             self.stageChanged.emit("done")
             self.succeeded.emit(compiled)
         except Exception as exc:  # noqa: BLE001
-            LOGGER.warning(
+            LOGGER.error(
                 "Character card compile worker failed; project_id=%s card_id=%s",
                 self.card.project_id,
                 self.card.card_id,
@@ -79,7 +79,7 @@ class CharacterCardPreviewWorker(QObject):
             store.save_preview_card(card)
             self.succeeded.emit(card)
         except Exception as exc:  # noqa: BLE001
-            LOGGER.warning(
+            LOGGER.error(
                 "Character card preview worker failed; project_id=%s character=%s",
                 self.project_id,
                 self.character_name,
@@ -104,10 +104,10 @@ class CharacterCardImportWorker(QObject):
         try:
             self.succeeded.emit(import_charapicker_card(self.project_id, self.path))
         except Exception as exc:  # noqa: BLE001
-            LOGGER.warning(
-                "Character card import worker failed; project_id=%s path=%s",
+            LOGGER.error(
+                "Character card import worker failed; project_id=%s file_name=%s",
                 self.project_id,
-                self.path,
+                self.path.name,
                 exc_info=True,
             )
             self.failed.emit(str(exc))
@@ -135,7 +135,7 @@ class CharacterCardExportWorker(QObject):
         try:
             self.succeeded.emit(export_selected_targets(self.card, self.targets, output_dir=self.output_dir))
         except Exception as exc:  # noqa: BLE001
-            LOGGER.warning(
+            LOGGER.error(
                 "Character card export worker failed; project_id=%s card_id=%s",
                 self.card.project_id,
                 self.card.card_id,

@@ -127,6 +127,15 @@ def compile_card_from_knowledge_base(
     on_stream_delta: StreamDeltaCallback | None = None,
 ) -> CharacterCard:
     target = build_compile_target(card)
+    LOGGER.info(
+        "Character card knowledge-base compile started; project_id=%s card_id=%s character=%s "
+        "variant=%s has_cloud_preset=%s",
+        target.project_id,
+        target.card_id,
+        target.character_name,
+        target.compile_variant.value,
+        cloud_preset is not None,
+    )
     _emit_stage(on_stage, "collecting")
     episode_payloads = _collect_episode_payloads(
         target.project_id,
@@ -134,7 +143,18 @@ def compile_card_from_knowledge_base(
         load_content=kb.load_episode_content,
         require_full=True,
     )
+    LOGGER.info(
+        "Character card compile episode payloads collected; project_id=%s card_id=%s count=%s",
+        target.project_id,
+        target.card_id,
+        len(episode_payloads),
+    )
     if not episode_payloads:
+        LOGGER.warning(
+            "Character card compile failed because formal knowledge base is empty; project_id=%s card_id=%s",
+            target.project_id,
+            target.card_id,
+        )
         raise ValueError("formal knowledge base is not available")
 
     _emit_stage(on_stage, "local_compile")
@@ -145,15 +165,36 @@ def compile_card_from_knowledge_base(
         match_aliases,
         episode_payloads,
     )
+    LOGGER.debug(
+        "Character card compile initial evidence summary; project_id=%s card_id=%s summary=%s",
+        target.project_id,
+        target.card_id,
+        _evidence_layer_summary(evidence_layers),
+    )
     if not _has_direct_evidence(evidence_layers) and cloud_preset is not None:
+        LOGGER.info(
+            "Character card compile direct evidence missing; alias resolution will run; "
+            "project_id=%s card_id=%s match_term_count=%s",
+            target.project_id,
+            target.card_id,
+            len(match_aliases),
+        )
         _emit_stage(on_stage, "resolving_alias")
         alias_resolution = _resolve_character_aliases_with_ai(card, episode_payloads, cloud_preset)
         if alias_resolution.aliases:
             LOGGER.info(
-                "Character card compile aliases resolved; project_id=%s card_id=%s character=%s aliases=%s",
+                "Character card compile aliases resolved; project_id=%s card_id=%s character=%s "
+                "alias_count=%s confidence=%s",
                 target.project_id,
                 target.card_id,
                 target.character_name,
+                len(alias_resolution.aliases),
+                alias_resolution.confidence,
+            )
+            LOGGER.debug(
+                "Character card compile resolved alias details; project_id=%s card_id=%s aliases=%s",
+                target.project_id,
+                target.card_id,
                 alias_resolution.aliases,
             )
             match_aliases = _unique([*match_aliases, *alias_resolution.aliases])
@@ -162,7 +203,22 @@ def compile_card_from_knowledge_base(
                 match_aliases,
                 episode_payloads,
             )
+            LOGGER.debug(
+                "Character card compile evidence summary after alias resolution; "
+                "project_id=%s card_id=%s summary=%s",
+                target.project_id,
+                target.card_id,
+                _evidence_layer_summary(evidence_layers),
+            )
     if not _has_direct_evidence(evidence_layers):
+        LOGGER.warning(
+            "Character card compile failed because no direct evidence was found; "
+            "project_id=%s card_id=%s character=%s evidence_summary=%s",
+            target.project_id,
+            target.card_id,
+            target.character_name,
+            _evidence_layer_summary(evidence_layers),
+        )
         raise ValueError("character was not found in the formal knowledge base")
 
     compiled = compile_character_state_by_season_episode(
@@ -172,12 +228,27 @@ def compile_card_from_knowledge_base(
     )
     timeline = compiled.get("timeline", [])
     if not timeline:
+        LOGGER.warning(
+            "Character card compile failed because state timeline is empty; "
+            "project_id=%s card_id=%s character=%s match_term_count=%s",
+            target.project_id,
+            target.card_id,
+            target.character_name,
+            len(match_aliases),
+        )
         raise ValueError("character was not found in the formal knowledge base")
 
     final_state = compiled.get("final_state", {})
     if not isinstance(final_state, dict):
         raise ValueError("compiled character state is invalid")
     if cloud_preset is None:
+        LOGGER.warning(
+            "Character card compile failed because cloud text model preset is missing; "
+            "project_id=%s card_id=%s character=%s",
+            target.project_id,
+            target.card_id,
+            target.character_name,
+        )
         raise ValueError("cloud text model preset is required for character card compilation")
 
     output = card.model_copy(deep=True)
@@ -217,11 +288,31 @@ def compile_card_from_knowledge_base(
     )
     _record_last_compile_variant(output, target.compile_variant)
     _emit_stage(on_stage, "finalizing")
+    LOGGER.info(
+        "Character card knowledge-base compile finished; project_id=%s card_id=%s character=%s "
+        "revision=%s evidence_count=%s needs_review=%s warning_count=%s",
+        output.project_id,
+        output.card_id,
+        output.identity.character_name,
+        output.revision,
+        output.evidence.evidence_count,
+        output.quality.needs_review,
+        len(output.evidence.warnings),
+    )
     return output
 
 
-def compile_preview_card_from_preview_knowledge_base(project_id: str, character_name: str = "") -> CharacterCard:
+def compile_preview_card_from_preview_knowledge_base(
+    project_id: str,
+    character_name: str = "",
+) -> CharacterCard:
     name = character_name.strip() or _guess_preview_character(project_id)
+    LOGGER.info(
+        "Preview character card compile started; project_id=%s character=%s explicit_character=%s",
+        project_id,
+        name,
+        bool(character_name.strip()),
+    )
     card = store.create_preview_card(project_id, name)
     episode_payloads = _collect_episode_payloads(
         project_id,
@@ -230,6 +321,10 @@ def compile_preview_card_from_preview_knowledge_base(project_id: str, character_
         require_full=False,
     )
     if not episode_payloads:
+        LOGGER.warning(
+            "Preview character card compile failed because preview knowledge base is empty; project_id=%s",
+            project_id,
+        )
         raise ValueError("preview knowledge base is not available")
 
     timeline: list[dict] = []
@@ -246,6 +341,13 @@ def compile_preview_card_from_preview_knowledge_base(project_id: str, character_
     card.compile_status = CharacterCardStatus.PREVIEW
     card.compile_source = CharacterCardCompileSource.PREVIEW
     card.compiled_at = datetime.now()
+    LOGGER.info(
+        "Preview character card compile finished; project_id=%s card_id=%s character=%s evidence_count=%s",
+        project_id,
+        card.card_id,
+        card.identity.character_name,
+        card.evidence.evidence_count,
+    )
     return card
 
 
@@ -298,7 +400,21 @@ def _resolve_character_aliases_with_ai(
 ) -> AliasResolutionResult:
     target_entries = _collect_target_entries(episode_payloads)
     if not target_entries:
+        LOGGER.info(
+            "Character alias resolution skipped because no target candidates were available; "
+            "project_id=%s card_id=%s character=%s",
+            card.project_id,
+            card.card_id,
+            card.identity.character_name,
+        )
         return AliasResolutionResult(source="none")
+    LOGGER.info(
+        "Character alias resolution started; project_id=%s card_id=%s character=%s target_count=%s",
+        card.project_id,
+        card.card_id,
+        card.identity.character_name,
+        len(target_entries),
+    )
     request = build_model_call_request(
         purpose=CHARACTER_ALIAS_RESOLVE_PROMPT,
         backend=cloud_model_provider(cloud_preset.provider).backend_for("text"),
@@ -330,9 +446,16 @@ def _resolve_character_aliases_with_ai(
             source=CHARACTER_ALIAS_RESOLVE_PROMPT,
         )
         payload = parse_result.payload
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         LOGGER.warning(
-            "Character alias resolution failed; project_id=%s card_id=%s character=%s",
+            "Character alias resolution failed; project_id=%s card_id=%s character=%s error=%s",
+            card.project_id,
+            card.card_id,
+            card.identity.character_name,
+            _clip_text(str(exc), 200),
+        )
+        LOGGER.debug(
+            "Character alias resolution traceback; project_id=%s card_id=%s character=%s",
             card.project_id,
             card.card_id,
             card.identity.character_name,
@@ -345,8 +468,25 @@ def _resolve_character_aliases_with_ai(
     confidence = str(payload.get("confidence") or "none").strip().lower()
     if confidence not in {"high", "medium", "low", "none"}:
         confidence = "none"
+    validated_aliases = _validated_resolved_aliases(aliases, target_entries)
+    LOGGER.info(
+        "Character alias resolution finished; project_id=%s card_id=%s character=%s "
+        "alias_count=%s confidence=%s diagnostics=%s",
+        card.project_id,
+        card.card_id,
+        card.identity.character_name,
+        len(validated_aliases),
+        confidence,
+        len(parse_result.diagnostics),
+    )
+    LOGGER.debug(
+        "Character alias resolution details; project_id=%s card_id=%s aliases=%s",
+        card.project_id,
+        card.card_id,
+        validated_aliases,
+    )
     return AliasResolutionResult(
-        aliases=_validated_resolved_aliases(aliases, target_entries),
+        aliases=validated_aliases,
         confidence=confidence,
         reason=_clip_text(str(payload.get("reason") or ""), 500),
         source="ai",
@@ -468,6 +608,15 @@ def _write_quality_checks(card: CharacterCard, updates: dict[str, Any]) -> None:
     quality_checks.update(updates)
     extension["quality_checks"] = quality_checks
     card.extensions[CHARAPICKER_EXTENSION_KEY] = extension
+
+
+def _evidence_layer_summary(evidence_layers: dict[str, list[dict[str, Any]]]) -> dict[str, int]:
+    return {
+        "direct": len(evidence_layers.get("direct_evidence_episodes", [])),
+        "mention": len(evidence_layers.get("mention_evidence_episodes", [])),
+        "causal": len(evidence_layers.get("causal_context_episodes", [])),
+        "season_context": len(evidence_layers.get("season_context", [])),
+    }
 
 
 def _build_compile_evidence_layers(
@@ -778,6 +927,17 @@ def _apply_quality_checks(
     card.quality.needs_review = bool(needs_review_reasons)
     card.quality.warnings = _unique(card.quality.warnings)
     card.evidence.warnings = collect_compile_warnings(card)
+    LOGGER.info(
+        "Character card quality checks completed; project_id=%s card_id=%s needs_review=%s "
+        "reason_codes=%s conflict_groups=%s parse_diagnostics=%s evidence_warning_count=%s",
+        card.project_id,
+        card.card_id,
+        card.quality.needs_review,
+        [str(item.get("reason", "")) for item in needs_review_reasons],
+        len(conflict_groups),
+        len(parse_diagnostics),
+        len(card.evidence.warnings),
+    )
 
 
 def _build_needs_review_reasons(
@@ -950,6 +1110,18 @@ def _review_card_with_ai(
     on_stage: CompileStageCallback | None = None,
     on_stream_delta: StreamDeltaCallback | None = None,
 ) -> list[dict[str, Any]]:
+    LOGGER.info(
+        "Character card AI review started; project_id=%s card_id=%s character=%s variant=%s "
+        "timeline_steps=%s episode_payloads=%s evidence_summary=%s stream=%s",
+        card.project_id,
+        card.card_id,
+        card.identity.character_name,
+        compile_variant.value,
+        len(timeline),
+        len(episode_payloads),
+        _evidence_layer_summary(evidence_layers),
+        on_stream_delta is not None,
+    )
     request = build_model_call_request(
         purpose=CHARACTER_CARD_COMPILE_PROMPT,
         backend=cloud_model_provider(cloud_preset.provider).backend_for("text"),
@@ -988,6 +1160,13 @@ def _review_card_with_ai(
     _apply_ai_card_payload(card, payload)
     card.source_context.prompt_profile_id = CHARACTER_CARD_COMPILE_PROMPT
     card.source_context.model_profile_id = cloud_preset.name
+    LOGGER.info(
+        "Character card AI review parsed; project_id=%s card_id=%s diagnostics=%s payload_keys=%s",
+        card.project_id,
+        card.card_id,
+        len(parse_result.diagnostics),
+        sorted(payload.keys()),
+    )
     return parse_result.diagnostics
 
 
@@ -1518,24 +1697,41 @@ def _collect_episode_payloads(
     require_full: bool,
 ) -> list[tuple[str, str, dict]]:
     payloads: list[tuple[str, str, dict]] = []
+    total_episode_files = 0
+    skipped_stage = 0
+    read_failed = 0
     for season_dir in kb.list_season_dirs(project_id):
         for episode_dir in kb.list_episode_dirs(project_id, season_dir.name):
             path = content_path(project_id, season_dir.name, episode_dir.name)
             if not path.exists():
                 continue
+            total_episode_files += 1
             try:
                 payload = load_content(project_id, season_dir.name, episode_dir.name)
             except (OSError, ValueError, json.JSONDecodeError):
+                read_failed += 1
                 LOGGER.warning(
-                    "Episode content skipped during card compilation; project_id=%s path=%s",
+                    "Episode content skipped during card compilation; project_id=%s season_id=%s episode_id=%s",
                     project_id,
-                    path,
+                    season_dir.name,
+                    episode_dir.name,
                     exc_info=True,
                 )
                 continue
             if require_full and not kb.is_full_artifact_payload(payload):
+                skipped_stage += 1
                 continue
             payloads.append((season_dir.name, episode_dir.name, payload))
+    LOGGER.debug(
+        "Episode payload collection completed for card compilation; project_id=%s require_full=%s "
+        "total_files=%s loaded=%s skipped_stage=%s read_failed=%s",
+        project_id,
+        require_full,
+        total_episode_files,
+        len(payloads),
+        skipped_stage,
+        read_failed,
+    )
     return payloads
 
 

@@ -8,7 +8,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
 
@@ -30,6 +30,19 @@ OPENAI_KEY_RE = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b")
 URL_WITH_CREDENTIALS_RE = re.compile(
     r"([A-Za-z][A-Za-z0-9+.-]*://)([^/\s:@]+(?::[^/\s@]*)?@)"
 )
+SENSITIVE_URL_QUERY_KEYS = {
+    "access_key",
+    "access_key_id",
+    "access_token",
+    "api_key",
+    "apikey",
+    "authorization",
+    "key",
+    "password",
+    "secret",
+    "signature",
+    "token",
+}
 
 
 class NetworkMiddlewareError(RuntimeError):
@@ -236,16 +249,30 @@ def sanitize_url(url: str) -> str:
         parsed = urlsplit(url)
     except ValueError:
         return redact_sensitive_text(url)
-    if not parsed.username and not parsed.password:
-        return url
 
+    netloc = parsed.netloc
     host = parsed.hostname or ""
-    if ":" in host and not host.startswith("["):
-        host = f"[{host}]"
-    netloc = f"***:***@{host}"
-    if parsed.port:
-        netloc += f":{parsed.port}"
-    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+    if parsed.username or parsed.password:
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        netloc = f"***:***@{host}"
+        if parsed.port:
+            netloc += f":{parsed.port}"
+    query = _sanitize_url_query(parsed.query)
+    return urlunsplit((parsed.scheme, netloc, parsed.path, query, parsed.fragment))
+
+
+def _sanitize_url_query(query: str) -> str:
+    if not query:
+        return ""
+    sanitized_pairs: list[tuple[str, str]] = []
+    for key, value in parse_qsl(query, keep_blank_values=True):
+        normalized_key = key.strip().lower().replace("-", "_")
+        if normalized_key in SENSITIVE_URL_QUERY_KEYS or normalized_key.endswith("_token"):
+            sanitized_pairs.append((key, "***"))
+        else:
+            sanitized_pairs.append((key, value))
+    return urlencode(sanitized_pairs, safe="*")
 
 
 def _probe_status_code(url: str, *, timeout: int | float) -> int:

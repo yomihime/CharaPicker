@@ -17,6 +17,8 @@
 - 没有 direct 证据的正式角色卡仍会编译失败，避免为未出场或无证据角色硬生成资料卡；`targets` 只作为别名候选和辅助信息，不单独算 direct。
 - 角色卡 AI 复核 prompt 新增 `evidence_layers` 变量，beta 阶段旧的用户 prompt override 可能需要重置后才能使用新分层证据。
 - `quality.warnings` 只保留用户可读 warning，结构化复核原因保存在 `extensions["charapicker"]["quality_checks"]["needs_review_reasons"]` 并由 UI 本地化展示。
+- 调整模型调用、素材处理、正式提取和角色卡编译日志：INFO 记录阶段起止与结果摘要，DEBUG 记录计数、分支和 token/响应形状，WARNING/ERROR 区分可恢复降级与任务失败。
+- 收紧日志中的敏感输出：模型端点统一脱敏，FFmpeg 不再打印完整命令，素材导入与知识库读取失败日志避免记录完整本地路径。
 
 ### 修复
 

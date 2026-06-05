@@ -36,6 +36,24 @@ class FfmpegProcessError(RuntimeError):
     pass
 
 
+def _ffmpeg_command_summary(command: list[str]) -> dict[str, object]:
+    flags: list[str] = []
+    input_count = 0
+    for index, value in enumerate(command):
+        if value == "-i":
+            input_count += 1
+            continue
+        if index > 0 and value.startswith("-"):
+            flags.append(value)
+    return {
+        "binary": Path(command[0]).name if command else "",
+        "argc": len(command),
+        "input_count": input_count,
+        "flag_count": len(flags),
+        "flags": sorted(dict.fromkeys(flags)),
+    }
+
+
 @dataclass(frozen=True)
 class EncoderOption:
     encoder: str
@@ -670,7 +688,7 @@ def _run_ffmpeg_command(
     cancelled: CancelledCallback | None = None,
     on_progress: FfmpegProgressCallback | None = None,
 ) -> None:
-    LOGGER.info("Running FFmpeg command: %s", subprocess.list2cmdline(command))
+    LOGGER.info("FFmpeg command started; summary=%s", _ffmpeg_command_summary(command))
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
@@ -732,7 +750,20 @@ def _run_ffmpeg_command(
         on_progress(final_frame, final_fps)
     if process.returncode != 0:
         summary = _extract_ffmpeg_error_summary(stderr_lines, stdout)
+        LOGGER.warning(
+            "FFmpeg command failed; summary=%s returncode=%s stderr_lines=%s stdout_chars=%s",
+            _ffmpeg_command_summary(command),
+            process.returncode,
+            len(stderr_lines),
+            len(stdout),
+        )
         raise FfmpegProcessError(summary or "FFmpeg process failed.")
+    LOGGER.debug(
+        "FFmpeg command finished; summary=%s returncode=%s stderr_lines=%s",
+        _ffmpeg_command_summary(command),
+        process.returncode,
+        len(stderr_lines),
+    )
 
 
 def _terminate_process(process: subprocess.Popen[bytes]) -> None:

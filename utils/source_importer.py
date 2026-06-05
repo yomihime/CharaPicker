@@ -16,6 +16,10 @@ CancelledCallback = Callable[[], bool]
 COPY_BUFFER_SIZE = 1024 * 1024 * 8
 
 
+def _path_log_name(path: Path) -> str:
+    return path.name or str(path)
+
+
 def import_sources_to_raw(
     project_id: str,
     source_paths: list[str],
@@ -73,7 +77,10 @@ def remove_raw_sources(project_id: str, raw_sources: list[Path]) -> int:
         try:
             raw_target = raw_source.resolve().relative_to(paths.raw.resolve())
         except ValueError:
-            LOGGER.warning("Raw source removal skipped because it is outside raw; path=%s", raw_source)
+            LOGGER.warning(
+                "Raw source removal skipped because it is outside raw; name=%s",
+                _path_log_name(raw_source),
+            )
             continue
         raw_path = paths.raw / raw_target
         material_path = paths.materials / raw_target
@@ -93,7 +100,10 @@ def clean_raw_sources(project_id: str, raw_sources: list[Path]) -> list[str]:
         try:
             relative_path = raw_source.resolve().relative_to(paths.raw.resolve())
         except ValueError:
-            LOGGER.warning("Raw cleanup skipped because it is outside raw; path=%s", raw_source)
+            LOGGER.warning(
+                "Raw cleanup skipped because it is outside raw; name=%s",
+                _path_log_name(raw_source),
+            )
             continue
 
         material_path = paths.materials / relative_path
@@ -129,7 +139,10 @@ def link_raw_sources_to_materials(
         try:
             relative_path = source.resolve().relative_to(raw_root.resolve())
         except ValueError:
-            LOGGER.warning("Raw source link skipped because it is outside raw; path=%s", source)
+            LOGGER.warning(
+                "Raw source link skipped because it is outside raw; name=%s",
+                _path_log_name(source),
+            )
             continue
         target = materials_root / relative_path
         if _ensure_symlink(source, target):
@@ -151,7 +164,10 @@ def _expand_source_paths(source_paths: list[str]) -> list[SourceImportTarget]:
     for source_path in source_paths:
         source = Path(source_path).expanduser()
         if not source.exists():
-            LOGGER.warning("Source import skipped because path does not exist; path=%s", source)
+            LOGGER.warning(
+                "Source import skipped because path does not exist; name=%s",
+                _path_log_name(source),
+            )
             continue
         if source.is_file() and _is_supported_source(source):
             sources.append(SourceImportTarget(source, Path(source.name)))
@@ -183,7 +199,10 @@ def _legacy_import_original_sources(project_id: str, source_paths: list[str]) ->
     for source_path in source_paths:
         source = Path(source_path).expanduser()
         if not source.exists():
-            LOGGER.warning("Source import skipped because path does not exist; path=%s", source)
+            LOGGER.warning(
+                "Source import skipped because path does not exist; name=%s",
+                _path_log_name(source),
+            )
             continue
         if source.is_file():
             if _copy_source_file(source, raw_root / source.name):
@@ -253,11 +272,20 @@ def _ensure_symlink(source: Path, target: Path) -> bool:
             target.unlink()
         os.symlink(source, target)
     except OSError:
-        LOGGER.warning("Source symlink failed; falling back to hard link; source=%s target=%s", source, target)
+        LOGGER.warning(
+            "Source symlink failed; falling back to hard link; source_name=%s target_name=%s",
+            _path_log_name(source),
+            _path_log_name(target),
+        )
         try:
             os.link(source, target)
         except OSError:
-            LOGGER.warning("Source lightweight link failed; source=%s target=%s", source, target, exc_info=True)
+            LOGGER.warning(
+                "Source lightweight link failed; source_name=%s target_name=%s",
+                _path_log_name(source),
+                _path_log_name(target),
+                exc_info=True,
+            )
             return False
     return True
 
@@ -277,7 +305,12 @@ def _materialize_source(source: Path, target: Path) -> bool:
             return True
         shutil.copy2(source, target)
     except OSError:
-        LOGGER.warning("Source materialize failed; source=%s target=%s", source, target, exc_info=True)
+        LOGGER.warning(
+            "Source materialize failed; source_name=%s target_name=%s",
+            _path_log_name(source),
+            _path_log_name(target),
+            exc_info=True,
+        )
         return False
     return True
 
@@ -299,7 +332,7 @@ def _remove_path(path: Path) -> bool:
             shutil.rmtree(path)
             return True
     except OSError:
-        LOGGER.warning("Source path removal failed; path=%s", path, exc_info=True)
+        LOGGER.warning("Source path removal failed; name=%s", _path_log_name(path), exc_info=True)
     return False
 
 
