@@ -24,7 +24,10 @@
 - `reference/documentation-maintenance.zh_CN.md`：README、多语言文档、ARCHITECTURE.md 和计划类文档维护规则。
 - `plans/`：仍在执行或持续跟踪的任务队列、长期路线和专项计划。
 - `plans/extraction-development-roadmap.zh_CN.md`：面向开发者的 Extract Once、知识库和角色成长编译长期路线；不是当前剩余任务清单。
-- `plans/preview-real-result-ingestion-plan.zh_CN.md`：面向开发者的真实预览结果后续计划，当前聚焦非视频素材接入、预览知识库覆盖和真实素材质量调优。
+- `plans/extraction-quality-observability-plan.framework.zh_CN.md`：提取质量与可观测性的第一阶段计划框架，只作为正式计划起草入口。
+- `plans/multi-material-refactor-plan.framework.zh_CN.md`：多素材平级接入前架构体检与解耦的第二阶段计划框架，只作为正式计划起草入口。
+- `plans/multi-material-coverage-plan.framework.zh_CN.md`：文本、字幕、音频转写、图片、漫画和混合媒体支持的第三阶段计划框架，只作为正式计划起草入口。
+- `plans/preview-real-result-ingestion-plan.zh_CN.md`：面向开发者的真实预览结果后续计划，当前聚焦文本、字幕、音频转写、图片、漫画和混合媒体接入预览与统一知识库消费路径。
 - `readme/`：README 的多语言补充版本，例如 `README.en_US.md`、`README.ja_JP.md`、`README.zh_TW.md`。
 - `archive/`：已执行完成、已被替代或仅保留历史查阅价值的计划类文档，包括已完成的正式视频提取、角色卡最终编译、角色卡质量分层、多供应商和 proxy 计划。
 - 后续多语言文档应在文件名中标明语种，例如 `usage.zh_CN.md`。

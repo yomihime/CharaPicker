@@ -24,9 +24,9 @@
 
 后续专项状态：
 
-- 角色卡编译上下文分层、AI 别名重分类、结构化复核原因和质量诊断基础实现已由 [角色卡质量后续执行计划完成记录](character-card-quality-followup-plan.completed.zh_CN.md) 接续完成；后续只保留真实素材分类边界和提示表现调优。
+- 角色卡编译上下文分层、AI 别名重分类、结构化复核原因、质量诊断和本轮真实素材调优已由 [角色卡质量后续执行计划完成记录](character-card-quality-followup-plan.completed.zh_CN.md) 及后续小修分支接续完成。
 - 自动化回归仍不足，尤其是 run 过滤、clean 清理边界、上下文预算降级、JSON 重试、跳过片段聚合和 stale 标记。
-- 日志隐私和体积仍需治理，避免模型请求/响应正文或临时素材 URL 在 DEBUG 日志中展开。
+- 日志隐私和体积基础治理已完成，长期边界沉淀到 `docs/reference/runtime-middleware.zh_CN.md`。
 - 非视频素材、文本/字幕/转写、图片/漫画/混合媒体接入仍按 `TODO.zh_CN.md` 继续推进。
 
 ## 1. 目的与范围

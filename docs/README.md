@@ -20,12 +20,15 @@
 
 ## 剩余项目队列
 
-以下顺序按“素材覆盖与知识库质量优先、角色卡真实素材调优随后、持续可观测性长期跟踪”整理。实施前仍必须重新核对当前代码和相关架构文档。
+以下顺序按“先稳住当前正式提取链路，再做多素材前解耦，最后推进多素材种类支持”整理。实施前仍必须重新核对当前代码和相关架构文档。
 
 1. [当前计划与任务队列分组](plans/README.md)：仍需执行或持续跟踪的计划类文档入口。
 2. [TODO List](plans/TODO.zh_CN.md)：当前剩余任务总表，已移出完成的历史项目。
-3. [提取与角色成长编译路线](plans/extraction-development-roadmap.zh_CN.md)：Extract Once、知识库和角色状态编译的长期目标与验收基准。
-4. [真实预览结果后续计划](plans/preview-real-result-ingestion-plan.zh_CN.md)：文本/字幕/音频、图片/漫画/混合媒体和角色卡真实素材调优的后续专项计划。
+3. [提取质量与可观测性计划框架](plans/extraction-quality-observability-plan.framework.zh_CN.md)：TODO P1 的框架占位，正式执行前需重新扩写计划。
+4. [多素材平级接入前重构解耦计划框架](plans/multi-material-refactor-plan.framework.zh_CN.md)：第二阶段架构体检与解耦的框架占位。
+5. [多素材种类支持计划框架](plans/multi-material-coverage-plan.framework.zh_CN.md)：TODO P0 的框架占位，正式执行前需结合第二阶段结果扩写计划。
+6. [提取与角色成长编译路线](plans/extraction-development-roadmap.zh_CN.md)：Extract Once、知识库和角色状态编译的长期目标与验收基准。
+7. [真实预览结果后续计划](plans/preview-real-result-ingestion-plan.zh_CN.md)：文本/字幕/音频、图片/漫画和混合媒体进入预览与统一知识库消费路径的后续专项计划。
 
 ## 发布与维护
 

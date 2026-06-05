@@ -4,12 +4,17 @@
 
 本目录存放仍需执行、仍需跟踪，或作为当前路线基准保留的计划类文档。已完成的一次性计划不留在这里，统一进入 `docs/archive/`。
 
+近期执行路线：先完成 P1 提取质量与可观测性以稳住当前代码，再做多素材平级接入前的架构体检与解耦，最后推进 P0 文本、音频、图片、漫画和混合媒体支持。三个阶段当前都只保留框架文档，正式执行前需要重新扩写计划。
+
 ## 当前文件
 
 | 文件 | 阶段 | 可用性 | 用途 |
 | --- | --- | --- | --- |
 | `TODO.zh_CN.md` | 当前队列 | 可用 | 当前剩余任务总表，按优先级组织执行入口。 |
-| `preview-real-result-ingestion-plan.zh_CN.md` | 待执行专项 | 可用，但实施前需复核代码 | 非视频素材接入、预览知识库覆盖和真实素材质量调优的后续专项计划。 |
+| `extraction-quality-observability-plan.framework.zh_CN.md` | 计划框架 | 仅供后续起草正式计划 | TODO P1 提取质量与可观测性的范围占位和正式计划章节骨架。 |
+| `multi-material-refactor-plan.framework.zh_CN.md` | 计划框架 | 仅供后续起草正式计划 | 多素材平级接入前架构体检与解耦的背景、状态和边界占位。 |
+| `multi-material-coverage-plan.framework.zh_CN.md` | 计划框架 | 仅供后续起草正式计划 | TODO P0 多素材种类支持的背景、状态和范围占位。 |
+| `preview-real-result-ingestion-plan.zh_CN.md` | 待执行专项 | 可用，但实施前需复核代码 | 文本/字幕/音频、图片/漫画和混合媒体进入预览与统一知识库消费路径的后续专项计划。 |
 | `extraction-development-roadmap.zh_CN.md` | 长期路线基准 | 可用作验收框架，不是当前任务清单 | Extract Once、知识库和角色成长编译的长期目标与验收基准。 |
 
 ## 维护规则

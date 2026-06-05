@@ -4,7 +4,7 @@
 
 计划阶段：待执行专项计划。
 
-可用性：可用。实施前仍需重新核对 `core/extractor.py`、`core/source_scanner.py`、`core/knowledge_base.py`、`utils/audio_transcription.py` 和角色卡编译相关代码。
+可用性：可用。实施前仍需重新核对 `core/extractor.py`、`core/source_scanner.py`、`core/knowledge_base.py` 和 `utils/audio_transcription.py`。
 
 本文只保留真实预览链路仍未完成的后续计划。视频 chunk 预览、`preview__` 产物隔离和正式视频提取 MVP 的详细完成记录已归档到 [真实预览结果接入计划完成记录](../archive/preview-real-result-ingestion-plan.completed.zh_CN.md) 与 [正式视频提取架构指南与任务计划](../archive/formal-video-extraction-architecture-plan.zh_CN.md)。
 
@@ -15,7 +15,7 @@
 - 正式提取产物使用 `extraction_stage = "full"`；正式聚合和正式编译不消费 preview 或 legacy 产物。
 - 角色卡页面、CharaPicker JSON 母本、正式知识库编译、预览草稿、导入、导出和 AstrBot 手动复制辅助的基础生命周期已完成并归档。
 - 正式视频提取可按配置生成 episode transcript；但预览链路仍只收集视频 chunk，文本、字幕、转写结果、图片和漫画素材仍未完整进入预览与统一知识库消费路径。
-- 角色卡编译上下文分层、冲突复核和质量评估基础实现已完成并归档；后续只保留真实素材分类边界和提示表现调优。
+- 角色卡编译上下文分层、冲突复核、质量评估和本轮真实素材调优已完成并归档；本文后续只保留真实预览链路的素材覆盖缺口。
 
 ## 1. 后续里程碑
 
@@ -48,22 +48,6 @@
 - 图片/漫画预览能生成与视频/text 一致结构的 `ChunkExtractionResult`。
 - 证据引用能定位到页、帧、文件或片段。
 - 失败反馈能说明是素材不可读、模型不支持还是输出结构不合法。
-
-### M3：角色卡真实素材质量调优
-
-目标：
-
-- 在已完成角色卡页面、正式知识库编译链路、分层证据包和结构化复核原因基础上，用真实素材继续调优 direct、mention、causal 与 season_context 的分类边界。
-- 继续观察冲突分组、知识库 warnings、AI JSON 修复 diagnostics 和 `needs_review_reasons` 的 UI/导出表现。
-- 需要新增共享阶段状态缓存时，仍写入 `character_stage_states.json` 或独立缓存，不替代 `character_cards/{card_id}/card.json` 母本。
-- 让角色卡质量打磨继续优先读取结构化知识库，而不是重新分析原始素材。
-
-验收标准：
-
-- 未出场角色不会被硬编出来；中文名/别名与知识库候选名不一致时，AI 验证别名后能重分类 direct 证据。
-- 冲突事实不会被静默覆盖，必须保留证据来源、候选解释和复核原因。
-- 质量警告、需要复核、AI JSON 修复和部分成功状态对用户清楚可见，且不直接暴露内部 reason key。
-- 角色卡页面能明确区分预览草稿、已编译、需重编译、失败和导出结果。
 
 ## 2. 模块边界
 
