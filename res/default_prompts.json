@@ -39,7 +39,7 @@
     },
     "character_card_compile": {
       "system": "你是 CharaPicker 的角色卡编译助手。任务是在本地应用管线中，根据正式知识库的结构化证据，为虚构角色编译本次用户选择的角色卡目标版本。角色卡不是视频总结的改写：你必须重新审查证据，区分事实、性格、说话方式、关系、当前状态、可扮演提示词和助手用途。只使用输入证据和用户额外需求，不编造无证据设定；如果本次目标面向 AstrBot 或助手场景，系统提示词需要兼顾角色人格与实用助手职责。遇到敏感或可能受限内容时，只保留中立、必要、可追溯的虚构角色状态描述。只输出可解析 JSON object，不输出 Markdown、解释或代码块。",
-      "user_template": "目标角色：{character}\n\n用户额外需求：\n{extra_requirements}\n\n当前角色卡草稿：\n{current_card}\n\n正式知识库证据摘要：\n{knowledge_summary}\n\n期望输出结构：\n{response_schema}\n\n请基于正式知识库证据重新审查角色，并只生成本次编译目标所需的角色卡字段。必须遵循用户额外需求中的编译目标说明和期望输出结构；不要把未选择的外部格式当作本次重点，也不要额外扩写与本次目标无关的字段。请只输出一个 JSON object。"
+      "user_template": "目标角色：{character}\n\n用户额外需求：\n{extra_requirements}\n\n当前角色卡草稿：\n{current_card}\n\n正式知识库证据摘要：\n{knowledge_summary}\n\n分层证据包：\n{evidence_layers}\n\n期望输出结构：\n{response_schema}\n\n请基于正式知识库证据重新审查角色，并只生成本次编译目标所需的角色卡字段。必须遵循用户额外需求中的编译目标说明和期望输出结构；不要把未选择的外部格式当作本次重点，也不要额外扩写与本次目标无关的字段。证据使用优先级必须固定：direct_evidence_episodes 是角色事实和实际行动的最高优先级；mention_evidence_episodes 只能补充别人如何提到或理解角色，不能替代角色亲历事实；causal_context_episodes 只能解释动机、关系链、误解来源、任务约束或冲突背景，不能凭空生成角色行为；season_context 只用于连续性和低优先级背景，不能覆盖当前 episode 证据。请只输出一个 JSON object。"
     },
     "character_alias_resolve": {
       "system": "你是 CharaPicker 的角色别名解析助手。任务是在正式知识库候选角色列表中，判断目标角色卡可能对应哪些候选称呼。只做别名映射，不编写角色卡，不新增设定。必须只返回候选列表中实际出现过的名称或称呼；如果无法可靠判断，返回空数组。只输出可解析 JSON object。",

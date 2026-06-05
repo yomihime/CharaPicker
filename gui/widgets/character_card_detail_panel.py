@@ -992,6 +992,7 @@ def _status_kind(card: CharacterCard, dirty: bool = False) -> str:
 
 def _notice_messages(card: CharacterCard) -> tuple[list[str], list[str], list[str]]:
     errors = [card.quality.last_error.strip()] if card.quality.last_error.strip() else []
+    structured_review_warnings = _structured_review_messages(card)
     messages = [
         *card.quality.warnings,
         *card.evidence.warnings,
@@ -1000,11 +1001,19 @@ def _notice_messages(card: CharacterCard) -> tuple[list[str], list[str], list[st
     seen = set(errors)
     for message in messages:
         text = message.strip()
-        if not text or text in seen or _is_stale_warning_reason(text):
+        if (
+            not text
+            or text in seen
+            or _is_stale_warning_reason(text)
+            or _is_structured_reason_warning(text)
+        ):
             continue
         visible_messages.append(text)
         seen.add(text)
-    review_warnings = [message for message in visible_messages if _is_review_warning(message)]
+    review_warnings = [
+        *structured_review_warnings,
+        *[message for message in visible_messages if _is_review_warning(message)],
+    ]
     compile_notes = [message for message in visible_messages if message not in review_warnings]
     return errors, review_warnings, compile_notes
 
@@ -1035,6 +1044,44 @@ def _is_stale_warning_reason(message: str) -> bool:
 def _is_review_warning(message: str) -> bool:
     normalized = message.strip().lower()
     return normalized in REVIEW_WARNING_MESSAGES
+
+
+def _structured_review_messages(card: CharacterCard) -> list[str]:
+    extension = card.extensions.get("charapicker")
+    if not isinstance(extension, dict):
+        return []
+    quality_checks = extension.get("quality_checks")
+    if not isinstance(quality_checks, dict):
+        return []
+    reasons = quality_checks.get("needs_review_reasons", [])
+    if not isinstance(reasons, list):
+        return []
+    messages: list[str] = []
+    seen: set[str] = set()
+    for item in reasons:
+        if not isinstance(item, dict):
+            continue
+        reason = str(item.get("reason", "")).strip()
+        if not reason or reason in seen:
+            continue
+        detail = str(item.get("detail", "")).strip()
+        label = t(f"cards.quality.reason.{reason}")
+        messages.append(f"{label}：{detail}" if detail else label)
+        seen.add(reason)
+    return messages
+
+
+def _is_structured_reason_warning(message: str) -> bool:
+    key = message.split(":", maxsplit=1)[0].strip()
+    return key.startswith(
+        (
+            "no_direct_evidence",
+            "alias_resolution_low_confidence",
+            "knowledge_base_has_warnings",
+            "conflict_requires_review",
+            "ai_json_repaired",
+        )
+    )
 
 
 def _short_compile_variant(variant: CharacterCardCompileVariant) -> str:

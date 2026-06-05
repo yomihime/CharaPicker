@@ -201,10 +201,13 @@ knowledge_base/
 ```text
 正式 episode_content を読む
 -> キャラクターカードの身元フィールドから照合名を生成
--> シーズン、エピソード順に直接ヒットしたキャラクター証拠を集約
--> 直接照合に失敗した場合、AI で knowledge_base targets 候補から別名を解析
+-> direct / mention / causal / season_context の証拠レイヤーを構築
+-> direct 証拠がない場合、AI で knowledge_base targets 候補から検証済み別名を解析
+-> 検証済み別名で証拠レイヤーを再構築
+-> direct 証拠がまだない場合は失敗
 -> ローカル CharacterState timeline を構築
--> キャラクター状態、timeline、ナレッジベース要約を AI に渡して再確認し、カード項目を生成
+-> キャラクター状態、timeline、ナレッジベース要約、evidence_layers を AI に渡して再確認し、カード項目を生成
+-> alias_resolution、needs_review_reasons、conflict_groups、parse_diagnostics を書き込む
 -> CharaPicker JSON 原本を保存
 -> 必要に応じて Markdown、HTML、Character Card V2 JSON、AstrBot 手動コピーリストを出力
 ```
@@ -212,17 +215,17 @@ knowledge_base/
 ```mermaid
 flowchart TD
     A[正式 episode_content を読む] --> B[カード身元フィールドから照合名を生成]
-    B --> C[シーズン、エピソード順に直接証拠を集約]
-    C --> D{直接証拠がある?}
-    D -->|いいえ| E[AI が knowledge_base targets 候補から別名を解析]
+    B --> C[direct / mention / causal / season_context 証拠レイヤーを構築]
+    C --> D{direct 証拠がある?}
+    D -->|いいえ| E[AI が knowledge_base targets 候補から検証済み別名を解析]
     E --> F{検証可能な別名を解析できた?}
-    F -->|はい| C
+    F -->|はい| B
     F -->|いいえ| X[コンパイル失敗：formal knowledge base にキャラクターが見つからない]
     D -->|はい| G[ローカル CharacterState timeline を構築]
-    G --> H[AI が再確認しカード項目を生成]
-    H --> I[card.json を保存]
+    G --> H[AI が timeline + evidence_layers を再確認]
+    H --> Q[品質ルールと構造化レビュー理由を適用]
+    Q --> I[card.json を保存]
     I --> J[必要に応じて Markdown / HTML / Card V2 / AstrBot リストを出力]
-    C -. 今後の強化 .-> K[direct / mention / causal / season context を分離]
 ```
 
 キャラクター照合には、キャラクターカードの身元フィールドを使います。
@@ -256,7 +259,7 @@ flowchart TD
 
 前後の情報に矛盾がある場合、システムはそれを単純に上書きせず、偽装、誤解、闇落ち、成長、関係の転換など、キャラクターの動的変化として記録するべきです。
 
-現在の制限：キャラクターカードの AI 再確認入力は、まだ正式に `direct_evidence_episodes`、`mention_evidence_episodes`、`causal_context_episodes`、`season_context` に分離されていません。そのため、キャラクター本人は登場しないが後続行動の動機を説明する episode は、薄い要約としてしかカードコンパイルに入らない可能性があり、今後の個別強化が必要です。
+現在の基礎実装：キャラクターカードの AI 再確認入力は、`direct_evidence_episodes`、`mention_evidence_episodes`、`causal_context_episodes`、`season_context` を含むようになりました。direct 証拠は episode の内容フィールドでキャラクター名または検証済み別名に命中した場合に形成されます。`targets` は別名候補と補助情報であり、それだけでは direct 証拠になりません。mention、causal、season_context は動機、関係のつながり、連続性を補足できますが、direct 証拠を上書きしてはいけません。証拠レイヤーと品質評価は `card.extensions["charapicker"]` に保存され、`compile_evidence_layers`、`alias_resolution`、`needs_review_reasons`、`conflict_groups`、`parse_diagnostics` を含みます。通常の `quality.warnings` はユーザーが読める warning だけを保持し、内部 reason key を直接表示しません。
 
 ## 8. 現在の制限
 
@@ -268,7 +271,7 @@ flowchart TD
 
 今後さらに整備が必要な点：
 
-- キャラクターカードコンパイルのコンテキスト分層：直接証拠、言及証拠、因果コンテキスト、シーズン背景を分離する必要があります。
+- キャラクターカードコンパイルのコンテキスト分層は基礎実装に接続済みですが、実素材で direct、mention、causal、season_context の分類境界を引き続き検証、調整する必要があります。
 - テキスト、字幕、文字起こし結果、画像、漫画、混合メディアは、まだ統一プレビュー/ナレッジベース消費経路へ完全には入っていません。
 - 自動回帰はまだ不足しており、正式抽出主線は現在、主に静的チェック、手動試行、ログ確認に依存しています。
 - モデル DEBUG ログは、完全なリクエスト/レスポンス本文や一時素材 URL が展開されないよう、引き続き脱感作とノイズ削減が必要です。

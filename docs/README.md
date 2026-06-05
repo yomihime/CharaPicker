@@ -1,6 +1,6 @@
 # CharaPicker 文档索引
 
-最近整理日期：2026-06-01。
+最近整理日期：2026-06-05。
 
 `docs/` 是 CharaPicker 的正式专题文档目录。根目录 `README.md` 负责项目首页说明；根目录和各主要代码目录中的 `ARCHITECTURE.md` 负责就近说明目录职责。已完成的一次性开发计划默认移入 `archive/`，稳定说明放入 `reference/`，仍有效路线和当前后续队列放入 `plans/`。
 
@@ -20,12 +20,12 @@
 
 ## 剩余项目队列
 
-以下顺序按“素材覆盖与知识库质量优先、角色卡质量随后、持续可观测性长期跟踪”整理。实施前仍必须重新核对当前代码和相关架构文档。
+以下顺序按“素材覆盖与知识库质量优先、角色卡真实素材调优随后、持续可观测性长期跟踪”整理。实施前仍必须重新核对当前代码和相关架构文档。
 
 1. [当前计划与任务队列分组](plans/README.md)：仍需执行或持续跟踪的计划类文档入口。
 2. [TODO List](plans/TODO.zh_CN.md)：当前剩余任务总表，已移出完成的历史项目。
 3. [提取与角色成长编译路线](plans/extraction-development-roadmap.zh_CN.md)：Extract Once、知识库和角色状态编译的长期目标与验收基准。
-4. [真实预览结果后续计划](plans/preview-real-result-ingestion-plan.zh_CN.md)：文本/字幕/音频、图片/漫画/混合媒体和角色卡质量强化的后续专项计划。
+4. [真实预览结果后续计划](plans/preview-real-result-ingestion-plan.zh_CN.md)：文本/字幕/音频、图片/漫画/混合媒体和角色卡真实素材调优的后续专项计划。
 
 ## 发布与维护
 
@@ -46,6 +46,7 @@
 - [正式视频提取架构指南与任务计划](archive/formal-video-extraction-architecture-plan.zh_CN.md)
 - [真实预览结果接入计划完成记录](archive/preview-real-result-ingestion-plan.completed.zh_CN.md)
 - [角色卡最终编译与角色卡页面计划](archive/character-card-compilation-plan.completed.zh_CN.md)
+- [角色卡质量后续执行计划完成记录](archive/character-card-quality-followup-plan.completed.zh_CN.md)
 - [多供应商与多 API 规范接入计划完成记录](archive/multi-provider-api-support-plan.completed.zh_CN.md)
 - [Proxy 运行时网络能力计划完成记录](archive/proxy-runtime-network-plan.completed.zh_CN.md)
 

@@ -201,10 +201,13 @@ knowledge_base/
 ```text
 讀取正式 episode_content
 -> 根據角色卡身份欄位生成匹配名
--> 按季、集順序聚合直接命中的角色證據
--> 若直接匹配失敗，嘗試用 AI 從知識庫 targets 候選中解析別名
+-> 建構 direct / mention / causal / season_context 分層證據包
+-> 若沒有 direct 證據，嘗試用 AI 從知識庫 targets 候選中解析已驗證別名
+-> 用已驗證別名重建分層證據包
+-> 沒有 direct 證據則失敗
 -> 建構本地角色狀態 timeline
--> 把角色狀態、timeline 和知識庫摘要交給 AI 複核並生成角色卡欄位
+-> 把角色狀態、timeline、知識庫摘要和 evidence_layers 交給 AI 複核並生成角色卡欄位
+-> 寫入 alias_resolution、needs_review_reasons、conflict_groups 和 parse_diagnostics
 -> 保存 CharaPicker JSON 母本
 -> 可選匯出 Markdown、HTML、Character Card V2 JSON 或 AstrBot 手動複製清單
 ```
@@ -212,17 +215,17 @@ knowledge_base/
 ```mermaid
 flowchart TD
     A[讀取正式 episode_content] --> B[從角色卡身份欄位生成匹配名]
-    B --> C[按季、集聚合直接命中的角色證據]
-    C --> D{找到直接證據?}
-    D -->|否| E[AI 從 knowledge_base targets 候選解析別名]
+    B --> C[建構 direct / mention / causal / season_context 分層證據包]
+    C --> D{找到 direct 證據?}
+    D -->|否| E[AI 從 knowledge_base targets 候選解析已驗證別名]
     E --> F{解析到可校驗別名?}
-    F -->|是| C
+    F -->|是| B
     F -->|否| X[編譯失敗：formal knowledge base 中找不到角色]
     D -->|是| G[建構本地 CharacterState timeline]
-    G --> H[AI 複核並生成角色卡欄位]
-    H --> I[保存 card.json]
+    G --> H[AI 複核 timeline + evidence_layers]
+    H --> Q[套用品質規則與結構化複核原因]
+    Q --> I[保存 card.json]
     I --> J[按需匯出 Markdown / HTML / Card V2 / AstrBot 清單]
-    C -. 後續增強 .-> K[拆分 direct / mention / causal / season context]
 ```
 
 角色匹配使用角色卡身份欄位：
@@ -256,7 +259,7 @@ flowchart TD
 
 如果前後資訊出現矛盾，系統應記錄為角色的動態變化，例如偽裝、誤解、黑化、成長或關係轉折，而不是簡單覆蓋舊資訊。
 
-目前限制：角色卡 AI 複核輸入還沒有正式拆成 `direct_evidence_episodes`、`mention_evidence_episodes`、`causal_context_episodes` 和 `season_context`。因此，角色沒有出現但解釋其後續行動動機的 episode 可能只會以很薄的摘要進入角色卡編譯，仍需後續專項強化。
+目前基礎實作：角色卡 AI 複核輸入已經接入 `direct_evidence_episodes`、`mention_evidence_episodes`、`causal_context_episodes` 和 `season_context`。direct 證據由 episode 內容欄位中的角色名或已驗證別名命中形成；`targets` 只作為別名候選和輔助資訊，不單獨算 direct。mention、causal 和 season_context 用於補充動機、關係鏈和連續性，不能覆蓋 direct 證據。分層證據和品質評估寫入 `card.extensions["charapicker"]`，其中包含 `compile_evidence_layers`、`alias_resolution`、`needs_review_reasons`、`conflict_groups` 和 `parse_diagnostics`；普通 `quality.warnings` 只保留使用者可讀 warning，不直接暴露內部 reason key。
 
 ## 8. 目前限制
 
@@ -268,7 +271,7 @@ flowchart TD
 
 目前仍需後續完善：
 
-- 角色卡編譯上下文分層：直接證據、提及證據、因果上下文和季級背景需要分離。
+- 角色卡編譯上下文分層已接入基礎實作，但仍需繼續用真實素材驗收和調優 direct、mention、causal 與 season_context 的分類邊界。
 - 文字、字幕、轉寫結果、圖片、漫畫和混合媒體還沒有完整進入統一預覽/知識庫消費路徑。
 - 自動化回歸仍不足，正式提取主線目前主要依賴靜態檢查、手動試跑和日誌複核。
 - 模型 DEBUG 日誌需要繼續脫敏和降噪，避免完整請求/回應正文或臨時素材 URL 展開。

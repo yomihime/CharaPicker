@@ -120,10 +120,16 @@ def _compile_character_state_by_season_episode(
                     kb.artifact_stage_from_payload(payload),
                 )
                 continue
-            if not _episode_targets_character(payload, match_terms):
+            if not _episode_targets_character(payload, match_terms) and not _episode_has_character_evidence(
+                payload,
+                match_terms,
+            ):
                 continue
 
-            state = _apply_episode_payload_to_state(state, payload, match_terms)
+            updated_state = _apply_episode_payload_to_state(state, payload, match_terms)
+            if not _state_has_new_evidence(state, updated_state):
+                continue
+            state = updated_state
             timeline.append(
                 {
                     "season_id": season_dir.name,
@@ -243,10 +249,21 @@ def _apply_episode_payload_to_state(
     ] or facts
     summary_parts = [part for part in [state.summary, "; ".join(summary_items)] if part]
     merged_conflicts = list(dict.fromkeys([*state.conflicts, *conflicts]))
+    evidence_increment = sum(
+        len(items)
+        for items in (
+            facts,
+            behavior_traits,
+            dialogue_style,
+            relationship_interactions,
+            character_state_changes,
+            conflicts,
+        )
+    )
     return CharacterState(
         character=state.character,
         summary="; ".join(summary_parts),
-        evidence_count=state.evidence_count + len(facts),
+        evidence_count=state.evidence_count + evidence_increment,
         conflicts=merged_conflicts,
     )
 
@@ -256,6 +273,29 @@ def _episode_targets_character(payload: dict, match_terms: list[str]) -> bool:
     if not isinstance(targets, list) or not targets:
         return True
     return any(isinstance(item, str) and _text_matches_any_term(item, match_terms) for item in targets)
+
+
+def _episode_has_character_evidence(payload: dict, match_terms: list[str]) -> bool:
+    return any(
+        _character_related_items(payload.get(field, []), match_terms)
+        for field in (
+            "facts",
+            "behavior_traits",
+            "dialogue_style",
+            "relationship_interactions",
+            "relationships",
+            "character_state_changes",
+            "conflicts",
+        )
+    )
+
+
+def _state_has_new_evidence(previous: CharacterState, current: CharacterState) -> bool:
+    return (
+        previous.summary != current.summary
+        or previous.evidence_count != current.evidence_count
+        or previous.conflicts != current.conflicts
+    )
 
 
 def _character_related_items(value: object, match_terms: list[str]) -> list[str]:

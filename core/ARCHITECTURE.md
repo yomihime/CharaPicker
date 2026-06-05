@@ -23,7 +23,7 @@
 - `extractor.py`：定义 `Extractor`，作为 UI-facing 提取入口，负责知识库分层初始化、预览提取、完整/洁净/快速正式提取、chunk/episode/season 内容合并、episode transcript 入口，并委托知识库读写与素材扫描 helper。
 - `compiler.py`：定义 `build_character_compile_request()`、`compile_character_state()`、`compile_character_state_by_season_episode()`、`write_character_stage_states()` 和 `final_polish_character_state()`，负责从知识库聚合角色阶段状态。
 - `character_card_store.py`：管理 `knowledge_base/character_cards/` 与 `preview_character_cards/` 下角色卡的创建、读取、保存、列表、删除和封面路径登记。
-- `character_card_compiler.py`：从正式或预览知识库生成 CharaPicker 角色卡 JSON；不读取原始素材，也不读取 `ProjectConfig.target_characters`。
+- `character_card_compiler.py`：从正式或预览知识库生成 CharaPicker 角色卡 JSON；正式编译会构建 direct、mention、causal 和 season_context 分层证据包，处理 AI 别名校验、AI 复核、冲突分组、`needs_review_reasons` 和 JSON parse diagnostics；不读取原始素材，也不读取 `ProjectConfig.target_characters`。
 - `character_card_renderers.py`：从 CharaPicker JSON 生成 Markdown、HTML 和人类友好 JSON 分组；HTML 渲染负责转义用户文本且不依赖外部资源。
 - `character_card_formats.py`：把 CharaPicker JSON 映射到 Character Card V2 JSON 和 AstrBot 手动复制内容，无法映射的信息返回 warnings 或进入扩展字段。
 - `character_card_exporter.py`：把角色卡派生产物写入 `projects/{project_id}/output/character_cards/`。
@@ -41,6 +41,7 @@
 - 被 `utils.state_manager` 引用，用于项目配置的序列化和反序列化。
 - 被 `utils.paths` 引用，用于描述包含 `raw/`、`materials/`、`cache/`、`knowledge_base/` 和 `output/` 的项目路径。
 - 向 `projects/{project_id}/knowledge_base/` 写入 `source_manifest.json`、`seasons/*/episodes/*/chunks/*.json`、`episode_content.json`、`episode_summary.json`、`episode_transcript.json`、`season_content.json`、阶段性角色状态和 `character_cards/{card_id}/card.json`；正式提取产物带 `extraction_run_id`，聚合时只消费当前 run 的合格产物。
+- 正式角色卡的 CharaPicker 扩展字段使用 `extensions["charapicker"]` 保存编译证据和质量评估，包括 `compile_evidence_layers`、`alias_resolution`、`needs_review_reasons`、`conflict_groups` 和 `parse_diagnostics`；这些字段属于 core 生成的结构化诊断，不应由 GUI 拼装。
 - 向 `projects/{project_id}/output/character_cards/` 写入 Markdown、HTML、CharaPicker JSON、Character Card V2 JSON 和 AstrBot 手动复制清单。
 
 ## 维护注意事项
@@ -49,7 +50,7 @@
 - 素材处理配置只描述用户选择和项目状态；文件复制、链接、清理等副作用放在 `utils/source_importer.py`。
 - `extractor` 只做素材解析、事实提取和洞察产出。
 - 完整提取和洁净提取保持线性上下文流程；快速提取允许 chunk 并发且不带上下文，随后用 AI 并发重整理集和季。
-- `compiler` 只做角色状态迭代、长文本阅读和冲突处理。
+- `compiler` 只做角色状态迭代、长文本阅读和冲突处理；角色卡证据分层和质量规则由 `character_card_compiler` 负责。
 - 角色卡编译、存储、渲染、导入和导出分别放在 `character_card_*` 模块；页面层不直接拼接知识库路径或导出字段。
 - 角色卡固定协议值优先放在 `character_card_constants.py`，避免在 store、compiler、renderer 和 GUI 层重复硬编码。
 - `generator` 只保留旧输出兼容，不新增角色卡业务逻辑。

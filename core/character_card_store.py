@@ -154,6 +154,8 @@ def mark_card_stale(card: CharacterCard, reason: str = "") -> CharacterCard:
         card.quality.warnings = [
             warning for warning in card.quality.warnings if warning not in STALE_WARNING_REASONS
         ]
+        if reason.strip():
+            card.quality.warnings = [*card.quality.warnings, reason.strip()]
     card.updated_at = datetime.now()
     return card
 
