@@ -6,6 +6,10 @@
 
 ## 未发布
 
+暂无。
+
+## v0.7.0-beta - 2026-06-05
+
 ### 新增
 
 - 角色卡正式编译新增分层证据包：`direct_evidence_episodes`、`mention_evidence_episodes`、`causal_context_episodes` 和 `season_context`，并把结果写入 CharaPicker 扩展字段，便于追踪角色事实、提及、因果背景和季级上下文。
@@ -33,6 +37,10 @@
 - 归档角色卡质量后续执行计划，并更新当前 TODO 与计划索引，将已完成的角色卡质量调优和日志治理移出队列，剩余工作收敛为素材覆盖、提取验证和可选增强。
 - 更新运行时中间件、utils 架构说明和当前 TODO，沉淀日志等级划分、脱敏边界与关键链路观测点。
 - 新增提取质量与可观测性、多素材前重构解耦和多素材种类支持三阶段计划框架，确认“P1 稳定性 -> 多素材前解耦 -> P0 多素材支持”的后续路线。
+
+### 构建
+
+- 默认应用版本升级为 `v0.7.0-beta`，同步更新 `pyproject.toml`、`utils/app_metadata.py`、`build.bat`、README、多语言 README、关于页版本文案和发布规范示例。
 
 ## v0.6.0-beta.1 - 2026-06-05
 

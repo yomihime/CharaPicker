@@ -14,7 +14,7 @@ CharaPicker is a desktop tool that extracts character-focused information from a
 
 ## Current Status
 
-- Version: `v0.6.0-beta.1` (in development)
+- Version: `v0.7.0-beta` (in development)
 - Document updated: `2026-06-05`
 
 ## Implemented
@@ -32,12 +32,12 @@ CharaPicker is a desktop tool that extracts character-focused information from a
 
 - Done: runnable UI skeleton and preview main path.
 - In progress: generating higher-quality reusable structured insights from real materials.
-- Next focus: knowledge-base quality, iterative compilation state updates, conflict handling, and character card quality.
+- Next focus: stabilize formal extraction quality and observability, then decouple the multi-material architecture before adding text, audio, image, manga, and mixed-media support.
 
 ## Not Yet Implemented
 
 - Real-material preview has started using video chunks from `materials/` and cloud models, while text, subtitles, manga/image, and other complete real-material consumption paths are still being improved.
-- Character card compilation can generate CharaPicker JSON from the formal knowledge base, while full conflict resolution and quality evaluation still need refinement.
+- Character card compilation can generate CharaPicker JSON from the formal knowledge base, with layered evidence, alias reclassification, quality diagnostics, and protection against compiling characters with no direct evidence.
 - Stable automatic write-back loop to `facts.json` and `targeted_insights.json` is not complete.
 
 ## Requirements
