@@ -170,7 +170,7 @@ class InsightStreamPanel(ScrollArea):
 
     def _create_empty_label(self, text: str) -> BodyLabel:
         label = BodyLabel(text, self.container)
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         label.setWordWrap(True)
         label.setMinimumHeight(160)
         label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
