@@ -51,8 +51,10 @@
 8. `core/extractor.py` 通过 `utils/ai_model_middleware.py` 调用模型，写入知识库分层 JSON，并产出结构化洞察事件与 token 用量。
 9. 洞察事件以 `dict` 形式通过 Qt Signal 推送到 `InsightStreamPanel`。
 10. `core/compiler.py` 可按季/集聚合知识库，生成阶段性角色状态。
-11. `gui/pages/character_card_page.py` 通过 `core.character_card_*` 模块管理 CharaPicker 角色卡母本、预览草稿、编译、导入和导出。
-12. 角色卡派生产物从 CharaPicker JSON 生成，并写入 `projects/{project_id}/output/character_cards/`。
+11. `core/character_card_compiler.py` 从正式知识库构建角色卡分层证据包：`direct_evidence_episodes`、`mention_evidence_episodes`、`causal_context_episodes` 和 `season_context`；必要时用 AI 从 `episode_content.targets` 校验别名，再把 `evidence_layers` 交给角色卡 AI 复核。
+12. 角色卡质量结果写入 `card.extensions["charapicker"]`，包括 `compile_evidence_layers`、`alias_resolution`、`needs_review_reasons`、`conflict_groups` 和 `parse_diagnostics`；GUI 只展示用户可读的复核原因和 warnings。
+13. `gui/pages/character_card_page.py` 通过 `core.character_card_*` 模块管理 CharaPicker 角色卡母本、预览草稿、编译、导入和导出。
+14. 角色卡派生产物从 CharaPicker JSON 生成，并写入 `projects/{project_id}/output/character_cards/`。
 
 ## 维护注意事项
 

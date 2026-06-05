@@ -6,7 +6,28 @@
 
 ## 未发布
 
-暂无。
+### 新增
+
+- 角色卡正式编译新增分层证据包：`direct_evidence_episodes`、`mention_evidence_episodes`、`causal_context_episodes` 和 `season_context`，并把结果写入 CharaPicker 扩展字段，便于追踪角色事实、提及、因果背景和季级上下文。
+- 角色卡编译新增 AI 别名校验与重分类链路：当用户填写中文名或别名而知识库使用英文/罗马字候选名时，可从 `episode_content.targets` 解析已验证别名并重新匹配 direct 证据。
+- 角色卡质量诊断新增 `needs_review_reasons`、`conflict_groups`、`alias_resolution` 和 `parse_diagnostics`，用于解释证据不足、低置信别名、知识库 warnings、冲突复核和 AI JSON 修复情况。
+
+### 变更
+
+- 没有 direct 证据的正式角色卡仍会编译失败，避免为未出场或无证据角色硬生成资料卡；`targets` 只作为别名候选和辅助信息，不单独算 direct。
+- 角色卡 AI 复核 prompt 新增 `evidence_layers` 变量，beta 阶段旧的用户 prompt override 可能需要重置后才能使用新分层证据。
+- `quality.warnings` 只保留用户可读 warning，结构化复核原因保存在 `extensions["charapicker"]["quality_checks"]["needs_review_reasons"]` 并由 UI 本地化展示。
+
+### 修复
+
+- 修复成功重编译后 stale reason 或失败状态残留的问题，已编译卡片重新成功后会清理旧错误与 stale warning。
+- 修复结构化复核原因可能以内部 reason key 形式混入普通 warning 或导出展示的问题。
+
+### 文档
+
+- 更新四语种提取工作流参考文档和角色卡编译 Mermaid 流程图，补充分层证据、别名重分类、质量诊断和未出场角色失败保护。
+- 更新根目录、core、gui、projects 和 docs 架构说明，明确角色卡证据分层、质量诊断扩展字段和 GUI/core 边界。
+- 归档角色卡质量后续执行计划，并更新当前 TODO 与计划索引，将剩余工作收敛为真实素材回归和质量调优。
 
 ## v0.6.0-beta.1 - 2026-06-05
 

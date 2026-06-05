@@ -1,12 +1,22 @@
-# 角色卡质量后续执行计划（zh_CN）
+# 角色卡质量后续执行计划完成记录（zh_CN）
 
-> 本文是 TODO P1 第 3、4 项的待执行专项计划，不代表已经实现。实施前必须重新核对当前代码和知识库样例。
+归档状态：本计划的基础实现已完成。本文保留角色卡编译上下文分层、冲突消解和质量评估强化的阶段性决策、边界和验收记录；后续真实素材调优应以 `docs/plans/TODO.zh_CN.md`、当前代码和稳定参考文档为准。
 
-最近整理日期：2026-06-05。
+最近归档日期：2026-06-05。
 
-阶段：待执行专项计划。
+阶段：阶段性完成并归档。
 
-可用性：可作为后续开发入口。实施前需复核 `core/character_card_compiler.py`、`core/compiler.py`、`core/models.py`、`core/knowledge_base.py`、`res/default_prompts.json`、`gui/workers/character_card_workers.py`、`gui/pages/character_card_page.py`、`docs/reference/extraction-workflow.zh_CN.md` 和当前正式知识库样例。
+可用性：不再作为新的默认执行入口。当前行为以 `core/character_card_compiler.py`、`core/compiler.py`、`core/knowledge_base.py`、`res/default_prompts.json`、`gui/widgets/character_card_detail_panel.py`、`docs/reference/extraction-workflow.zh_CN.md` 和真实知识库样例为准。
+
+阶段性完成摘要：
+
+- 正式角色卡编译会构建 `direct_evidence_episodes`、`mention_evidence_episodes`、`causal_context_episodes` 和 `season_context`。
+- direct 证据必须命中 episode 内容字段中的角色名或已验证别名；`targets` 只作为别名候选和辅助信息，不单独算 direct。
+- 中文名/别名与知识库英文候选不一致时，可用 AI 从 `episode_content.targets` 解析已验证别名，例如 `菈菈` -> `Lala`。
+- 没有 direct 证据的角色仍会编译失败，避免为未出场或无证据角色硬生成资料卡。
+- `card.extensions["charapicker"]` 写入 `compile_evidence_layers`、`alias_resolution`、`needs_review_reasons`、`conflict_groups` 和 `parse_diagnostics`。
+- `quality.warnings` 只保存用户可读 warning；结构化复核原因保留在 `needs_review_reasons`，由 UI 本地化展示。
+- 已增加基础回归测试覆盖别名重分类、`targets` 不单独算 direct、stale reason、AI JSON 修复 diagnostics 和内部 reason key 不进入普通 warnings。
 
 ## 1. 范围
 

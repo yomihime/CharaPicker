@@ -204,10 +204,13 @@ Current character card compilation flow:
 ```text
 read formal episode_content
 -> build match names from character card identity fields
--> aggregate directly matched character evidence by season and episode
--> if direct matching fails, ask AI to resolve aliases from knowledge_base targets
+-> build direct / mention / causal / season_context evidence layers
+-> if no direct evidence exists, ask AI to resolve verified aliases from knowledge_base targets
+-> rebuild evidence layers with verified aliases
+-> fail if direct evidence is still missing
 -> build local CharacterState timeline
--> ask AI to review the state, timeline, and knowledge summary
+-> ask AI to review the state, timeline, knowledge summary, and evidence_layers
+-> write alias_resolution, needs_review_reasons, conflict_groups, and parse_diagnostics
 -> save CharaPicker JSON master
 -> optionally export Markdown, HTML, Character Card V2 JSON, or AstrBot copy checklist
 ```
@@ -215,17 +218,17 @@ read formal episode_content
 ```mermaid
 flowchart TD
     A[Read formal episode_content] --> B[Build match names from card identity]
-    B --> C[Aggregate directly matched evidence by season and episode]
+    B --> C[Build direct / mention / causal / season_context evidence layers]
     C --> D{Direct evidence found?}
-    D -->|No| E[AI resolves aliases from knowledge_base targets]
+    D -->|No| E[AI resolves verified aliases from knowledge_base targets]
     E --> F{Validated alias found?}
-    F -->|Yes| C
+    F -->|Yes| B
     F -->|No| X[Compile fails: character not found in formal knowledge base]
     D -->|Yes| G[Build local CharacterState timeline]
-    G --> H[AI reviews and writes card fields]
-    H --> I[Save card.json]
+    G --> H[AI reviews timeline + evidence_layers]
+    H --> Q[Apply quality rules and structured review reasons]
+    Q --> I[Save card.json]
     I --> J[Export Markdown / HTML / Card V2 / AstrBot when requested]
-    C -. future enhancement .-> K[Split direct / mention / causal / season context]
 ```
 
 Character matching uses these card identity fields:
@@ -259,7 +262,7 @@ This better represents a character growth path. The character is not treated as 
 
 If information conflicts over time, the system should preserve it as dynamic change, such as disguise, misunderstanding, corruption, growth, or relationship shift, rather than simply overwriting old information.
 
-Current baseline implementation: the AI review input for character cards now includes `direct_evidence_episodes`, `mention_evidence_episodes`, `causal_context_episodes`, and `season_context`. Direct evidence is formed by character-name or verified-alias matches in episode content fields; `targets` is only an alias candidate and supporting signal, not direct evidence by itself. Mention, causal, and season context can supplement motivation, relationship chains, and continuity, but must not override direct evidence.
+Current baseline implementation: the AI review input for character cards now includes `direct_evidence_episodes`, `mention_evidence_episodes`, `causal_context_episodes`, and `season_context`. Direct evidence is formed by character-name or verified-alias matches in episode content fields; `targets` is only an alias candidate and supporting signal, not direct evidence by itself. Mention, causal, and season context can supplement motivation, relationship chains, and continuity, but must not override direct evidence. Evidence layers and quality results are stored in `card.extensions["charapicker"]`, including `compile_evidence_layers`, `alias_resolution`, `needs_review_reasons`, `conflict_groups`, and `parse_diagnostics`; plain `quality.warnings` keeps user-readable warnings only and does not expose internal reason keys.
 
 ## 8. Current Limitations
 
@@ -271,7 +274,7 @@ This design intentionally stays transparent: users can understand why the system
 
 Current follow-up work:
 
-- Continue validating and tuning character card context layering: direct evidence, mention evidence, causal context, and season-level background are connected in the baseline implementation, but real material still needs to verify the classification boundaries.
+- Character card context layering is connected in the baseline implementation, but real material still needs to validate and tune the direct, mention, causal, and season_context classification boundaries.
 - Bring text, subtitles, transcription results, images, manga pages, and mixed media into the unified preview/knowledge-base consumption path.
 - Add automated regression coverage. The formal extraction mainline is still mainly verified through static checks, manual runs, and log review.
 - Reduce and redact model DEBUG logs so complete request/response bodies and temporary material URLs are not expanded.
