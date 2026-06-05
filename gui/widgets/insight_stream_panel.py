@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, CaptionLabel, CardWidget, ScrollArea, StrongBodyLabel, isDarkTheme
 
 from core.models import InsightStatus
@@ -69,6 +69,8 @@ class InsightCard(CardWidget):
 
         header = QHBoxLayout()
         self.title_label = StrongBodyLabel(event.get("title", t("insight.untitled")), self)
+        self.title_label.setWordWrap(True)
+        self.title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.status_label = CaptionLabel(t(STATUS_TEXT.get(status, "insight.status.queued")), self)
         self.status_label.setStyleSheet(f"color: {color};")
         header.addWidget(self.title_label, 1)
@@ -76,6 +78,10 @@ class InsightCard(CardWidget):
 
         self.description_label = BodyLabel(event.get("description", ""), self)
         self.description_label.setWordWrap(True)
+        self.description_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
         self.description_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
         content.addLayout(header)
@@ -109,17 +115,15 @@ class InsightStreamPanel(ScrollArea):
         self.setWidgetResizable(True)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setMinimumHeight(180)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self.container = QWidget(self)
         self.layout = QVBoxLayout(self.container)
         self.layout.setContentsMargins(4, 4, 12, 4)
         self.layout.setSpacing(10)
 
-        self.empty_label = BodyLabel(t("insight.empty"), self.container)
-        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setMinimumHeight(160)
+        self.empty_label = self._create_empty_label(t("insight.empty"))
         self.layout.addWidget(self.empty_label, 1)
-        self.layout.setAlignment(self.empty_label, Qt.AlignmentFlag.AlignCenter)
 
         self.setWidget(self.container)
         self._stream_cards: dict[str, InsightCard] = {}
@@ -160,12 +164,17 @@ class InsightStreamPanel(ScrollArea):
             if widget is not None:
                 widget.deleteLater()
 
-        self.empty_label = BodyLabel(t("insight.empty"), self.container)
-        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.empty_label.setMinimumHeight(160)
+        self.empty_label = self._create_empty_label(t("insight.empty"))
         self.layout.addWidget(self.empty_label, 1)
-        self.layout.setAlignment(self.empty_label, Qt.AlignmentFlag.AlignCenter)
         self.apply_theme_colors()
+
+    def _create_empty_label(self, text: str) -> BodyLabel:
+        label = BodyLabel(text, self.container)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setWordWrap(True)
+        label.setMinimumHeight(160)
+        label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        return label
 
     def _is_scroll_near_bottom(self) -> bool:
         scroll_bar = self.verticalScrollBar()
