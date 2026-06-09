@@ -797,7 +797,7 @@ docs: record extraction observability completion
 - 删除临时测试项目、调试开关和一次性日志。
 - 移除重复 helper 或保留说明不足的桥接代码。
 - 在 `docs/plans/TODO.zh_CN.md` 整理阶段完成记录并更新 P1 状态。
-- 准备进入 `02-multi-material-refactor-plan.framework.zh_CN.md`。
+- 准备进入 `02-multi-material-refactor-plan.zh_CN.md`。
 
 若收尾时发现行为 bug，应回到对应里程碑修复，不把 bug 修复塞进收尾项。
 
