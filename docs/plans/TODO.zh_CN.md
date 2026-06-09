@@ -9,12 +9,12 @@
 当前路线按“先稳住，再解耦，最后扩展素材类型”推进：
 
 1. 先执行 P1「提取质量与可观测性」，通过回归验证、prompt 边界和进度事件复核稳住现有正式提取链路。
-2. 再做多素材平级接入前的架构体检与解耦，重点检查当前代码是否仍被视频流程主导，明确视频、音频、文本、图片和漫画作为平级素材的共同入口与边界。框架见 [多素材平级接入前重构解耦计划框架](multi-material-refactor-plan.framework.zh_CN.md)。
-3. 最后进入 P0「Extract Once 覆盖缺口」，正式推进文本、字幕、音频转写、图片、漫画和混合媒体接入。框架见 [多素材种类支持计划框架](multi-material-coverage-plan.framework.zh_CN.md)。
+2. 再做多素材平级接入前的架构体检与解耦，重点检查当前代码是否仍被视频流程主导，明确视频、音频、文本、图片和漫画作为平级素材的共同入口与边界。框架见 [多素材平级接入前重构解耦计划框架](02-multi-material-refactor-plan.framework.zh_CN.md)。
+3. 最后进入 P0「Extract Once 覆盖缺口」，正式推进文本、字幕、音频转写、图片、漫画和混合媒体接入。框架见 [多素材种类支持计划框架](03-multi-material-coverage-plan.framework.zh_CN.md)。
 
 ## P0：Extract Once 覆盖缺口
 
-计划框架见 [多素材种类支持计划框架](multi-material-coverage-plan.framework.zh_CN.md)。该文件只是框架占位，正式执行前仍需在 P1 稳定性工作和多素材前解耦工作完成后重新起草细化计划。
+计划框架见 [多素材种类支持计划框架](03-multi-material-coverage-plan.framework.zh_CN.md)。该文件只是框架占位，正式执行前仍需在 P1 稳定性工作和多素材前解耦工作完成后重新起草细化计划。
 
 | 顺序 | 待办 | 优先级 | 规模 | 主要验收点 |
 | --- | --- | --- | --- | --- |
@@ -23,7 +23,7 @@
 
 ## P1：提取质量与可观测性
 
-计划框架见 [提取质量与可观测性计划框架](extraction-quality-observability-plan.framework.zh_CN.md)。该文件只是框架占位，正式执行前仍需重新起草细化计划。
+执行计划见 [提取质量与可观测性执行计划](01-extraction-quality-observability-plan.zh_CN.md)。执行前仍需按计划重新复核当前代码、测试脚本、日志规范和用户试跑结果。
 
 | 顺序 | 待办 | 优先级 | 规模 | 主要验收点 |
 | --- | --- | --- | --- | --- |

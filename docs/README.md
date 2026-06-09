@@ -24,9 +24,9 @@
 
 1. [当前计划与任务队列分组](plans/README.md)：仍需执行或持续跟踪的计划类文档入口。
 2. [TODO List](plans/TODO.zh_CN.md)：当前剩余任务总表，已移出完成的历史项目。
-3. [提取质量与可观测性计划框架](plans/extraction-quality-observability-plan.framework.zh_CN.md)：TODO P1 的框架占位，正式执行前需重新扩写计划。
-4. [多素材平级接入前重构解耦计划框架](plans/multi-material-refactor-plan.framework.zh_CN.md)：第二阶段架构体检与解耦的框架占位。
-5. [多素材种类支持计划框架](plans/multi-material-coverage-plan.framework.zh_CN.md)：TODO P0 的框架占位，正式执行前需结合第二阶段结果扩写计划。
+3. [提取质量与可观测性执行计划](plans/01-extraction-quality-observability-plan.zh_CN.md)：TODO P1 的第一阶段执行计划。
+4. [多素材平级接入前重构解耦计划框架](plans/02-multi-material-refactor-plan.framework.zh_CN.md)：第二阶段架构体检与解耦的框架占位。
+5. [多素材种类支持计划框架](plans/03-multi-material-coverage-plan.framework.zh_CN.md)：TODO P0 的第三阶段框架占位，正式执行前需结合第二阶段结果扩写计划。
 6. [提取与角色成长编译路线](plans/extraction-development-roadmap.zh_CN.md)：Extract Once、知识库和角色状态编译的长期目标与验收基准。
 7. [真实预览结果后续计划](plans/preview-real-result-ingestion-plan.zh_CN.md)：文本/字幕/音频、图片/漫画和混合媒体进入预览与统一知识库消费路径的后续专项计划。
 

@@ -11,9 +11,9 @@
 | 文件 | 阶段 | 可用性 | 用途 |
 | --- | --- | --- | --- |
 | `TODO.zh_CN.md` | 当前队列 | 可用 | 当前剩余任务总表，按优先级组织执行入口。 |
-| `extraction-quality-observability-plan.framework.zh_CN.md` | 计划框架 | 仅供后续起草正式计划 | TODO P1 提取质量与可观测性的范围占位和正式计划章节骨架。 |
-| `multi-material-refactor-plan.framework.zh_CN.md` | 计划框架 | 仅供后续起草正式计划 | 多素材平级接入前架构体检与解耦的背景、状态和边界占位。 |
-| `multi-material-coverage-plan.framework.zh_CN.md` | 计划框架 | 仅供后续起草正式计划 | TODO P0 多素材种类支持的背景、状态和范围占位。 |
+| `01-extraction-quality-observability-plan.zh_CN.md` | 执行计划 | 第一阶段执行入口 | 第一阶段：TODO P1 提取质量与可观测性的正式执行计划。 |
+| `02-multi-material-refactor-plan.framework.zh_CN.md` | 计划框架 | 仅供后续起草正式计划 | 第二阶段：多素材平级接入前架构体检与解耦的背景、状态和边界占位。 |
+| `03-multi-material-coverage-plan.framework.zh_CN.md` | 计划框架 | 仅供后续起草正式计划 | 第三阶段：TODO P0 多素材种类支持的背景、状态和范围占位。 |
 | `preview-real-result-ingestion-plan.zh_CN.md` | 待执行专项 | 可用，但实施前需复核代码 | 文本/字幕/音频、图片/漫画和混合媒体进入预览与统一知识库消费路径的后续专项计划。 |
 | `extraction-development-roadmap.zh_CN.md` | 长期路线基准 | 可用作验收框架，不是当前任务清单 | Extract Once、知识库和角色成长编译的长期目标与验收基准。 |
 
