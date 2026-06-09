@@ -5,7 +5,7 @@
 
 最近整理日期：2026-06-09。
 
-计划阶段：正式计划草案。
+计划阶段：正式执行计划，待执行前复核。
 
 适用阶段：路线 01，先稳住现有正式提取链路，再进入路线 02 多素材平级接入前重构解耦。
 
@@ -36,9 +36,11 @@
 
 - 后续路线按 `01 -> 02 -> 03` 推进：先稳住正式提取质量与可观测性，再做多素材前解耦，最后推进多素材覆盖。
 - 第一阶段只处理稳定性、回归验证、prompt 边界和进度反馈，不承担新素材类型扩展。
-- 第一阶段的正式计划写在本文档；旧框架文件名已保留 `01-` 前缀，以免后续忘记路线顺序。
+- 第一阶段执行入口固定为本文档，文件名前缀 `01-` 用于标识路线顺序。
 - prompt 调整优先维护 `res/default_prompts.json` 或用户 prompt override；业务代码不得长期拼接或复制 prompt 正文。
 - GUI 页面层只负责触发、进度、反馈和洞察展示；正式提取、知识库写入、聚合和角色卡 stale 标记仍属于 `core`。
+- 本阶段回归脚本优先保持单文件轻量入口；后续若仓库建立正式测试体系，再评估是否迁移到测试目录。
+- 若执行中需要新增或改动 stale reason，应优先集中到常量或共享协议；只验证既有 reason 时不强制重构。
 - 本阶段完成后才能进入路线 02。若 P1 回归脚本或进度反馈仍不能稳定说明当前正式提取状态，应继续收敛第一阶段。
 
 ## 4. 当前状态与缺口
@@ -74,7 +76,7 @@
 - 洁净提取只清理可再生提取产物，不误删用户素材、角色卡母本或导出结果。
 - 完整提取、洁净提取、快速提取的分流边界可验证。
 - JSON 三次重试、输出截断、token usage 和 attempt metadata 的回归覆盖更完整。
-- 上下文预算降级和跳过片段聚合的可观察行为。
+- 上下文预算降级和跳过片段聚合的可观察行为；若上下文预算逻辑尚未形成独立 helper，本阶段先记录现状和风险，不为测试强行拆分业务代码。
 - 正式提取成功后角色卡 stale 标记条件明确且可验证。
 - 进度条对开始、跳过、失败、完成、前置失败等状态的反馈不误导。
 - prompt 拒绝样例维护流程仍停留在原则层，需要写清复现、归档、调整和验证边界。
@@ -157,6 +159,7 @@
 
 - 增强 `scripts/validate_formal_extraction_workflow.py`，优先保持轻量、离线、无真实模型调用、无 GUI 依赖。
 - 新增或整理纯逻辑验证 helper，使脚本能覆盖正式提取关键 contract。
+- 本里程碑优先覆盖不需要临时项目目录的纯函数或纯 helper contract；需要创建临时项目树的清理、run artifact 和 stale 验证放到 M03/M04。
 
 建议覆盖：
 
@@ -164,7 +167,7 @@
 - `core.knowledge_base.is_matching_run_artifact_payload()` 与 `is_full_artifact_payload_for_run()` 的 run 过滤。
 - 旧 run、空 run、缺字段 artifact、preview artifact 不应被正式当前 run 聚合消费。
 - 快速提取无输入、部分输入、跳过 episode/season 时的 stats 和 token usage。
-- 上下文预算降级相关 helper 的可预测选择结果；若当前代码没有可独立验证 helper，应在后续里程碑先补出清晰边界。
+- 上下文预算降级相关 helper 的可预测选择结果；若当前代码没有可独立验证 helper，本阶段只记录现状、风险和后续抽取建议，不把 helper 抽取作为 M02 强制交付。
 
 验收：
 
@@ -187,6 +190,7 @@ conda run -n CharaPicker python scripts/validate_formal_extraction_workflow.py
 - 不调用真实云端模型。
 - 不依赖用户本地 `projects/` 私有素材。
 - 不写入长期项目数据。
+- 不创建长期项目树；确需文件系统验证时使用临时目录，并归入 M03/M04。
 
 ### M03：洁净提取与模式分流验证
 
@@ -194,6 +198,7 @@ conda run -n CharaPicker python scripts/validate_formal_extraction_workflow.py
 
 - 补齐完整提取、洁净提取、快速提取三种模式的分流验证。
 - 验证洁净提取清理范围只包含可再生提取产物。
+- 本里程碑允许使用临时项目树验证清理命中范围，但不得读取或改写用户真实 `projects/` 数据。
 
 重点检查：
 
@@ -219,6 +224,7 @@ conda run -n CharaPicker python scripts/validate_formal_extraction_workflow.py
 
 - 验证正式聚合只消费当前 `extraction_run_id` 的合格产物。
 - 验证 stale 标记只在正式提取产生有效更新后触发。
+- 本里程碑允许使用临时项目树构造最小知识库和角色卡样例，用于验证 run artifact 与 stale contract。
 
 重点检查：
 
@@ -226,7 +232,7 @@ conda run -n CharaPicker python scripts/validate_formal_extraction_workflow.py
 - 旧 run 产物不会被当前 run 的 episode/season 聚合读取。
 - preview 产物不会被正式聚合当作正式事实。
 - 正式提取没有有效 chunk 或快速模式 season 整理失败时，不应错误标记角色卡 stale。
-- stale reason 使用稳定常量或集中协议，避免散落硬编码。
+- 若执行中需要新增或改动 stale reason，应优先集中到常量或共享协议；若只验证既有 reason，可不强制重构。
 
 验收：
 
@@ -378,11 +384,11 @@ python -m ruff check .
 
 ## 10. 提交分组
 
-### G01：第一阶段计划定稿
+### G01：第一阶段计划定稿与后续修订
 
 覆盖：
 
-- 本文档从框架扩写为正式执行计划。
+- 本文档从框架扩写为正式执行计划，并承载后续审核打磨修订。
 - 如有必要，同步 `docs/plans/README.md`、`docs/README.md` 或 `docs/plans/TODO.zh_CN.md` 中的状态描述。
 
 建议提交信息：
@@ -396,13 +402,13 @@ docs: finalize extraction quality observability plan
 - 链接指向 `01-extraction-quality-observability-plan.zh_CN.md`。
 - 文档没有把未实现内容写成已实现事实。
 
-### G02：回归脚本与纯逻辑验证
+### G02：回归脚本与离线验证
 
 覆盖：
 
 - M02。
-- M03 中不依赖真实项目数据的纯逻辑验证。
-- M04 中 run 隔离和 stale 条件的最小自动化验证。
+- M03 中不依赖真实项目数据的离线验证。
+- M04 中 run 隔离和 stale 条件的最小离线验证。
 
 建议提交信息：
 
@@ -510,8 +516,6 @@ fix: tune formal extraction prompt safety boundaries
 
 ## 13. 待确认问题
 
-- 回归脚本是否长期保持单文件轻量脚本，还是后续在测试体系稳定后迁入正式测试目录。
-- 上下文预算降级是否已有足够独立 helper 可测；如果没有，是否允许在不改变业务语义的前提下提取小 helper。
-- stale reason 是否需要集中到常量，避免在多个模块散落字符串。
+- 执行时需复核上下文预算降级是否已有足够独立 helper 可测；如果没有，按本文只记录现状、风险和后续抽取建议。
 - 第一阶段完成记录写入本文末尾、`TODO.zh_CN.md`，还是另建 `completed` 归档文档。
 - 是否需要为真实拒绝样例建立一个脱敏记录模板；如建立，应放在普通 docs 中还是仅作为执行者本地记录。
