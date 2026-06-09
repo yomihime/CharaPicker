@@ -41,6 +41,10 @@
 - GUI 页面层只负责触发、进度、反馈和洞察展示；正式提取、知识库写入、聚合和角色卡 stale 标记仍属于 `core`。
 - 本阶段回归脚本优先保持单文件轻量入口；后续若仓库建立正式测试体系，再评估是否迁移到测试目录。
 - 若执行中需要新增或改动 stale reason，应优先集中到常量或共享协议；只验证既有 reason 时不强制重构。
+- 第一阶段完成记录固定写入 `docs/plans/TODO.zh_CN.md`；除非后续需要完整历史叙述，否则不另建 completed 归档文档。
+- 预算设置必须区分输出、输入和上下文窗口：`输出 Token / 分钟` 只用于视频 chunk 信息提取的输出上限，不得泛化为输入预算、上下文预算、文本聚合预算、角色卡编译预算或其他素材类型的通用设置。模型页应把现有单个输出 token 控件改为“预算设置”按钮，打开独立弹窗维护各类预算。
+- 执行时应记录真实 prompt 拒绝样例的脱敏摘要，让用户有机会主动打包回传；代码中应提供基于用户回传样例更新提示词的路径，优先落到用户 prompt override，确认通用后再维护默认 prompt。
+- 拒绝样例不得自动上传。应用只生成本地样例记录和用户主动触发的 zip 包，后续更新流程从固定输出目录读取 zip 或由用户手动提供。
 - 本阶段完成后才能进入路线 02。若 P1 回归脚本或进度反馈仍不能稳定说明当前正式提取状态，应继续收敛第一阶段。
 
 ## 4. 当前状态与缺口
@@ -80,6 +84,34 @@
 - 正式提取成功后角色卡 stale 标记条件明确且可验证。
 - 进度条对开始、跳过、失败、完成、前置失败等状态的反馈不误导。
 - prompt 拒绝样例维护流程仍停留在原则层，需要写清复现、归档、调整和验证边界。
+
+### 4.4 当前预算规则
+
+当前预算由三类规则共同决定：
+
+- 视频 chunk 输出 token 预算来自云模型预设的 `max_output_tokens`，在 UI 语义上按“每分钟输出 Token”配置；默认值为 2048，输入值按 128 步进规整，并限制在 128 到 8192 之间。预览、完整提取和快速提取都会按 chunk 时长调用 `scale_cloud_max_output_tokens_for_video_duration()`，把每分钟预算换算为单次请求 `max_tokens`。
+- 模型上下文窗口来自云模型预设的 `context_window_tokens`。用户手动填写的值优先；没有手动值时，`complete_context_window_tokens()` 会尝试按 provider 和 model name 推断内置上下文窗口；仍无法推断时，正式提取通过 `context_window_budget_tokens()` 使用 32768 token fallback。上下文窗口值会被限制在 4096 到 10,000,000 之间。
+- episode/season 文本聚合输出预算集中在 `core/extraction_budget.py` 的 `TEXT_MERGE_OUTPUT_BUDGETS`。每个 purpose 有 `min_tokens`、`target_tokens`、`max_tokens`、按 source item 增量和按输入估算增量；`resolve_text_merge_output_tokens()` 会先按这些规则计算请求输出，再受 `context_window_tokens - reserved_input_tokens - 1024` 的安全余量约束。若可用输出低于该 purpose 最小值，当前代码仍返回最小值，并由 `text_merge_budget_warning()` 写入聚合 warning。
+
+输入 token 估算由 `core.extraction_context.estimate_context_tokens()` 提供：CJK/Kana/Hangul 字符按 1 token 估算，ASCII 约按 4 字符 1 token，最后乘以 1.2 安全系数。
+
+本阶段不要求为了测试强行拆分预算逻辑。执行时应优先为现有 helper 增加离线验证；若发现预算逻辑仍嵌在难以验证的业务流程中，只记录现状、风险和后续抽取建议。
+
+### 4.5 预算设置边界
+
+P1 对预算设置的目标是让用户知道自己在调什么，也让执行者能验证预算是否被正确传入提取链路。这里必须避免把视频输出预算误当成所有模型调用的通用预算。
+
+- 模型页不应继续直接展示一个容易误读的 `输出 Token / 分钟` 行。建议替换为“预算设置”按钮，点击后打开预算设置弹窗。
+- 预算设置弹窗至少包含：`输入/上下文窗口 Token`、`视频输出 Token / 分钟`、`图片输出 Token / 张`、`音频输出 Token / 分钟`、`角色卡编译输出 Token`。底部提供“恢复默认”“确认”“取消”。
+- `输入/上下文窗口 Token`：作为云模型预设的一部分展示或设置，用于 episode/season 文本聚合预算、上下文选择和降级判断。UI 需要清楚区分手动填写、内置推断和 32768 fallback，避免用户误以为只调输出预算就能解决输入过长或上下文过长问题。
+- `视频输出 Token / 分钟`：只作为视频 chunk 信息提取的输出预算入口。它控制预览、完整提取和快速提取的视频 chunk 单次请求输出上限；实际请求值按 chunk 时长换算。它不得用于输入 token 预算，不得用于上下文窗口预算，也不得作为文本、图片、音频、漫画或混合媒体的通用输出预算口径。
+- `图片输出 Token / 张`：用于后续图片或漫画单张图像理解的输出上限。P1 只定义设置口径；路线 03 接入图片/漫画时再接入实际提取链路。
+- `音频输出 Token / 分钟`：用于后续音频理解或音频转写后摘要类任务的输出上限。P1 只定义设置口径；路线 03 接入音频消费链路时再确认实际用法。
+- `角色卡编译输出 Token`：用于角色卡 AI 复核与最终 JSON 生成。它是文本生成预算，不应使用视频、图片或音频预算；也不应使用“每分钟”语义。
+- 输入 token 预算：当前不应由用户用输出预算直接设置。输入侧应通过上下文窗口、上下文选择、上下文降级、chunk 切分和素材处理策略控制。
+- episode/season 各 purpose 的 `min/target/max` 输出预算属于内部策略，本阶段不设计用户逐项配置入口；如后续需要高级调参，应另起计划。
+- 当视频 chunk 模型输出因 token 上限被截断时，错误反馈应继续建议提高“输出 Token / 分钟”；当问题来自输入过长、上下文窗口不足或文本聚合预算不足时，反馈应指向上下文窗口设置、上下文降级或模型能力，而不是误导用户只调输出预算。
+- 当前代码中，角色卡别名校验使用 `min(cloud_preset.max_output_tokens, 1024)`，角色卡 AI 复核使用 `cloud_preset.max_output_tokens`。这属于历史复用口径；P1 应把角色卡编译改为使用独立的 `角色卡编译输出 Token` 或内部编译预算 helper。别名校验可继续保留 1024 以内的内部小预算。
 
 ## 5. 模块边界
 
@@ -245,13 +277,15 @@ conda run -n CharaPicker python scripts/validate_formal_extraction_workflow.py
 - 不改变角色卡编译证据层规则。
 - 不把预览产物升级为正式知识库事实。
 
-### M05：进度、token usage 与洞察事件一致性
+### M05：进度、token usage、预算设置与洞察事件一致性
 
 交付：
 
 - 明确预览和正式提取的进度 contract。
 - 对正式提取的关键路径建立最小进度序列验证或手动验收清单。
 - 检查 token usage 在 chunk、episode、season 和失败/跳过场景中的展示是否可理解。
+- 将模型页现有单行输出 token 控件规划为“预算设置”弹窗，并验证各预算字段只进入对应链路。
+- 明确角色卡编译使用独立编译输出预算，不再复用视频每分钟预算。
 
 建议覆盖场景：
 
@@ -274,6 +308,9 @@ conda run -n CharaPicker python scripts/validate_formal_extraction_workflow.py
 - 进度值始终限制在 0 到 100。
 - 洞察流只展示用户关心的结构化事件，不展示普通 DEBUG 日志。
 - token usage 没有数据时显示 pending 或 empty，不伪造总量。
+- 预算设置弹窗能保存、恢复默认、确认和取消；取消不应改写预设。
+- 视频、图片、音频、角色卡编译和上下文窗口预算在 UI 文案和代码字段上不互相冒名。
+- 角色卡编译请求不再使用视频每分钟预算；别名校验如保留内部 1024 以内小预算，需要在代码中有清晰注释或 helper 名称。
 
 边界：
 
@@ -286,33 +323,46 @@ conda run -n CharaPicker python scripts/validate_formal_extraction_workflow.py
 
 - 在计划或参考文档中写清 prompt 拒绝样例的处理流程。
 - 有真实拒绝样例时，再修改 `res/default_prompts.json` 或指导用户使用 prompt override。
+- 执行时记录真实拒绝样例的脱敏摘要，并提供用户主动打包样例的路径。
+- 代码中应存在基于用户回传样例更新提示词的方法；项目特定样例优先更新用户 prompt override，确认具备通用价值后再维护 `res/default_prompts.json`。
+- 设计拒绝样例本地记录目录和 zip 打包目录。建议记录目录为 `projects/{project_id}/cache/refusal_samples/{sample_id}/`，固定 zip 输出目录为 `projects/{project_id}/output/refusal_samples/`。
+- 在设置页或关于页提供“打包拒绝样例”入口；优先放设置页，关于页可只放说明或跳转入口。
 
 处理流程：
 
-1. 记录触发拒绝的 prompt purpose、模型供应商、模型名、素材类型、阶段、finish reason 或错误摘要。
-2. 只保留必要摘要，不写入完整 API Key、完整 prompt、完整模型响应或隐私文本。
-3. 判断问题属于 prompt 语气、输出结构约束、模型后端策略、输出 token 不足，还是素材内容本身。
-4. 若属于 prompt，可维护 `res/default_prompts.json` 并保持 JSON 输出约束。
-5. 若属于用户项目特定需求，优先建议用户 prompt override。
-6. 修改后用相同样例复跑，并确认正式提取 JSON 可解析。
+1. 提取流程遇到模型拒绝或供应商策略拒绝时，写入一份本地 `refusal_sample.json` 描述文件。
+2. `refusal_sample.json` 至少记录 sample_id、created_at、project_id、prompt purpose、模型供应商、模型名、backend、素材类型、阶段、extraction_run_id、season/episode/chunk 标识、项目内素材相对路径、finish reason 或错误摘要、是否有用户 prompt override、应用版本和脱敏说明。
+3. 默认不复制素材，不写入完整 API Key、完整 prompt、完整模型响应或隐私文本。素材路径优先保存项目内相对路径；确需外部路径时必须脱敏或要求用户确认。
+4. 用户在设置页或关于页点击“打包拒绝样例”后，应用读取 `refusal_sample.json`，把描述文件和被引用的素材副本一起打进 zip。素材缺失时仍生成 zip，并在 JSON 或打包结果中写入缺失 warning。
+5. zip 包输出到固定目录 `projects/{project_id}/output/refusal_samples/`。应用只打开或提示该本地目录，不自动上传。
+6. 用户必须显式选择是否回传 zip；应用不得自动上传素材、prompt 或模型响应。
+7. 更新流程从用户提供的 zip 开始：读取 `refusal_sample.json`，判断问题属于 prompt 语气、输出结构约束、模型后端策略、输出 token 不足，还是素材内容本身。
+8. 若属于用户项目特定需求，优先通过用户 prompt override 更新。
+9. 若确认具备通用价值，再维护 `res/default_prompts.json` 并保持 JSON 输出约束。
+10. 修改后用相同脱敏样例或用户允许的打包素材复跑，并确认正式提取 JSON 可解析。
 
 验收：
 
 - prompt 修改不绕过 `utils.ai_model_middleware`。
 - prompt 修改后仍要求输出原始 JSON object。
 - 没有在业务代码中新增长期 prompt 正文。
+- 用户回传样例路径不会自动导出隐私素材，且给用户明确的选择权。
+- zip 包内至少包含 `refusal_sample.json`；素材可用且用户确认后才随包复制。
+- 打包按钮写入固定输出目录，并能清楚提示 zip 路径和缺失素材 warning。
 
 边界：
 
 - 没有真实拒绝样例时，不主动做大幅 prompt 重写。
 - 不把安全拒绝问题全部归因于 prompt；输出 token、模型能力和素材内容都需要区分。
+- 不建立自动联网回传；样例回传必须由用户主动触发。
+- 不把拒绝样例 zip 放入仓库，不提交用户素材、真实样例 zip 或本地 sample cache。
 
 ### M07：第一阶段验收与进入路线 02 门槛
 
 交付：
 
-- 形成第一阶段完成小结，记录验证命令、通过结果、未解决风险和是否允许进入路线 02。
-- 必要时更新 `docs/plans/TODO.zh_CN.md` 中 P1 状态。
+- 在 `docs/plans/TODO.zh_CN.md` 标记第一阶段完成状态，并记录验证命令、通过结果、未解决风险和是否允许进入路线 02。
+- 如需更长历史说明，可在后续单独归档；默认不另建 completed 文档。
 
 进入路线 02 前必须满足：
 
@@ -363,6 +413,7 @@ python -m ruff check .
 - 无可用正式视频 chunk 时，进度和错误反馈不显示成功完成。
 - 正式提取失败时按钮状态恢复可用。
 - token usage 在 pending、empty 和有用量三种状态下显示合理。
+- 预算设置弹窗中的输入/上下文窗口、视频、图片、音频和角色卡编译预算能恢复默认、确认保存和取消放弃。
 - 洞察流不展示普通 DEBUG 日志。
 - 角色卡页面现有角色卡不会因为失败提取被错误标记为 stale。
 
@@ -379,6 +430,7 @@ python -m ruff check .
 - 是否让验证脚本依赖真实模型、真实用户素材或 GUI。
 - 是否新增 UI 可见文案；如有，同步四个 `i18n` JSON。
 - 是否改变长期数据结构；如有，先更新对应 `ARCHITECTURE.md` 或普通项目文档。
+- 是否误把拒绝样例 cache、zip 包或用户素材加入源码提交；如有，必须移出并更新忽略规则或输出目录说明。
 
 进入用户验收前再做一次整体自审查，确认没有把临时调试入口、测试项目数据或一次性日志留在源码结构中。
 
@@ -490,10 +542,11 @@ fix: tune formal extraction prompt safety boundaries
 2. 用一个可公开或用户明确允许的本地测试项目检查完整提取。
 3. 检查洁净提取确认、清理范围和后续正式提取。
 4. 检查快速提取在部分成功或跳过时的进度与洞察事件。
-5. 若近期有安全拒绝样例，复跑对应样例并确认 JSON 输出约束。
-6. 检查角色卡页面现有卡片 stale 状态是否符合正式提取结果。
+5. 检查预算设置弹窗保存、恢复默认和取消行为，并确认视频输出预算不会影响角色卡编译预算。
+6. 若近期有安全拒绝样例，复跑对应样例并确认 JSON 输出约束。
+7. 检查角色卡页面现有卡片 stale 状态是否符合正式提取结果。
 
-用户验收通过后，再判断是否更新 `TODO.zh_CN.md` 或进入路线 02。
+用户验收通过后，更新 `TODO.zh_CN.md` 标记第一阶段状态，再判断是否进入路线 02。
 
 ## 12. 验收后收尾
 
@@ -508,14 +561,15 @@ fix: tune formal extraction prompt safety boundaries
 
 - 删除临时测试项目、调试开关和一次性日志。
 - 移除重复 helper 或保留说明不足的桥接代码。
-- 整理阶段完成记录。
-- 更新 `docs/plans/TODO.zh_CN.md` 状态。
+- 在 `docs/plans/TODO.zh_CN.md` 整理阶段完成记录并更新 P1 状态。
 - 准备进入 `02-multi-material-refactor-plan.framework.zh_CN.md`。
 
 若收尾时发现行为 bug，应回到对应里程碑修复，不把 bug 修复塞进收尾项。
 
-## 13. 待确认问题
+## 13. 执行时复核点
 
-- 执行时需复核上下文预算降级是否已有足够独立 helper 可测；如果没有，按本文只记录现状、风险和后续抽取建议。
-- 第一阶段完成记录写入本文末尾、`TODO.zh_CN.md`，还是另建 `completed` 归档文档。
-- 是否需要为真实拒绝样例建立一个脱敏记录模板；如建立，应放在普通 docs 中还是仅作为执行者本地记录。
+当前没有阻塞第一阶段执行的开放决策。执行时仍需复核：
+
+- 当前上下文预算规则是否仍与本文 4.4 一致；若代码已变化，以代码事实更新本文。
+- 用户回传拒绝样例的脱敏摘要字段、保存位置和 UI 文案；如果新增用户可见文本，必须同步四个 `i18n` JSON。
+- 第一阶段完成记录在 `docs/plans/TODO.zh_CN.md` 中的标记形式，避免把短期执行日志写成长期噪音。
