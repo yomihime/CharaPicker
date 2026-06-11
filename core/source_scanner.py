@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+from hashlib import sha1
 from pathlib import Path
 from typing import Any
 
+from core.extraction_plan import (
+    ContentForm,
+    EpisodePlan,
+    ExtractionUnit,
+    MaterialOrigin,
+    MaterialRef,
+    MediaType,
+)
 from utils.media_types import VIDEO_SUFFIXES
 from utils.paths import ensure_project_tree
 
@@ -10,6 +19,7 @@ from utils.paths import ensure_project_tree
 FORMAL_VIDEO_SCHEMA_VERSION = 1
 FORMAL_VIDEO_SOURCE_KIND = "video"
 FORMAL_VIDEO_SCAN_TYPE = "formal_video"
+FORMAL_MATERIAL_SCAN_TYPE = "formal_materials"
 TRANSCODED_VIDEO_NAME = "transcoded.mp4"
 SEGMENT_VIDEO_PREFIX = "segment_"
 
@@ -61,6 +71,28 @@ def scan_source_directory(source_root: str) -> dict[str, Any]:
 
 
 def scan_formal_video_materials(project_id: str) -> dict[str, Any]:
+    return _scan_formal_video_materials(project_id)
+
+
+def scan_formal_materials(project_id: str) -> list[EpisodePlan]:
+    video_scan = _scan_formal_video_materials(project_id)
+    episodes: list[EpisodePlan] = []
+    for season in video_scan.get("seasons", []):
+        if not isinstance(season, dict):
+            continue
+        season_id = _manifest_string(season.get("season_id"))
+        if not season_id:
+            continue
+        for episode in season.get("episodes", []):
+            if not isinstance(episode, dict):
+                continue
+            episode_plan = _video_episode_plan_from_scan(season, episode)
+            if episode_plan.units:
+                episodes.append(episode_plan)
+    return episodes
+
+
+def _scan_formal_video_materials(project_id: str) -> dict[str, Any]:
     materials_root = ensure_project_tree(project_id).materials
     root_episode_candidates = _root_episode_candidates(materials_root)
     season_candidates = _season_candidates(materials_root)
@@ -98,6 +130,70 @@ def scan_formal_video_materials(project_id: str) -> dict[str, Any]:
         "source_root": str(materials_root.resolve()),
         "seasons": seasons,
     }
+
+
+def _video_episode_plan_from_scan(season: dict[str, Any], episode: dict[str, Any]) -> EpisodePlan:
+    season_id = _manifest_string(season.get("season_id"))
+    episode_id = _manifest_string(episode.get("episode_id"))
+    units: list[ExtractionUnit] = []
+    for chunk in episode.get("chunks", []):
+        if not isinstance(chunk, dict):
+            continue
+        chunk_id = _manifest_string(chunk.get("chunk_id"))
+        source_path = _manifest_string(chunk.get("source_path"))
+        if not chunk_id or not source_path:
+            continue
+
+        material_ref = MaterialRef(
+            material_id=_stable_material_id(MediaType.VIDEO, source_path),
+            relative_path=source_path,
+            source_media_type=MediaType.VIDEO,
+            content_form=ContentForm.UNKNOWN,
+            origin=MaterialOrigin.MATERIAL,
+            metadata={
+                "display_title": _manifest_string(chunk.get("display_title")),
+                "sort_key": _manifest_string(chunk.get("sort_key")),
+                "legacy_chunk_id": chunk_id,
+                "legacy_source_kind": _manifest_string(
+                    chunk.get("source_kind")
+                )
+                or FORMAL_VIDEO_SOURCE_KIND,
+            },
+        )
+        units.append(
+            ExtractionUnit(
+                unit_id=_stable_unit_id(MediaType.VIDEO, season_id, episode_id, chunk_id),
+                episode_id=episode_id,
+                media_type=MediaType.VIDEO,
+                content_form=ContentForm.UNKNOWN,
+                material_ref=material_ref,
+                origin=MaterialOrigin.MATERIAL,
+                unit_kind="video_chunk",
+                metadata={
+                    "legacy_chunk_id": chunk_id,
+                    "display_title": _manifest_string(chunk.get("display_title")),
+                    "sort_key": _manifest_string(chunk.get("sort_key")),
+                },
+            )
+        )
+
+    return EpisodePlan(
+        season_id=season_id,
+        episode_id=episode_id,
+        display_title=_manifest_string(episode.get("display_title")),
+        sort_key=_manifest_string(episode.get("sort_key")),
+        content_forms=[ContentForm.UNKNOWN] if units else [],
+        units=units,
+        metadata={
+            "scan_type": FORMAL_MATERIAL_SCAN_TYPE,
+            "legacy_source_kind": _manifest_string(episode.get("source_kind"))
+            or FORMAL_VIDEO_SOURCE_KIND,
+            "legacy_source_path": _manifest_string(episode.get("source_path")),
+            "season_display_title": _manifest_string(season.get("display_title")),
+            "season_sort_key": _manifest_string(season.get("sort_key")),
+            "season_source_path": _manifest_string(season.get("source_path")),
+        },
+    )
 
 
 def collect_preview_video_chunks(project_id: str, *, limit: int) -> list[Path]:
@@ -312,3 +408,16 @@ def _relative_material_path(materials_root: Path, path: Path) -> str:
         return path.resolve().relative_to(materials_root.resolve()).as_posix()
     except ValueError:
         return path.resolve().as_posix()
+
+
+def _manifest_string(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _stable_material_id(media_type: MediaType, source_path: str) -> str:
+    digest = sha1(f"{media_type.value}:{source_path}".encode("utf-8")).hexdigest()[:12]
+    return f"material_{media_type.value}_{digest}"
+
+
+def _stable_unit_id(media_type: MediaType, season_id: str, episode_id: str, chunk_id: str) -> str:
+    return f"unit_{media_type.value}_{season_id}_{episode_id}_{chunk_id}"

@@ -38,6 +38,14 @@ from core.extraction_context import (
     estimate_context_tokens,
     select_episode_context_candidates,
 )
+from core.extraction_plan import (
+    ContentForm,
+    EpisodePlan,
+    ExtractionUnit,
+    FormalExtractionMode,
+    FormalExtractionRunPlan,
+    MediaType,
+)
 from core.models import (
     ChunkExtractionResult,
     EpisodeTranscript,
@@ -102,21 +110,127 @@ class Extractor(QObject):
     def scan_formal_video_materials(self, project_id: str) -> dict[str, Any]:
         return source_scanner.scan_formal_video_materials(project_id)
 
+    def scan_formal_materials(self, project_id: str) -> list[EpisodePlan]:
+        return source_scanner.scan_formal_materials(project_id)
+
     def generate_source_manifest(self, project_id: str, source_root: str) -> Path:
         manifest = self.scan_source_directory(source_root)
         manifest = self._with_extraction_run_metadata(manifest, mode=ExtractionMode.FULL)
         return kb.save_source_manifest(project_id, manifest)
+
+    def prepare_formal_extraction_run_plan(
+        self,
+        project_id: str,
+        mode: ExtractionMode = ExtractionMode.FULL,
+    ) -> FormalExtractionRunPlan:
+        episodes = self.scan_formal_materials(project_id)
+        return FormalExtractionRunPlan(
+            project_id=project_id,
+            mode=self._formal_extraction_mode(mode),
+            media_types=self._media_types_from_episode_plans(episodes),
+            content_forms=self._content_forms_from_episode_plans(episodes),
+            episodes=episodes,
+            metadata={"run_type": FULL_EXTRACTION_RUN_TYPE},
+        )
 
     def prepare_formal_video_extraction_plan(
         self,
         project_id: str,
         mode: ExtractionMode = ExtractionMode.FULL,
     ) -> dict[str, Any]:
-        manifest = self.scan_formal_video_materials(project_id)
-        manifest = self._with_extraction_run_metadata(manifest, mode=mode)
+        run_plan = self.prepare_formal_extraction_run_plan(project_id, mode=mode)
+        manifest = self._legacy_manifest_from_run_plan(run_plan)
         kb.save_source_manifest(project_id, manifest)
         kb.initialize_structure(project_id, manifest)
         return manifest
+
+    def _formal_extraction_mode(self, mode: ExtractionMode) -> FormalExtractionMode:
+        if mode == ExtractionMode.CLEAN:
+            return FormalExtractionMode.CLEAN
+        if mode == ExtractionMode.FAST:
+            return FormalExtractionMode.FAST
+        return FormalExtractionMode.FULL
+
+    def _legacy_manifest_from_run_plan(self, run_plan: FormalExtractionRunPlan) -> dict[str, Any]:
+        seasons: list[dict[str, Any]] = []
+        season_index: dict[str, int] = {}
+        for episode in run_plan.episodes:
+            season_id = episode.season_id
+            if season_id not in season_index:
+                season_index[season_id] = len(seasons)
+                seasons.append(
+                    {
+                        "season_id": season_id,
+                        "source_path": self._manifest_string(
+                            episode.metadata.get("season_source_path")
+                        ),
+                        "display_title": self._manifest_string(
+                            episode.metadata.get("season_display_title")
+                        ),
+                        "sort_key": self._manifest_string(episode.metadata.get("season_sort_key")),
+                        "episodes": [],
+                    }
+                )
+            seasons[season_index[season_id]]["episodes"].append(
+                self._legacy_episode_from_plan(episode)
+            )
+
+        return {
+            "schema_version": source_scanner.FORMAL_VIDEO_SCHEMA_VERSION,
+            "source_kind": source_scanner.FORMAL_VIDEO_SOURCE_KIND,
+            "scan_type": source_scanner.FORMAL_VIDEO_SCAN_TYPE,
+            "source_root": str(ensure_project_tree(run_plan.project_id).materials.resolve()),
+            "extraction_run_id": run_plan.run_id,
+            "extraction_mode": run_plan.mode.value,
+            "run_type": FULL_EXTRACTION_RUN_TYPE,
+            "seasons": seasons,
+        }
+
+    def _legacy_episode_from_plan(self, episode: EpisodePlan) -> dict[str, Any]:
+        return {
+            "episode_id": episode.episode_id,
+            "source_kind": self._manifest_string(episode.metadata.get("legacy_source_kind"))
+            or source_scanner.FORMAL_VIDEO_SOURCE_KIND,
+            "source_path": self._manifest_string(episode.metadata.get("legacy_source_path")),
+            "display_title": episode.display_title,
+            "sort_key": episode.sort_key,
+            "chunks": [
+                self._legacy_chunk_from_unit(unit)
+                for unit in episode.units
+                if unit.media_type == MediaType.VIDEO
+            ],
+        }
+
+    def _legacy_chunk_from_unit(self, unit: ExtractionUnit) -> dict[str, Any]:
+        material_ref = unit.material_ref
+        return {
+            "chunk_id": self._manifest_string(unit.metadata.get("legacy_chunk_id")) or unit.unit_id,
+            "source_kind": material_ref.source_media_type.value,
+            "source_path": material_ref.relative_path,
+            "display_title": self._manifest_string(material_ref.metadata.get("display_title")),
+            "sort_key": self._manifest_string(material_ref.metadata.get("sort_key"))
+            or material_ref.relative_path.lower(),
+        }
+
+    def _media_types_from_episode_plans(self, episodes: list[EpisodePlan]) -> list[MediaType]:
+        seen: set[MediaType] = set()
+        output: list[MediaType] = []
+        for episode in episodes:
+            for unit in episode.units:
+                if unit.media_type not in seen:
+                    seen.add(unit.media_type)
+                    output.append(unit.media_type)
+        return output
+
+    def _content_forms_from_episode_plans(self, episodes: list[EpisodePlan]) -> list[ContentForm]:
+        seen: set[ContentForm] = set()
+        output: list[ContentForm] = []
+        for episode in episodes:
+            for content_form in episode.content_forms:
+                if content_form not in seen:
+                    seen.add(content_form)
+                    output.append(content_form)
+        return output
 
     def _with_extraction_run_metadata(
         self,
@@ -3752,10 +3866,13 @@ class Extractor(QObject):
             extraction_mode = ExtractionMode.FAST
         else:
             extraction_mode = ExtractionMode.FULL
-        manifest = self.prepare_formal_video_extraction_plan(
+        run_plan = self.prepare_formal_extraction_run_plan(
             config.project_id,
             mode=extraction_mode,
         )
+        manifest = self._legacy_manifest_from_run_plan(run_plan)
+        kb.save_source_manifest(config.project_id, manifest)
+        kb.initialize_structure(config.project_id, manifest)
         chunk_inputs = self._collect_formal_video_chunk_inputs(config.project_id, manifest)
         if not chunk_inputs:
             message = t("extractor.full.noVideoMaterials")

@@ -10,7 +10,9 @@ APP_ROOT = Path(__file__).resolve().parents[1]
 if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
 
+from core import extractor as extractor_module  # noqa: E402
 from core import knowledge_base as kb  # noqa: E402
+from core import source_scanner  # noqa: E402
 from core.character_card_store import (  # noqa: E402
     load_card,
     mark_compiled_official_cards_stale,
@@ -37,6 +39,8 @@ from utils.ai_model_middleware import ModelCallRequest, ModelCallResult, ModelMe
 @contextmanager
 def _isolated_project_tree(project_id: str = "validation-project") -> Iterator[ProjectPaths]:
     original_ensure_project_tree = kb.ensure_project_tree
+    original_scanner_ensure_project_tree = source_scanner.ensure_project_tree
+    original_extractor_ensure_project_tree = extractor_module.ensure_project_tree
     with TemporaryDirectory(prefix="charapicker-validation-") as temp_dir:
         projects_root = Path(temp_dir) / "projects"
 
@@ -65,10 +69,14 @@ def _isolated_project_tree(project_id: str = "validation-project") -> Iterator[P
             return paths
 
         kb.ensure_project_tree = fake_ensure_project_tree
+        source_scanner.ensure_project_tree = fake_ensure_project_tree
+        extractor_module.ensure_project_tree = fake_ensure_project_tree
         try:
             yield fake_ensure_project_tree(project_id)
         finally:
             kb.ensure_project_tree = original_ensure_project_tree
+            source_scanner.ensure_project_tree = original_scanner_ensure_project_tree
+            extractor_module.ensure_project_tree = original_extractor_ensure_project_tree
 
 
 def _assert_fast_concurrency_bounds() -> None:
@@ -248,18 +256,6 @@ def _assert_full_extraction_modes_stop_before_completion_without_chunks() -> Non
             extractor = Extractor()
             progress: list[int] = []
             events: list[dict] = []
-            plan_modes: list[ExtractionMode] = []
-
-            def fake_prepare_formal_video_extraction_plan(
-                _project_id: str,
-                *,
-                mode: ExtractionMode,
-            ) -> dict:
-                plan_modes.append(mode)
-                return {"extraction_run_id": f"run-{configured_mode.value}", "seasons": []}
-
-            extractor.prepare_formal_video_extraction_plan = fake_prepare_formal_video_extraction_plan
-            extractor._collect_formal_video_chunk_inputs = lambda _project_id, _manifest: []
 
             config = ProjectConfig(project_id=project_id, extraction_mode=configured_mode)
             try:
@@ -275,10 +271,11 @@ def _assert_full_extraction_modes_stop_before_completion_without_chunks() -> Non
             else:
                 raise AssertionError(f"expected {configured_mode.value} mode to stop without chunks")
 
-            assert plan_modes == [expected_plan_mode]
             assert progress
             assert max(progress) < 100
             assert any(event.get("status") == "warning" for event in events)
+            manifest = kb.read_json_object(kb.source_manifest_path(project_id))
+            assert manifest["extraction_mode"] == expected_plan_mode.value
 
 
 def _write_chunk_payload(path: Path, payload: dict) -> None:
