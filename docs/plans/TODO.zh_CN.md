@@ -6,24 +6,24 @@
 
 ## 近期执行路线
 
-当前路线按“先稳住，再解耦，最后扩展素材类型”推进：
+当前路线按“先稳住，再解耦，最后扩展内容形态覆盖”推进：
 
 1. 先执行 P1「提取质量与可观测性」，通过回归验证、prompt 边界和进度事件复核稳住现有正式提取链路。
-2. 再做多素材平级接入前的架构体检与解耦，重点检查当前代码是否仍被视频流程主导，明确视频、音频、文本、图片和漫画作为平级素材的共同入口与边界。框架见 [多素材平级接入前重构解耦计划框架](multi-material-refactor-plan.framework.zh_CN.md)。
-3. 最后进入 P0「Extract Once 覆盖缺口」，正式推进文本、字幕、音频转写、图片、漫画和混合媒体接入。框架见 [多素材种类支持计划框架](multi-material-coverage-plan.framework.zh_CN.md)。
+2. 再做多媒体平级接入前的架构体检与解耦，重点检查当前代码是否仍被视频流程主导，明确 `video`、`image`、`audio`、`text` 四种代码层媒体类型，以及番剧、漫画、广播剧、小说等内容形态如何映射到共同入口与边界。计划见 [多媒体平级接入前重构解耦执行计划](02-multi-material-refactor-plan.zh_CN.md)。
+3. 最后进入 P0「Extract Once 覆盖缺口」，正式推进番剧、漫画、广播剧、小说、设定集、字幕/台本和混合资料包等内容形态接入。计划见 [番剧、漫画、广播剧、小说等内容形态支持执行计划](03-multi-material-coverage-plan.zh_CN.md)。
 
 ## P0：Extract Once 覆盖缺口
 
-计划框架见 [多素材种类支持计划框架](multi-material-coverage-plan.framework.zh_CN.md)。该文件只是框架占位，正式执行前仍需在 P1 稳定性工作和多素材前解耦工作完成后重新起草细化计划。
+执行计划见 [番剧、漫画、广播剧、小说等内容形态支持执行计划](03-multi-material-coverage-plan.zh_CN.md)。路线 03 开始代码实现前，路线 02 必须先完成当前结构图、目标结构图和多媒体接入准备矩阵，并经用户审核通过。
 
 | 顺序 | 待办 | 优先级 | 规模 | 主要验收点 |
 | --- | --- | --- | --- | --- |
-| 1 | 文本、字幕与音频转写进入预览和知识库消费链路 | 高 | 大 | 没有视频 chunk 但存在可读文本、字幕或转写结果时，预览能生成真实 `ChunkExtractionResult`，来源路径和证据可追溯；正式提取已有 transcript 能力不得被破坏。详见 [真实预览结果后续计划](preview-real-result-ingestion-plan.zh_CN.md)。 |
-| 2 | 图片、漫画与混合媒体接入 | 高 | 大 | 图片、漫画页组和混合媒体能映射到稳定 season/episode/chunk，并通过 `utils.ai_model_middleware` 生成与视频/text 一致结构的知识库结果。 |
+| 1 | 小说/设定文本、字幕/台本与音频转写进入预览和知识库消费链路 | 高 | 大 | 没有视频 chunk 但存在可读文本、字幕/台本或转写结果时，预览能生成真实 `ChunkExtractionResult`，来源路径和证据可追溯；正式提取已有 transcript 能力不得被破坏。详见 [真实预览结果后续计划](preview-real-result-ingestion-plan.zh_CN.md)。 |
+| 2 | 漫画/图集、图片资料与视频+字幕混合资料接入 | 高 | 大 | 漫画页组、图片资料和视频+字幕/台本组合能映射到稳定 season/episode/chunk；同目录混放的其它媒体类型会被自动分类到不同处理集合但不建立首版关联，并通过 `utils.ai_model_middleware` 生成与 `video`/`image`/`audio`/`text` 四种媒体类型一致的知识库结果。 |
 
 ## P1：提取质量与可观测性
 
-计划框架见 [提取质量与可观测性计划框架](extraction-quality-observability-plan.framework.zh_CN.md)。该文件只是框架占位，正式执行前仍需重新起草细化计划。
+执行计划见 [提取质量与可观测性执行计划](01-extraction-quality-observability-plan.zh_CN.md)。执行前仍需按计划重新复核当前代码、测试脚本、日志规范和用户试跑结果。
 
 | 顺序 | 待办 | 优先级 | 规模 | 主要验收点 |
 | --- | --- | --- | --- | --- |
