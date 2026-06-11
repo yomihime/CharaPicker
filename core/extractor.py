@@ -140,8 +140,9 @@ class Extractor(QObject):
     ) -> dict[str, Any]:
         run_plan = self.prepare_formal_extraction_run_plan(project_id, mode=mode)
         manifest = self._legacy_manifest_from_run_plan(run_plan)
+        kb.save_extraction_run_plan(project_id, run_plan)
+        kb.initialize_structure_from_run_plan(project_id, run_plan)
         kb.save_source_manifest(project_id, manifest)
-        kb.initialize_structure(project_id, manifest)
         return manifest
 
     def _formal_extraction_mode(self, mode: ExtractionMode) -> FormalExtractionMode:
@@ -3871,8 +3872,9 @@ class Extractor(QObject):
             mode=extraction_mode,
         )
         manifest = self._legacy_manifest_from_run_plan(run_plan)
+        kb.save_extraction_run_plan(config.project_id, run_plan)
+        kb.initialize_structure_from_run_plan(config.project_id, run_plan)
         kb.save_source_manifest(config.project_id, manifest)
-        kb.initialize_structure(config.project_id, manifest)
         chunk_inputs = self._collect_formal_video_chunk_inputs(config.project_id, manifest)
         if not chunk_inputs:
             message = t("extractor.full.noVideoMaterials")

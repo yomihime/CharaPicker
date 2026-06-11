@@ -41,7 +41,7 @@
 - 向 `gui` 通过回调传递预览进度和 token 用量。
 - 被 `utils.state_manager` 引用，用于项目配置的序列化和反序列化。
 - 被 `utils.paths` 引用，用于描述包含 `raw/`、`materials/`、`cache/`、`knowledge_base/` 和 `output/` 的项目路径。
-- 向 `projects/{project_id}/knowledge_base/` 写入 `source_manifest.json`、`seasons/*/episodes/*/chunks/*.json`、`episode_content.json`、`episode_summary.json`、`episode_transcript.json`、`season_content.json`、阶段性角色状态和 `character_cards/{card_id}/card.json`；正式提取产物带 `extraction_run_id`，聚合时只消费当前 run 的合格产物。
+- 向 `projects/{project_id}/knowledge_base/` 写入 `extraction_runs/{run_id}/plan.json`、兼容用 `source_manifest.json`、`seasons/*/episodes/*/chunks/*.json`、`episode_content.json`、`episode_summary.json`、`episode_transcript.json`、`season_content.json`、阶段性角色状态和 `character_cards/{card_id}/card.json`；正式提取产物带 `extraction_run_id`，聚合时只消费当前 run 的合格产物。
 - 正式角色卡的 CharaPicker 扩展字段使用 `extensions["charapicker"]` 保存编译证据和质量评估，包括 `compile_evidence_layers`、`alias_resolution`、`needs_review_reasons`、`conflict_groups` 和 `parse_diagnostics`；这些字段属于 core 生成的结构化诊断，不应由 GUI 拼装。
 - 向 `projects/{project_id}/output/character_cards/` 写入 Markdown、HTML、CharaPicker JSON、Character Card V2 JSON 和 AstrBot 手动复制清单。
 

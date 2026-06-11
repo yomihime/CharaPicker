@@ -276,6 +276,10 @@ def _assert_full_extraction_modes_stop_before_completion_without_chunks() -> Non
             assert any(event.get("status") == "warning" for event in events)
             manifest = kb.read_json_object(kb.source_manifest_path(project_id))
             assert manifest["extraction_mode"] == expected_plan_mode.value
+            run_plan_path = kb.extraction_run_plan_path(project_id, manifest["extraction_run_id"])
+            assert run_plan_path.exists()
+            run_plan = kb.load_extraction_run_plan(project_id, manifest["extraction_run_id"])
+            assert run_plan.mode.value == expected_plan_mode.value
 
 
 def _write_chunk_payload(path: Path, payload: dict) -> None:
@@ -325,6 +329,8 @@ def _assert_clean_regenerable_artifacts_scope() -> None:
     with _isolated_project_tree(project_id) as paths:
         regenerable_paths = [
             kb.source_manifest_path(project_id),
+            kb.extraction_run_plan_path(project_id, "run-current"),
+            kb.extraction_run_path(project_id, "run-current") / "derived_artifacts.json",
             kb.season_path(project_id, "season_001") / "season_content.json",
             kb.season_path(project_id, "season_001") / "season_summary.json",
             kb.season_path(project_id, "season_001") / "character_stage_states.json",
@@ -344,6 +350,7 @@ def _assert_clean_regenerable_artifacts_scope() -> None:
             kb.character_card_json_path(project_id, "official_card"),
             kb.preview_character_card_json_path(project_id),
             kb.root_path(project_id) / "facts.json",
+            kb.extraction_run_path(project_id, "run-current") / "notes.txt",
             kb.root_path(project_id) / "seasons" / "season_001" / "episodes" / "episode_001" / "notes.txt",
         ]
         for path in protected_paths:
