@@ -22,6 +22,7 @@
 - `knowledge_base.py`：集中管理 `projects/{project_id}/knowledge_base/` 下常用产物的路径、JSON 读写和结构校验。
 - `source_scanner.py`：提供素材目录扫描、正式素材到 run plan unit 的扫描、预览视频 chunk 收集和预览 chunk 标识生成。
 - `extractor.py`：定义 `Extractor`，作为 UI-facing 提取入口，负责知识库分层初始化、预览提取、完整/洁净/快速正式提取、chunk/episode/season 内容合并、episode transcript 入口，并委托知识库读写与素材扫描 helper。
+- `transcript_provider.py`：把 transcript 表达为 run plan 中的 text 型 `DerivedArtifact`，收集每集可转写素材并调用既有音频转写实现；不把 transcript 作为新的 `MediaType`。
 - `compiler.py`：定义 `build_character_compile_request()`、`compile_character_state()`、`compile_character_state_by_season_episode()`、`write_character_stage_states()` 和 `final_polish_character_state()`，负责从知识库聚合角色阶段状态。
 - `character_card_store.py`：管理 `knowledge_base/character_cards/` 与 `preview_character_cards/` 下角色卡的创建、读取、保存、列表、删除和封面路径登记。
 - `character_card_compiler.py`：从正式或预览知识库生成 CharaPicker 角色卡 JSON；正式编译会构建 direct、mention、causal 和 season_context 分层证据包，处理 AI 别名校验、AI 复核、冲突分组、`needs_review_reasons` 和 JSON parse diagnostics；不读取原始素材，也不读取 `ProjectConfig.target_characters`。
