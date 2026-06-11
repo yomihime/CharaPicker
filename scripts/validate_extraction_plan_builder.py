@@ -93,6 +93,16 @@ def _assert_video_materials_build_run_plan() -> None:
         assert {unit.media_type for unit in plan.all_units} == {MediaType.VIDEO}
         assert all(unit.material_ref.relative_path for unit in plan.all_units)
 
+        chunk_inputs = Extractor()._collect_formal_video_chunk_inputs_from_run_plan(project_id, plan)
+        assert len(chunk_inputs) == plan.unit_count
+        assert all(chunk_input["unit_ref"] for chunk_input in chunk_inputs)
+        assert all(
+            chunk_input["material_ref"]["source_media_type"] == "video"
+            for chunk_input in chunk_inputs
+        )
+        assert all(chunk_input["source_trace"]["unit_refs"] for chunk_input in chunk_inputs)
+        assert all(chunk_input["source_trace"]["material_refs"] for chunk_input in chunk_inputs)
+
         payload = plan.model_dump(mode="json")
         assert payload["mode"] == "fast"
         assert payload["media_types"] == ["video"]

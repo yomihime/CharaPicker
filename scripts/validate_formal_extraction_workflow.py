@@ -28,6 +28,7 @@ from core.models import (  # noqa: E402
     CharacterCard,
     CharacterCardKind,
     CharacterCardStatus,
+    ChunkExtractionResult,
     ExtractionArtifactStage,
     ExtractionMode,
     ProjectConfig,
@@ -324,6 +325,25 @@ def _assert_run_artifact_filtering() -> None:
         assert kb.is_matching_run_artifact_payload(old_payload, "") is True
 
 
+def _assert_chunk_result_source_trace_serialization() -> None:
+    chunk = ChunkExtractionResult(
+        season_id="season_001",
+        episode_id="episode_001",
+        chunk_id="chunk_0001",
+        extraction_stage=ExtractionArtifactStage.FULL,
+        extraction_run_id="run-current",
+        source_kind="video",
+        source_trace={
+            "material_refs": [{"material_id": "material_video_001", "source_media_type": "video"}],
+            "unit_refs": ["unit_video_001"],
+            "derived_artifact_refs": [],
+        },
+    )
+    payload = chunk.model_dump(mode="json")
+    assert payload["source_trace"]["material_refs"][0]["source_media_type"] == "video"
+    assert payload["source_trace"]["unit_refs"] == ["unit_video_001"]
+
+
 def _assert_clean_regenerable_artifacts_scope() -> None:
     project_id = "validation-clean-scope"
     with _isolated_project_tree(project_id) as paths:
@@ -423,6 +443,7 @@ def main() -> None:
     _assert_fast_episode_and_season_skip_without_inputs()
     _assert_full_extraction_modes_stop_before_completion_without_chunks()
     _assert_run_artifact_filtering()
+    _assert_chunk_result_source_trace_serialization()
     _assert_clean_regenerable_artifacts_scope()
     _assert_stale_marking_only_updates_compiled_official_cards()
     print("formal extraction workflow validation passed")

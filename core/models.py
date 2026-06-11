@@ -471,6 +471,7 @@ class ChunkExtractionResult(ExtractionStructuredArtifact):
     episode_id: str
     chunk_id: str
     source_path: str = ""
+    source_trace: dict[str, Any] = Field(default_factory=dict)
     targets: list[str] = Field(default_factory=list)
     facts: list[str] = Field(default_factory=list)
     behavior_traits: list[str] = Field(default_factory=list)

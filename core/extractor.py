@@ -45,6 +45,7 @@ from core.extraction_plan import (
     FormalExtractionMode,
     FormalExtractionRunPlan,
     MediaType,
+    SourceTrace,
 )
 from core.models import (
     ChunkExtractionResult,
@@ -972,6 +973,55 @@ class Extractor(QObject):
                         }
                     )
         return chunk_inputs
+
+    def _collect_formal_video_chunk_inputs_from_run_plan(
+        self,
+        project_id: str,
+        run_plan: FormalExtractionRunPlan,
+    ) -> list[dict[str, Any]]:
+        chunk_inputs: list[dict[str, Any]] = []
+        for episode in run_plan.episodes:
+            season_id = episode.season_id.strip()
+            episode_id = episode.episode_id.strip()
+            if not season_id or not episode_id:
+                continue
+            for unit in episode.units:
+                if unit.media_type != MediaType.VIDEO:
+                    continue
+                source_path = unit.material_ref.relative_path.strip()
+                if not source_path:
+                    continue
+                chunk_inputs.append(
+                    {
+                        "season_id": season_id,
+                        "episode_id": episode_id,
+                        "chunk_id": self._manifest_string(unit.metadata.get("legacy_chunk_id"))
+                        or unit.unit_id,
+                        "source_path": source_path,
+                        "extraction_run_id": run_plan.run_id,
+                        "video_path": self._formal_material_video_path(project_id, source_path),
+                        "unit_ref": unit.unit_id,
+                        "material_ref": unit.material_ref.model_dump(mode="json"),
+                        "source_trace": self._source_trace_for_unit(unit).model_dump(mode="json"),
+                    }
+                )
+        return chunk_inputs
+
+    def _source_trace_for_unit(self, unit: ExtractionUnit) -> SourceTrace:
+        return SourceTrace(
+            material_refs=[unit.material_ref],
+            unit_refs=[unit.unit_id],
+            derived_artifact_refs=list(unit.derived_refs),
+            source_breakdown={
+                "materials": 1,
+                "units": 1,
+                unit.media_type.value: 1,
+            },
+        )
+
+    def _source_trace_from_chunk_input(self, chunk_input: dict[str, Any]) -> dict[str, Any]:
+        source_trace = chunk_input.get("source_trace")
+        return source_trace if isinstance(source_trace, dict) else {}
 
     def _group_formal_video_chunk_inputs_by_episode(
         self,
@@ -2272,6 +2322,7 @@ class Extractor(QObject):
                     run_type=FULL_EXTRACTION_RUN_TYPE,
                     source_path=source_path,
                     source_kind="video",
+                    source_trace=self._source_trace_from_chunk_input(chunk_input),
                     source_counts={
                         "current_episode_extracted_chunks": 0,
                         "selected_episode_contexts": 0,
@@ -3063,6 +3114,7 @@ class Extractor(QObject):
                         run_type=FULL_EXTRACTION_RUN_TYPE,
                         source_path=source_path,
                         source_kind="video",
+                        source_trace=self._source_trace_from_chunk_input(chunk_input),
                         source_counts={
                             "current_episode_extracted_chunks": len(current_episode_chunks),
                             "selected_episode_contexts": len(
@@ -3875,7 +3927,10 @@ class Extractor(QObject):
         kb.save_extraction_run_plan(config.project_id, run_plan)
         kb.initialize_structure_from_run_plan(config.project_id, run_plan)
         kb.save_source_manifest(config.project_id, manifest)
-        chunk_inputs = self._collect_formal_video_chunk_inputs(config.project_id, manifest)
+        chunk_inputs = self._collect_formal_video_chunk_inputs_from_run_plan(
+            config.project_id,
+            run_plan,
+        )
         if not chunk_inputs:
             message = t("extractor.full.noVideoMaterials")
             emit_event(
@@ -3886,7 +3941,7 @@ class Extractor(QObject):
                 ).model_dump(mode="json")
             )
             LOGGER.warning(
-                "Full extraction stopped because no formal video chunks were found; project_id=%s",
+                "Full extraction stopped because no formal extraction units were found; project_id=%s",
                 config.project_id,
             )
             raise ValueError(message)
