@@ -19,7 +19,7 @@
 | 顺序 | 待办 | 优先级 | 规模 | 主要验收点 |
 | --- | --- | --- | --- | --- |
 | 1 | 小说/设定文本、字幕/台本与音频转写进入预览和知识库消费链路 | 高 | 大 | 没有视频 chunk 但存在可读文本、字幕/台本或转写结果时，预览能生成真实 `ChunkExtractionResult`，来源路径和证据可追溯；正式提取已有 transcript 能力不得被破坏。详见 [真实预览结果后续计划](preview-real-result-ingestion-plan.zh_CN.md)。 |
-| 2 | 漫画/图集、图片资料与混合资料包接入 | 高 | 大 | 漫画页组、图片资料和混合资料包能映射到稳定 season/episode/chunk，并通过 `utils.ai_model_middleware` 生成与 `video`/`image`/`audio`/`text` 四种媒体类型一致的知识库结果。 |
+| 2 | 漫画/图集、图片资料与视频+字幕混合资料接入 | 高 | 大 | 漫画页组、图片资料和视频+字幕/台本组合能映射到稳定 season/episode/chunk；同目录混放的其它媒体类型会被自动分类到不同处理集合但不建立首版关联，并通过 `utils.ai_model_middleware` 生成与 `video`/`image`/`audio`/`text` 四种媒体类型一致的知识库结果。 |
 
 ## P1：提取质量与可观测性
 

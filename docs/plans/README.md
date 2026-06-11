@@ -14,7 +14,7 @@
 | `01-extraction-quality-observability-plan.zh_CN.md` | 执行计划 | 第一阶段执行入口 | 第一阶段：TODO P1 提取质量与可观测性的正式执行计划。 |
 | `02-multi-material-refactor-plan.zh_CN.md` | 正式计划 | 待执行前复核当前代码 | 第二阶段：多媒体平级接入前架构体检、耦合拆分、边界固化与路线 03 交接。 |
 | `03-multi-material-coverage-plan.zh_CN.md` | 正式计划 | 待路线 02 交接后执行 | 第三阶段：TODO P0 番剧、漫画、广播剧、小说等内容形态支持的执行计划。 |
-| `preview-real-result-ingestion-plan.zh_CN.md` | 待执行专项 | 可用，但实施前需复核代码 | 小说/设定文本、字幕/台本、广播剧/音频、图片/漫画和混合资料包进入预览与统一知识库消费路径的后续专项计划。 |
+| `preview-real-result-ingestion-plan.zh_CN.md` | 待执行专项 | 可用，但实施前需复核代码 | 小说/设定文本、字幕/台本、广播剧/音频、图片/漫画和视频+字幕混合资料进入预览与统一知识库消费路径的后续专项计划。 |
 | `extraction-development-roadmap.zh_CN.md` | 长期路线基准 | 可用作验收框架，不是当前任务清单 | Extract Once、知识库和角色成长编译的长期目标与验收基准。 |
 
 ## 维护规则

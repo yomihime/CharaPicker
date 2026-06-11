@@ -28,7 +28,7 @@
 4. [多媒体平级接入前重构解耦执行计划](plans/02-multi-material-refactor-plan.zh_CN.md)：第二阶段架构体检与解耦计划，约束进入多内容形态覆盖前的重构边界。
 5. [番剧、漫画、广播剧、小说等内容形态支持执行计划](plans/03-multi-material-coverage-plan.zh_CN.md)：TODO P0 的第三阶段执行计划，要求路线 02 先准备好多媒体接入矩阵。
 6. [提取与角色成长编译路线](plans/extraction-development-roadmap.zh_CN.md)：Extract Once、知识库和角色状态编译的长期目标与验收基准。
-7. [真实预览结果后续计划](plans/preview-real-result-ingestion-plan.zh_CN.md)：小说/设定文本、字幕/台本、广播剧/音频、图片/漫画和混合资料包进入预览与统一知识库消费路径的后续专项计划。
+7. [真实预览结果后续计划](plans/preview-real-result-ingestion-plan.zh_CN.md)：小说/设定文本、字幕/台本、广播剧/音频、图片/漫画和视频+字幕混合资料进入预览与统一知识库消费路径的后续专项计划。
 
 ## 发布与维护
 

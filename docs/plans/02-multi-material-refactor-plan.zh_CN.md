@@ -337,7 +337,7 @@
 | 广播剧/音频节目 | `audio`，可派生 `text` transcript | audio unit、时间段 evidence、audio backend 能力判断、转写派生关系 | 原生音频正式提取请求和音频知识库提取 |
 | 小说/设定集/台本 | `text` | text unit、章节/段落 evidence、text backend 分派、文本预算占位 | 文本正式提取 prompt 和完整 GUI 能力 |
 | 字幕/歌词/台词稿 | `text`，可关联 `video`/`audio` | 时间轴 evidence、text unit、与 episode 对齐的 metadata | 字幕解析细节和说话人推断 |
-| 混合资料包 | `video`/`image`/`audio`/`text` 组合 | 单 episode 多 media types、多个 evidence refs、冲突/重复事实合并占位 | 混合媒体正式聚合策略 |
+| 混合资料包 | `video`/`image`/`audio`/`text` 组合 | 单 episode 多 media types、多个 evidence refs、分类目录和关联 metadata 占位 | 更复杂的混合正式聚合策略；路线 03 首版只要求视频 + 字幕/台本关联，其它同目录混放内容分开管理 |
 
 矩阵中每一行都要说明：
 
@@ -839,7 +839,7 @@ conda run -n CharaPicker python -m ruff check .
 - `ChunkExtractionResult` 是否足够表达图片、文本、漫画等内容形态的未来最小单元。02 只能给出兼容方向，不宜一次性扩展到所有领域字段。
 - 字幕/歌词/台词稿统一归入 `text` 媒体类型，但需要保留时间轴、字幕行号和可关联 `video`/`audio` 的 evidence。03 再决定首批支持 `.srt`、`.ass`、`.vtt` 的范围。
 - 漫画/图集统一归入 `image` 媒体类型，但需要通过 `ContentForm`、页码、页组和目录排序表达漫画语义。真实 OCR/视觉策略留给 03。
-- 混合资料包不是独立媒体类型。02 只要求 manifest 和运行计划能表达一个 episode 中多个 media types、content forms 和 evidence refs。
+- 混合资料包不是独立媒体类型。02 只要求 manifest 和运行计划能表达一个 episode 中多个 media types、content forms 和 evidence refs；路线 03 首版只关联视频 + 字幕/台本，其它同目录混放内容应能分类到不同处理集合但不自动关联。
 - 预览正式边界。正式提取是否忽略预览产物仍未完全定案，02 不应悄悄改变。
 
 ## 15. 代码审查自检表
@@ -870,7 +870,7 @@ conda run -n CharaPicker python -m ruff check .
 - 媒体类型、内容形态、提取单元、派生素材、证据引用的内部契约稳定。
 - 预算接口不再强迫非视频内容形态使用视频每分钟语义。
 - transcript 已有明确派生素材边界。
-- 多媒体接入准备矩阵已经覆盖番剧、漫画、广播剧、小说、设定集、字幕/台本和混合资料包等内容形态，并明确它们到 `video`、`image`、`audio`、`text` 四种媒体类型的映射、预览入口、正式入口、模型能力、预算口径、知识库落点和失败反馈。
+- 多媒体接入准备矩阵已经覆盖番剧、漫画、广播剧、小说、设定集、字幕/台本和混合资料包等内容形态，并明确它们到 `video`、`image`、`audio`、`text` 四种媒体类型的映射、预览入口、正式入口、模型能力、预算口径、知识库落点和失败反馈；混合资料包首版范围限定为视频 + 字幕/台本。
 - GUI/worker/core/utils 的责任没有因重构变得更混乱。
 - 文档中列出路线 03 可以直接接入的入口和仍需实现的媒体处理器/内容形态适配器。
 
