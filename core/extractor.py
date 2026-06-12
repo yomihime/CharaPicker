@@ -284,6 +284,7 @@ class Extractor(QObject):
         evidence_refs: list[str] = []
         aggregation_warnings: list[str] = []
         skipped_chunks = 0
+        full_chunks: list[ChunkExtractionResult] = []
 
         for chunk_path in chunk_paths:
             if kb.is_preview_artifact_path(chunk_path):
@@ -327,6 +328,7 @@ class Extractor(QObject):
                     exc_info=True,
                 )
                 continue
+            full_chunks.append(chunk)
             chunk_results.append(chunk.model_dump(mode="json"))
             targets.extend(chunk.targets)
             facts.extend(chunk.facts)
@@ -364,10 +366,18 @@ class Extractor(QObject):
             "run_type": FULL_EXTRACTION_RUN_TYPE,
             "source_kind": "video",
             "schema_version": 1,
+            "source_trace": self._source_trace_from_chunks(full_chunks),
             "source_counts": {
                 "total_chunk_files": len(chunk_paths),
                 "full_chunks": len(chunk_results),
                 "skipped_chunks": skipped_chunks,
+                "source_trace_units": len(self._unique_trace_refs(full_chunks, "unit_refs")),
+                "source_trace_materials": len(
+                    self._unique_trace_material_refs(full_chunks)
+                ),
+                "source_trace_derived_artifacts": len(
+                    self._unique_trace_refs(full_chunks, "derived_artifact_refs")
+                ),
             },
             "aggregation_warnings": aggregation_warnings,
             "targets": self._deduplicate_preserve_order(targets),
@@ -381,6 +391,59 @@ class Extractor(QObject):
             "evidence_refs": self._deduplicate_preserve_order(evidence_refs),
         }
         return kb.save_episode_content(project_id, season_id, episode_id, episode_content)
+
+    def _source_trace_from_chunks(self, chunks: list[ChunkExtractionResult]) -> dict[str, Any]:
+        material_refs = self._unique_trace_material_refs(chunks)
+        unit_refs = self._unique_trace_refs(chunks, "unit_refs")
+        derived_artifact_refs = self._unique_trace_refs(chunks, "derived_artifact_refs")
+        return {
+            "material_refs": material_refs,
+            "unit_refs": unit_refs,
+            "derived_artifact_refs": derived_artifact_refs,
+            "source_breakdown": {
+                "chunks": len(chunks),
+                "materials": len(material_refs),
+                "units": len(unit_refs),
+                "derived_artifacts": len(derived_artifact_refs),
+            },
+        }
+
+    def _unique_trace_material_refs(self, chunks: list[ChunkExtractionResult]) -> list[dict[str, Any]]:
+        refs: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for chunk in chunks:
+            trace = chunk.source_trace if isinstance(chunk.source_trace, dict) else {}
+            for item in trace.get("material_refs", []):
+                if not isinstance(item, dict):
+                    continue
+                key = self._manifest_string(item.get("material_id")) or self._manifest_string(
+                    item.get("relative_path")
+                )
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                refs.append(item)
+        return refs
+
+    def _unique_trace_refs(
+        self,
+        chunks: list[ChunkExtractionResult],
+        field_name: str,
+    ) -> list[str]:
+        refs: list[str] = []
+        seen: set[str] = set()
+        for chunk in chunks:
+            trace = chunk.source_trace if isinstance(chunk.source_trace, dict) else {}
+            values = trace.get(field_name, [])
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                ref = self._manifest_string(value)
+                if not ref or ref in seen:
+                    continue
+                seen.add(ref)
+                refs.append(ref)
+        return refs
 
     def merge_preview_episode_content(self, project_id: str, season_id: str, episode_id: str) -> Path:
         episode_chunks_root = kb.chunks_root_path(project_id, season_id, episode_id).resolve()

@@ -336,12 +336,86 @@ def _assert_chunk_result_source_trace_serialization() -> None:
         source_trace={
             "material_refs": [{"material_id": "material_video_001", "source_media_type": "video"}],
             "unit_refs": ["unit_video_001"],
-            "derived_artifact_refs": [],
+            "derived_artifact_refs": ["transcript_season_001_episode_001"],
         },
     )
     payload = chunk.model_dump(mode="json")
     assert payload["source_trace"]["material_refs"][0]["source_media_type"] == "video"
     assert payload["source_trace"]["unit_refs"] == ["unit_video_001"]
+    assert payload["source_trace"]["derived_artifact_refs"] == ["transcript_season_001_episode_001"]
+
+
+def _assert_episode_merge_source_trace() -> None:
+    project_id = "validation-episode-source-trace"
+    with _isolated_project_tree(project_id):
+        chunks = [
+            ChunkExtractionResult(
+                season_id="season_001",
+                episode_id="episode_001",
+                chunk_id="chunk_0001",
+                extraction_stage=ExtractionArtifactStage.FULL,
+                extraction_run_id="run-current",
+                run_type="formal_extraction",
+                source_kind="video",
+                source_path="Episode 01/segment_0001.mp4",
+                source_trace={
+                    "material_refs": [
+                        {
+                            "material_id": "material_video_001",
+                            "relative_path": "Episode 01/segment_0001.mp4",
+                            "source_media_type": "video",
+                        }
+                    ],
+                    "unit_refs": ["unit_video_001"],
+                    "derived_artifact_refs": ["transcript_season_001_episode_001"],
+                },
+                facts=["fact one"],
+            ),
+            ChunkExtractionResult(
+                season_id="season_001",
+                episode_id="episode_001",
+                chunk_id="chunk_0002",
+                extraction_stage=ExtractionArtifactStage.FULL,
+                extraction_run_id="run-current",
+                run_type="formal_extraction",
+                source_kind="video",
+                source_path="Episode 01/segment_0002.mp4",
+                source_trace={
+                    "material_refs": [
+                        {
+                            "material_id": "material_video_002",
+                            "relative_path": "Episode 01/segment_0002.mp4",
+                            "source_media_type": "video",
+                        }
+                    ],
+                    "unit_refs": ["unit_video_002"],
+                    "derived_artifact_refs": ["transcript_season_001_episode_001"],
+                },
+                facts=["fact two"],
+            ),
+        ]
+        for chunk in chunks:
+            kb.save_chunk_result(project_id, chunk)
+
+        Extractor().merge_episode_content(
+            project_id,
+            "season_001",
+            "episode_001",
+            extraction_run_id="run-current",
+        )
+        payload = kb.load_episode_content(project_id, "season_001", "episode_001")
+        source_trace = payload["source_trace"]
+        assert source_trace["unit_refs"] == ["unit_video_001", "unit_video_002"]
+        assert source_trace["derived_artifact_refs"] == ["transcript_season_001_episode_001"]
+        assert len(source_trace["material_refs"]) == 2
+        assert source_trace["source_breakdown"] == {
+            "chunks": 2,
+            "materials": 2,
+            "units": 2,
+            "derived_artifacts": 1,
+        }
+        assert payload["source_counts"]["source_trace_units"] == 2
+        assert payload["source_counts"]["source_trace_derived_artifacts"] == 1
 
 
 def _assert_clean_regenerable_artifacts_scope() -> None:
@@ -444,6 +518,7 @@ def main() -> None:
     _assert_full_extraction_modes_stop_before_completion_without_chunks()
     _assert_run_artifact_filtering()
     _assert_chunk_result_source_trace_serialization()
+    _assert_episode_merge_source_trace()
     _assert_clean_regenerable_artifacts_scope()
     _assert_stale_marking_only_updates_compiled_official_cards()
     print("formal extraction workflow validation passed")
