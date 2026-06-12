@@ -38,6 +38,16 @@ from core.extraction_context import (
     estimate_context_tokens,
     select_episode_context_candidates,
 )
+from core.extraction_plan import (
+    ContentForm,
+    DerivedArtifactStatus,
+    EpisodePlan,
+    ExtractionUnit,
+    FormalExtractionMode,
+    FormalExtractionRunPlan,
+    MediaType,
+    SourceTrace,
+)
 from core.models import (
     ChunkExtractionResult,
     EpisodeTranscript,
@@ -47,6 +57,8 @@ from core.models import (
     InsightStatus,
     ProjectConfig,
 )
+from core.transcript_provider import TranscriptArtifactRequest, TranscriptProvider
+from core.video_unit_handler import VideoUnitHandler, VideoUnitHandlerConfig
 from utils.ai_model_middleware import (
     ModelBackend,
     ModelCallRequest,
@@ -99,24 +111,111 @@ class Extractor(QObject):
     def scan_source_directory(self, source_root: str) -> dict[str, Any]:
         return source_scanner.scan_source_directory(source_root)
 
-    def scan_formal_video_materials(self, project_id: str) -> dict[str, Any]:
-        return source_scanner.scan_formal_video_materials(project_id)
+    def scan_formal_materials(self, project_id: str) -> list[EpisodePlan]:
+        return source_scanner.scan_formal_materials(project_id)
 
-    def generate_source_manifest(self, project_id: str, source_root: str) -> Path:
-        manifest = self.scan_source_directory(source_root)
-        manifest = self._with_extraction_run_metadata(manifest, mode=ExtractionMode.FULL)
-        return kb.save_source_manifest(project_id, manifest)
-
-    def prepare_formal_video_extraction_plan(
+    def prepare_formal_extraction_run_plan(
         self,
         project_id: str,
         mode: ExtractionMode = ExtractionMode.FULL,
-    ) -> dict[str, Any]:
-        manifest = self.scan_formal_video_materials(project_id)
-        manifest = self._with_extraction_run_metadata(manifest, mode=mode)
-        kb.save_source_manifest(project_id, manifest)
-        kb.initialize_structure(project_id, manifest)
-        return manifest
+    ) -> FormalExtractionRunPlan:
+        episodes = self.scan_formal_materials(project_id)
+        return FormalExtractionRunPlan(
+            project_id=project_id,
+            mode=self._formal_extraction_mode(mode),
+            media_types=self._media_types_from_episode_plans(episodes),
+            content_forms=self._content_forms_from_episode_plans(episodes),
+            episodes=episodes,
+            metadata={"run_type": FULL_EXTRACTION_RUN_TYPE},
+        )
+
+    def _formal_extraction_mode(self, mode: ExtractionMode) -> FormalExtractionMode:
+        if mode == ExtractionMode.CLEAN:
+            return FormalExtractionMode.CLEAN
+        if mode == ExtractionMode.FAST:
+            return FormalExtractionMode.FAST
+        return FormalExtractionMode.FULL
+
+    def _legacy_manifest_from_run_plan(self, run_plan: FormalExtractionRunPlan) -> dict[str, Any]:
+        seasons: list[dict[str, Any]] = []
+        season_index: dict[str, int] = {}
+        for episode in run_plan.episodes:
+            season_id = episode.season_id
+            if season_id not in season_index:
+                season_index[season_id] = len(seasons)
+                seasons.append(
+                    {
+                        "season_id": season_id,
+                        "source_path": self._manifest_string(
+                            episode.metadata.get("season_source_path")
+                        ),
+                        "display_title": self._manifest_string(
+                            episode.metadata.get("season_display_title")
+                        ),
+                        "sort_key": self._manifest_string(episode.metadata.get("season_sort_key")),
+                        "episodes": [],
+                    }
+                )
+            seasons[season_index[season_id]]["episodes"].append(
+                self._legacy_episode_from_plan(episode)
+            )
+
+        return {
+            "schema_version": source_scanner.FORMAL_VIDEO_SCHEMA_VERSION,
+            "source_kind": source_scanner.FORMAL_VIDEO_SOURCE_KIND,
+            "scan_type": source_scanner.FORMAL_VIDEO_SCAN_TYPE,
+            "source_root": str(ensure_project_tree(run_plan.project_id).materials.resolve()),
+            "extraction_run_id": run_plan.run_id,
+            "extraction_mode": run_plan.mode.value,
+            "run_type": FULL_EXTRACTION_RUN_TYPE,
+            "seasons": seasons,
+        }
+
+    def _legacy_episode_from_plan(self, episode: EpisodePlan) -> dict[str, Any]:
+        return {
+            "episode_id": episode.episode_id,
+            "source_kind": self._manifest_string(episode.metadata.get("legacy_source_kind"))
+            or source_scanner.FORMAL_VIDEO_SOURCE_KIND,
+            "source_path": self._manifest_string(episode.metadata.get("legacy_source_path")),
+            "display_title": episode.display_title,
+            "sort_key": episode.sort_key,
+            "chunks": [
+                self._legacy_chunk_from_unit(unit)
+                for unit in episode.units
+                if unit.media_type == MediaType.VIDEO
+            ],
+        }
+
+    def _legacy_chunk_from_unit(self, unit: ExtractionUnit) -> dict[str, Any]:
+        material_ref = unit.material_ref
+        return {
+            "chunk_id": self._manifest_string(unit.metadata.get("legacy_chunk_id")) or unit.unit_id,
+            "source_kind": material_ref.source_media_type.value,
+            "source_path": material_ref.relative_path,
+            "display_title": self._manifest_string(material_ref.metadata.get("display_title")),
+            "sort_key": self._manifest_string(material_ref.metadata.get("sort_key"))
+            or material_ref.relative_path.lower(),
+        }
+
+    def _media_types_from_episode_plans(self, episodes: list[EpisodePlan]) -> list[MediaType]:
+        seen: set[MediaType] = set()
+        output: list[MediaType] = []
+        for episode in episodes:
+            for unit in episode.units:
+                if unit.media_type not in seen:
+                    seen.add(unit.media_type)
+                    output.append(unit.media_type)
+        return output
+
+    def _content_forms_from_episode_plans(self, episodes: list[EpisodePlan]) -> list[ContentForm]:
+        seen: set[ContentForm] = set()
+        output: list[ContentForm] = []
+        for episode in episodes:
+            for content_form in episode.content_forms:
+                if content_form not in seen:
+                    seen.add(content_form)
+                    output.append(content_form)
+        return output
 
     def _with_extraction_run_metadata(
         self,
@@ -131,9 +230,6 @@ class Extractor(QObject):
         output["extraction_mode"] = mode.value
         output["run_type"] = FULL_EXTRACTION_RUN_TYPE
         return output
-
-    def initialize_knowledge_base_structure(self, project_id: str, manifest: dict | None = None) -> Path:
-        return kb.initialize_structure(project_id, manifest)
 
     def save_chunk_extraction_result(self, project_id: str, result: ChunkExtractionResult) -> Path:
         return kb.save_chunk_result(project_id, result)
@@ -166,6 +262,7 @@ class Extractor(QObject):
         evidence_refs: list[str] = []
         aggregation_warnings: list[str] = []
         skipped_chunks = 0
+        full_chunks: list[ChunkExtractionResult] = []
 
         for chunk_path in chunk_paths:
             if kb.is_preview_artifact_path(chunk_path):
@@ -209,6 +306,7 @@ class Extractor(QObject):
                     exc_info=True,
                 )
                 continue
+            full_chunks.append(chunk)
             chunk_results.append(chunk.model_dump(mode="json"))
             targets.extend(chunk.targets)
             facts.extend(chunk.facts)
@@ -238,6 +336,8 @@ class Extractor(QObject):
                 episode_id,
             )
 
+        source_trace = self._source_trace_from_chunks(full_chunks)
+        media_types = self._media_types_from_source_trace(source_trace)
         episode_content = {
             "season_id": season_id,
             "episode_id": episode_id,
@@ -245,11 +345,18 @@ class Extractor(QObject):
             "extraction_run_id": extraction_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
             "source_kind": "video",
+            "media_types": media_types,
             "schema_version": 1,
+            "source_trace": source_trace,
             "source_counts": {
                 "total_chunk_files": len(chunk_paths),
                 "full_chunks": len(chunk_results),
                 "skipped_chunks": skipped_chunks,
+                "source_trace_units": len(source_trace.get("unit_refs", [])),
+                "source_trace_materials": len(source_trace.get("material_refs", [])),
+                "source_trace_derived_artifacts": len(
+                    source_trace.get("derived_artifact_refs", [])
+                ),
             },
             "aggregation_warnings": aggregation_warnings,
             "targets": self._deduplicate_preserve_order(targets),
@@ -263,6 +370,361 @@ class Extractor(QObject):
             "evidence_refs": self._deduplicate_preserve_order(evidence_refs),
         }
         return kb.save_episode_content(project_id, season_id, episode_id, episode_content)
+
+    def _source_trace_from_chunks(self, chunks: list[ChunkExtractionResult]) -> dict[str, Any]:
+        payloads = [chunk.model_dump(mode="json") for chunk in chunks]
+        return self._source_trace_from_payloads(
+            payloads,
+            source_breakdown={"chunks": len(chunks)},
+        )
+
+    def _source_trace_for_episode_summary(self, episode_content: dict[str, Any]) -> dict[str, Any]:
+        return self._source_trace_from_payloads(
+            [episode_content],
+            extra_refs={
+                "episode_content_refs": [
+                    self._episode_artifact_ref(
+                        episode_content,
+                        artifact_type="episode_content",
+                        file_name="episode_content.json",
+                    )
+                ],
+            },
+            source_breakdown={"episode_contents": 1},
+        )
+
+    def _source_trace_for_season_content(
+        self,
+        episode_contents: list[dict[str, Any]],
+        *,
+        episode_summaries: list[dict[str, Any]] | None = None,
+        previous_season_backgrounds: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        episode_summaries = episode_summaries or []
+        previous_season_backgrounds = previous_season_backgrounds or []
+        return self._source_trace_from_payloads(
+            [*episode_contents, *episode_summaries, *previous_season_backgrounds],
+            extra_refs={
+                "episode_content_refs": [
+                    self._episode_artifact_ref(
+                        payload,
+                        artifact_type="episode_content",
+                        file_name="episode_content.json",
+                    )
+                    for payload in episode_contents
+                ],
+                "episode_summary_refs": [
+                    self._episode_artifact_ref(
+                        payload,
+                        artifact_type="episode_summary",
+                        file_name="episode_summary.json",
+                    )
+                    for payload in episode_summaries
+                ],
+                "previous_season_summary_refs": [
+                    self._season_artifact_ref(
+                        payload,
+                        artifact_type="season_summary",
+                        file_name="season_summary.json",
+                    )
+                    for payload in previous_season_backgrounds
+                ],
+            },
+            source_breakdown={
+                "episode_contents": len(episode_contents),
+                "episode_summaries": len(episode_summaries),
+                "previous_season_summaries": len(previous_season_backgrounds),
+            },
+        )
+
+    def _source_trace_for_season_summary(
+        self,
+        season_content: dict[str, Any],
+        *,
+        episode_summaries: list[dict[str, Any]] | None = None,
+        previous_season_backgrounds: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        episode_summaries = episode_summaries or []
+        previous_season_backgrounds = previous_season_backgrounds or []
+        return self._source_trace_from_payloads(
+            [season_content, *episode_summaries, *previous_season_backgrounds],
+            extra_refs={
+                "season_content_refs": [
+                    self._season_artifact_ref(
+                        season_content,
+                        artifact_type="season_content",
+                        file_name="season_content.json",
+                    )
+                ],
+                "episode_summary_refs": [
+                    self._episode_artifact_ref(
+                        payload,
+                        artifact_type="episode_summary",
+                        file_name="episode_summary.json",
+                    )
+                    for payload in episode_summaries
+                ],
+                "previous_season_summary_refs": [
+                    self._season_artifact_ref(
+                        payload,
+                        artifact_type="season_summary",
+                        file_name="season_summary.json",
+                    )
+                    for payload in previous_season_backgrounds
+                ],
+            },
+            source_breakdown={
+                "season_contents": 1,
+                "episode_summaries": len(episode_summaries),
+                "previous_season_summaries": len(previous_season_backgrounds),
+            },
+        )
+
+    def _source_trace_from_payloads(
+        self,
+        payloads: list[dict[str, Any]],
+        *,
+        extra_refs: dict[str, list[dict[str, Any]]] | None = None,
+        source_breakdown: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        material_refs = self._unique_trace_material_refs_from_payloads(payloads)
+        unit_refs = self._unique_trace_string_refs_from_payloads(payloads, "unit_refs")
+        derived_artifact_refs = self._unique_trace_string_refs_from_payloads(
+            payloads,
+            "derived_artifact_refs",
+        )
+        media_type_counts = self._media_type_counts_from_material_refs(material_refs)
+        for payload in payloads:
+            for media_type in self._media_types_from_payload(payload):
+                media_type_counts.setdefault(media_type, 0)
+
+        trace: dict[str, Any] = {
+            "material_refs": material_refs,
+            "unit_refs": unit_refs,
+            "derived_artifact_refs": derived_artifact_refs,
+            "media_types": list(media_type_counts),
+        }
+        for field_name in (
+            "episode_content_refs",
+            "episode_summary_refs",
+            "season_content_refs",
+            "previous_season_summary_refs",
+        ):
+            refs = self._unique_trace_artifact_refs_from_payloads(payloads, field_name)
+            if extra_refs and field_name in extra_refs:
+                refs = self._unique_artifact_refs([*refs, *extra_refs[field_name]])
+            if refs:
+                trace[field_name] = refs
+
+        breakdown = dict(source_breakdown or {})
+        breakdown.update(
+            {
+                "materials": len(material_refs),
+                "units": len(unit_refs),
+                "derived_artifacts": len(derived_artifact_refs),
+                "media_types": media_type_counts,
+            }
+        )
+        for field_name in (
+            "episode_content_refs",
+            "episode_summary_refs",
+            "season_content_refs",
+            "previous_season_summary_refs",
+        ):
+            refs = trace.get(field_name, [])
+            if refs:
+                breakdown[field_name] = len(refs)
+        trace["source_breakdown"] = breakdown
+        return trace
+
+    def _unique_trace_material_refs_from_payloads(
+        self,
+        payloads: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        refs: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for payload in payloads:
+            trace = self._payload_source_trace(payload)
+            for item in trace.get("material_refs", []):
+                if not isinstance(item, dict):
+                    continue
+                key = self._manifest_string(item.get("material_id")) or self._manifest_string(
+                    item.get("relative_path")
+                )
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                refs.append(item)
+        return refs
+
+    def _unique_trace_string_refs_from_payloads(
+        self,
+        payloads: list[dict[str, Any]],
+        field_name: str,
+    ) -> list[str]:
+        refs: list[str] = []
+        seen: set[str] = set()
+        for payload in payloads:
+            trace = self._payload_source_trace(payload)
+            values = trace.get(field_name, [])
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                ref = self._manifest_string(value)
+                if not ref or ref in seen:
+                    continue
+                seen.add(ref)
+                refs.append(ref)
+        return refs
+
+    def _unique_trace_artifact_refs_from_payloads(
+        self,
+        payloads: list[dict[str, Any]],
+        field_name: str,
+    ) -> list[dict[str, Any]]:
+        refs: list[dict[str, Any]] = []
+        for payload in payloads:
+            trace = self._payload_source_trace(payload)
+            values = trace.get(field_name, [])
+            if not isinstance(values, list):
+                continue
+            refs.extend(item for item in values if isinstance(item, dict))
+        return self._unique_artifact_refs(refs)
+
+    def _payload_source_trace(self, payload: dict[str, Any]) -> dict[str, Any]:
+        trace = payload.get("source_trace")
+        return trace if isinstance(trace, dict) else {}
+
+    def _episode_artifact_ref(
+        self,
+        payload: dict[str, Any],
+        *,
+        artifact_type: str,
+        file_name: str,
+    ) -> dict[str, Any]:
+        season_id = self._manifest_string(payload.get("season_id"))
+        episode_id = self._manifest_string(payload.get("episode_id"))
+        ref = {
+            "artifact_type": artifact_type,
+            "season_id": season_id,
+            "episode_id": episode_id,
+            "path": f"seasons/{season_id}/episodes/{episode_id}/{file_name}",
+        }
+        extraction_run_id = self._manifest_string(payload.get("extraction_run_id"))
+        if extraction_run_id:
+            ref["extraction_run_id"] = extraction_run_id
+        return ref
+
+    def _season_artifact_ref(
+        self,
+        payload: dict[str, Any],
+        *,
+        artifact_type: str,
+        file_name: str,
+    ) -> dict[str, Any]:
+        season_id = self._manifest_string(payload.get("season_id"))
+        ref = {
+            "artifact_type": artifact_type,
+            "season_id": season_id,
+            "path": f"seasons/{season_id}/{file_name}",
+        }
+        extraction_run_id = self._manifest_string(payload.get("extraction_run_id"))
+        if extraction_run_id:
+            ref["extraction_run_id"] = extraction_run_id
+        return ref
+
+    def _unique_artifact_refs(self, refs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        unique_refs: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for ref in refs:
+            key = "|".join(
+                [
+                    self._manifest_string(ref.get("artifact_type")),
+                    self._manifest_string(ref.get("season_id")),
+                    self._manifest_string(ref.get("episode_id")),
+                    self._manifest_string(ref.get("path")),
+                    self._manifest_string(ref.get("extraction_run_id")),
+                ]
+            )
+            if not key.strip("|") or key in seen:
+                continue
+            seen.add(key)
+            unique_refs.append(ref)
+        return unique_refs
+
+    def _media_type_counts_from_material_refs(
+        self,
+        material_refs: list[dict[str, Any]],
+    ) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for ref in material_refs:
+            media_type = self._manifest_string(
+                ref.get("source_media_type") or ref.get("media_type")
+            )
+            if not media_type:
+                continue
+            counts[media_type] = counts.get(media_type, 0) + 1
+        return counts
+
+    def _media_types_from_payload(self, payload: dict[str, Any]) -> list[str]:
+        media_types = payload.get("media_types")
+        if isinstance(media_types, list):
+            return [
+                media_type
+                for media_type in (self._manifest_string(value) for value in media_types)
+                if media_type
+            ]
+        source_trace = self._payload_source_trace(payload)
+        trace_media_types = source_trace.get("media_types")
+        if isinstance(trace_media_types, list):
+            return [
+                media_type
+                for media_type in (self._manifest_string(value) for value in trace_media_types)
+                if media_type
+            ]
+        source_breakdown = source_trace.get("source_breakdown", {})
+        media_type_counts = (
+            source_breakdown.get("media_types") if isinstance(source_breakdown, dict) else None
+        )
+        if isinstance(media_type_counts, dict):
+            return [
+                media_type
+                for media_type in (self._manifest_string(value) for value in media_type_counts)
+                if media_type
+            ]
+        source_kind = self._manifest_string(payload.get("source_kind"))
+        return [source_kind] if source_kind else []
+
+    def _media_types_from_source_trace(self, source_trace: dict[str, Any]) -> list[str]:
+        media_types = source_trace.get("media_types")
+        if isinstance(media_types, list):
+            return [
+                media_type
+                for media_type in (self._manifest_string(value) for value in media_types)
+                if media_type
+            ]
+        return []
+
+    def _load_episode_summaries_for_source_trace(
+        self,
+        project_id: str,
+        season_id: str,
+        episode_contents: list[dict[str, Any]],
+        *,
+        extraction_run_id: str,
+    ) -> list[dict[str, Any]]:
+        episode_summaries: list[dict[str, Any]] = []
+        for episode_content in episode_contents:
+            episode_id = self._manifest_string(episode_content.get("episode_id"))
+            if not episode_id:
+                continue
+            try:
+                summary = kb.load_episode_summary(project_id, season_id, episode_id)
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+            if kb.is_full_artifact_payload_for_run(summary, extraction_run_id):
+                episode_summaries.append(summary)
+        return episode_summaries
 
     def merge_preview_episode_content(self, project_id: str, season_id: str, episode_id: str) -> Path:
         episode_chunks_root = kb.chunks_root_path(project_id, season_id, episode_id).resolve()
@@ -351,6 +813,10 @@ class Extractor(QObject):
             if isinstance(insight, str) and insight.strip():
                 insight_summaries.append(insight.strip())
 
+        source_trace = self._source_trace_for_episode_summary(episode_content)
+        source_counts = episode_content.get("source_counts", {})
+        if not isinstance(source_counts, dict):
+            source_counts = {}
         summary = {
             "season_id": season_id,
             "episode_id": episode_id,
@@ -358,8 +824,20 @@ class Extractor(QObject):
             "extraction_run_id": artifact_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
             "source_kind": "video",
+            "media_types": self._media_types_from_source_trace(source_trace),
             "schema_version": 1,
-            "source_counts": episode_content.get("source_counts", {}),
+            "source_trace": source_trace,
+            "source_counts": {
+                **source_counts,
+                "source_trace_episode_contents": len(
+                    source_trace.get("episode_content_refs", [])
+                ),
+                "source_trace_units": len(source_trace.get("unit_refs", [])),
+                "source_trace_materials": len(source_trace.get("material_refs", [])),
+                "source_trace_derived_artifacts": len(
+                    source_trace.get("derived_artifact_refs", [])
+                ),
+            },
             "aggregation_warnings": episode_content.get("aggregation_warnings", []),
             "character_summaries": episode_content.get("behavior_traits", []),
             "relationship_changes": episode_content.get("relationship_interactions", []),
@@ -453,17 +931,28 @@ class Extractor(QObject):
                 season_id,
             )
 
+        source_trace = self._source_trace_for_season_content(episode_contents)
         season_content = {
             "season_id": season_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
             "extraction_run_id": extraction_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
             "source_kind": "video",
+            "media_types": self._media_types_from_source_trace(source_trace),
             "schema_version": 1,
+            "source_trace": source_trace,
             "source_counts": {
                 "total_episode_dirs": len(episode_dirs),
                 "full_episodes": len(episode_contents),
                 "skipped_episodes": skipped_episodes,
+                "source_trace_episode_contents": len(
+                    source_trace.get("episode_content_refs", [])
+                ),
+                "source_trace_units": len(source_trace.get("unit_refs", [])),
+                "source_trace_materials": len(source_trace.get("material_refs", [])),
+                "source_trace_derived_artifacts": len(
+                    source_trace.get("derived_artifact_refs", [])
+                ),
             },
             "aggregation_warnings": aggregation_warnings,
             "episode_contents": episode_contents,
@@ -511,14 +1000,42 @@ class Extractor(QObject):
             if isinstance(episode_id, str) and isinstance(facts, list) and facts:
                 background_parts.append(f"{episode_id}: {'; '.join(str(item) for item in facts)}")
 
+        episode_summaries = self._load_episode_summaries_for_source_trace(
+            project_id,
+            season_id,
+            episode_contents,
+            extraction_run_id=artifact_run_id,
+        )
+        source_trace = self._source_trace_for_season_summary(
+            season_content,
+            episode_summaries=episode_summaries,
+        )
+        source_counts = season_content.get("source_counts", {})
+        if not isinstance(source_counts, dict):
+            source_counts = {}
         summary = {
             "season_id": season_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
             "extraction_run_id": artifact_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
             "source_kind": "video",
+            "media_types": self._media_types_from_source_trace(source_trace),
             "schema_version": 1,
-            "source_counts": season_content.get("source_counts", {}),
+            "source_trace": source_trace,
+            "source_counts": {
+                **source_counts,
+                "source_trace_season_contents": len(
+                    source_trace.get("season_content_refs", [])
+                ),
+                "source_trace_episode_summaries": len(
+                    source_trace.get("episode_summary_refs", [])
+                ),
+                "source_trace_units": len(source_trace.get("unit_refs", [])),
+                "source_trace_materials": len(source_trace.get("material_refs", [])),
+                "source_trace_derived_artifacts": len(
+                    source_trace.get("derived_artifact_refs", [])
+                ),
+            },
             "aggregation_warnings": season_content.get("aggregation_warnings", []),
             "final_character_states": season_content.get("character_state_changes", []),
             "relationship_baseline": season_content.get("relationship_interactions", []),
@@ -818,45 +1335,73 @@ class Extractor(QObject):
         return provider.backend_for("video")  # type: ignore[return-value]
 
     def _video_mode_requires_transcript(self, video_input_mode: VideoInputMode) -> bool:
-        return video_input_mode in {"frame_sampling_with_transcript", "audio_transcript_only"}
+        return VideoUnitHandler.video_mode_requires_transcript(video_input_mode)
 
-    def _collect_formal_video_chunk_inputs(
+    def _video_unit_handler(
+        self,
+        *,
+        provider: str,
+        video_fps: float,
+        video_input_mode: VideoInputMode,
+        max_output_tokens: int,
+    ) -> VideoUnitHandler:
+        return VideoUnitHandler(
+            VideoUnitHandlerConfig(
+                provider=provider,
+                video_fps=video_fps,
+                video_input_mode=video_input_mode,
+                max_output_tokens_per_minute=max_output_tokens,
+            )
+        )
+
+    def _collect_formal_video_chunk_inputs_from_run_plan(
         self,
         project_id: str,
-        manifest: dict[str, Any],
+        run_plan: FormalExtractionRunPlan,
     ) -> list[dict[str, Any]]:
         chunk_inputs: list[dict[str, Any]] = []
-        extraction_run_id = self._manifest_string(manifest.get("extraction_run_id"))
-        for season in manifest.get("seasons", []):
-            if not isinstance(season, dict):
+        for episode in run_plan.episodes:
+            season_id = episode.season_id.strip()
+            episode_id = episode.episode_id.strip()
+            if not season_id or not episode_id:
                 continue
-            season_id = self._manifest_string(season.get("season_id"))
-            if not season_id:
-                continue
-            for episode in season.get("episodes", []):
-                if not isinstance(episode, dict):
+            for unit in episode.units:
+                if unit.media_type != MediaType.VIDEO:
                     continue
-                episode_id = self._manifest_string(episode.get("episode_id"))
-                if not episode_id:
+                source_path = unit.material_ref.relative_path.strip()
+                if not source_path:
                     continue
-                for chunk in episode.get("chunks", []):
-                    if not isinstance(chunk, dict):
-                        continue
-                    chunk_id = self._manifest_string(chunk.get("chunk_id"))
-                    source_path = self._manifest_string(chunk.get("source_path"))
-                    if not chunk_id or not source_path:
-                        continue
-                    chunk_inputs.append(
-                        {
-                            "season_id": season_id,
-                            "episode_id": episode_id,
-                            "chunk_id": chunk_id,
-                            "source_path": source_path,
-                            "extraction_run_id": extraction_run_id,
-                            "video_path": self._formal_material_video_path(project_id, source_path),
-                        }
-                    )
+                chunk_inputs.append(
+                    {
+                        "season_id": season_id,
+                        "episode_id": episode_id,
+                        "chunk_id": self._manifest_string(unit.metadata.get("legacy_chunk_id"))
+                        or unit.unit_id,
+                        "source_path": source_path,
+                        "extraction_run_id": run_plan.run_id,
+                        "video_path": self._formal_material_video_path(project_id, source_path),
+                        "unit_ref": unit.unit_id,
+                        "material_ref": unit.material_ref.model_dump(mode="json"),
+                        "source_trace": self._source_trace_for_unit(unit).model_dump(mode="json"),
+                    }
+                )
         return chunk_inputs
+
+    def _source_trace_for_unit(self, unit: ExtractionUnit) -> SourceTrace:
+        return SourceTrace(
+            material_refs=[unit.material_ref],
+            unit_refs=[unit.unit_id],
+            derived_artifact_refs=list(unit.derived_refs),
+            source_breakdown={
+                "materials": 1,
+                "units": 1,
+                unit.media_type.value: 1,
+            },
+        )
+
+    def _source_trace_from_chunk_input(self, chunk_input: dict[str, Any]) -> dict[str, Any]:
+        source_trace = chunk_input.get("source_trace")
+        return source_trace if isinstance(source_trace, dict) else {}
 
     def _group_formal_video_chunk_inputs_by_episode(
         self,
@@ -1217,6 +1762,7 @@ class Extractor(QObject):
             estimated_context_tokens=estimated_input_tokens,
         )
         payload = result.payload
+        source_trace = self._source_trace_from_chunks(episode_chunks)
         episode_content = {
             "season_id": season_id,
             "episode_id": episode_id,
@@ -1224,11 +1770,18 @@ class Extractor(QObject):
             "extraction_run_id": extraction_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
             "source_kind": "video",
+            "media_types": self._media_types_from_source_trace(source_trace),
             "schema_version": 1,
+            "source_trace": source_trace,
             "source_counts": {
                 "expected_chunks": len(expected_chunk_ids),
                 "successful_chunks": len(chunk_results),
                 "missing_chunks": len(missing_chunk_ids),
+                "source_trace_units": len(source_trace.get("unit_refs", [])),
+                "source_trace_materials": len(source_trace.get("material_refs", [])),
+                "source_trace_derived_artifacts": len(
+                    source_trace.get("derived_artifact_refs", [])
+                ),
             },
             "context_policy": merge_context.get("context_policy", {}),
             "aggregation_warnings": aggregation_warnings
@@ -1322,6 +1875,10 @@ class Extractor(QObject):
             estimated_context_tokens=estimated_input_tokens,
         )
         payload = result.payload
+        source_trace = self._source_trace_for_episode_summary(episode_content)
+        source_counts = episode_content.get("source_counts", {})
+        if not isinstance(source_counts, dict):
+            source_counts = {}
         summary = {
             "season_id": season_id,
             "episode_id": episode_id,
@@ -1329,8 +1886,20 @@ class Extractor(QObject):
             "extraction_run_id": extraction_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
             "source_kind": "video",
+            "media_types": self._media_types_from_source_trace(source_trace),
             "schema_version": 1,
-            "source_counts": episode_content.get("source_counts", {}),
+            "source_trace": source_trace,
+            "source_counts": {
+                **source_counts,
+                "source_trace_episode_contents": len(
+                    source_trace.get("episode_content_refs", [])
+                ),
+                "source_trace_units": len(source_trace.get("unit_refs", [])),
+                "source_trace_materials": len(source_trace.get("material_refs", [])),
+                "source_trace_derived_artifacts": len(
+                    source_trace.get("derived_artifact_refs", [])
+                ),
+            },
             "context_policy": episode_content.get("context_policy", {}),
             "aggregation_warnings": aggregation_warnings
             + self._coerce_string_list(payload.get("aggregation_warnings")),
@@ -1520,18 +2089,39 @@ class Extractor(QObject):
             estimated_context_tokens=estimated_input_tokens,
         )
         payload = result.payload
+        source_trace = self._source_trace_for_season_content(
+            episode_contents,
+            episode_summaries=episode_summaries,
+            previous_season_backgrounds=previous_season_backgrounds,
+        )
         season_content = {
             "season_id": season_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
             "extraction_run_id": extraction_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
             "source_kind": "video",
+            "media_types": self._media_types_from_source_trace(source_trace),
             "schema_version": 1,
+            "source_trace": source_trace,
             "source_counts": {
                 "expected_episodes": len(expected_episode_ids),
                 "completed_episodes": len(episode_contents),
                 "missing_episodes": len(missing_episode_ids),
                 "previous_season_backgrounds": len(previous_season_backgrounds),
+                "source_trace_episode_contents": len(
+                    source_trace.get("episode_content_refs", [])
+                ),
+                "source_trace_episode_summaries": len(
+                    source_trace.get("episode_summary_refs", [])
+                ),
+                "source_trace_previous_season_summaries": len(
+                    source_trace.get("previous_season_summary_refs", [])
+                ),
+                "source_trace_units": len(source_trace.get("unit_refs", [])),
+                "source_trace_materials": len(source_trace.get("material_refs", [])),
+                "source_trace_derived_artifacts": len(
+                    source_trace.get("derived_artifact_refs", [])
+                ),
             },
             "aggregation_warnings": aggregation_warnings
             + self._coerce_string_list(payload.get("aggregation_warnings")),
@@ -1642,16 +2232,40 @@ class Extractor(QObject):
         source_counts = season_content.get("source_counts", {})
         if not isinstance(source_counts, dict):
             source_counts = {}
+        episode_summaries = [
+            item for item in season_content.get("episode_summaries", []) if isinstance(item, dict)
+        ]
+        source_trace = self._source_trace_for_season_summary(
+            season_content,
+            episode_summaries=episode_summaries,
+            previous_season_backgrounds=previous_series_background,
+        )
         summary = {
             "season_id": season_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
             "extraction_run_id": extraction_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
             "source_kind": "video",
+            "media_types": self._media_types_from_source_trace(source_trace),
             "schema_version": 1,
+            "source_trace": source_trace,
             "source_counts": {
                 **source_counts,
                 "previous_series_backgrounds": len(previous_series_background),
+                "source_trace_season_contents": len(
+                    source_trace.get("season_content_refs", [])
+                ),
+                "source_trace_episode_summaries": len(
+                    source_trace.get("episode_summary_refs", [])
+                ),
+                "source_trace_previous_season_summaries": len(
+                    source_trace.get("previous_season_summary_refs", [])
+                ),
+                "source_trace_units": len(source_trace.get("unit_refs", [])),
+                "source_trace_materials": len(source_trace.get("material_refs", [])),
+                "source_trace_derived_artifacts": len(
+                    source_trace.get("derived_artifact_refs", [])
+                ),
             },
             "aggregation_warnings": aggregation_warnings
             + self._coerce_string_list(payload.get("aggregation_warnings")),
@@ -1841,6 +2455,113 @@ class Extractor(QObject):
                 )
         return transcripts
 
+    def ensure_episode_transcripts_from_run_plan(
+        self,
+        project_id: str,
+        run_plan: FormalExtractionRunPlan,
+        *,
+        language: str = "auto",
+        force_rebuild: bool = False,
+        emit_event: Callable[[dict], None] | None = None,
+    ) -> list[EpisodeTranscript]:
+        provider = TranscriptProvider()
+        provider.prepare_run_plan(project_id, run_plan)
+        kb.save_extraction_run_plan(project_id, run_plan)
+        requests = provider.collect_requests(project_id, run_plan)
+        transcripts: list[EpisodeTranscript] = []
+        total = len(requests)
+        for index, request in enumerate(requests, start=1):
+            if not request.material_paths:
+                provider.mark_status(
+                    run_plan,
+                    request.artifact_id,
+                    DerivedArtifactStatus.MISSING,
+                    warning="no_material_paths",
+                )
+                continue
+            self._emit_transcript_event(emit_event, request, index, total, InsightStatus.RUNNING)
+            try:
+                transcript = provider.ensure_transcript(
+                    project_id,
+                    request,
+                    language=language,
+                    force_rebuild=force_rebuild,
+                )
+            except AudioTranscriptionError as exc:
+                warning = self._compact_exception_message(exc)
+                provider.mark_status(
+                    run_plan,
+                    request.artifact_id,
+                    DerivedArtifactStatus.FAILED,
+                    warning=warning,
+                )
+                LOGGER.warning(
+                    "Episode transcription failed; project_id=%s season_id=%s episode_id=%s error=%s",
+                    project_id,
+                    request.season_id,
+                    request.episode_id,
+                    warning,
+                )
+                if emit_event is not None:
+                    emit_event(
+                        InsightEvent(
+                            title=t("extractor.transcript.title"),
+                            description=t(
+                                "extractor.transcript.failed",
+                                episode=request.episode_id,
+                                error=warning,
+                            ),
+                            status=InsightStatus.WARNING,
+                        ).model_dump(mode="json")
+                    )
+                continue
+            provider.mark_status(run_plan, request.artifact_id, DerivedArtifactStatus.READY)
+            transcripts.append(transcript)
+            self._emit_transcript_event(
+                emit_event,
+                request,
+                index,
+                total,
+                InsightStatus.DONE,
+                segment_count=len(transcript.segments),
+            )
+        kb.save_extraction_run_plan(project_id, run_plan)
+        return transcripts
+
+    def _emit_transcript_event(
+        self,
+        emit_event: Callable[[dict], None] | None,
+        request: TranscriptArtifactRequest,
+        index: int,
+        total: int,
+        status: InsightStatus,
+        *,
+        segment_count: int = 0,
+    ) -> None:
+        if emit_event is None:
+            return
+        if status == InsightStatus.DONE:
+            description = t(
+                "extractor.transcript.ready",
+                episode=request.episode_id,
+                count=segment_count,
+            )
+        else:
+            description = t(
+                "extractor.transcript.transcribing",
+                current=index,
+                total=total,
+                episode=request.episode_id,
+            )
+        emit_event(
+            InsightEvent(
+                title=t("extractor.transcript.title"),
+                description=description,
+                status=status,
+                meta={"artifact_id": request.artifact_id, "artifact_path": request.artifact_path},
+            ).model_dump(mode="json")
+        )
+
     def _collect_formal_episode_transcript_inputs(
         self,
         project_id: str,
@@ -1990,12 +2711,12 @@ class Extractor(QObject):
             value = 1
         return max(1, min(500, value))
 
-    def _extract_fast_chunk_json_from_manifest(
+    def _extract_fast_video_units(
         self,
         config: ProjectConfig,
         manifest: dict[str, Any],
         *,
-        chunk_inputs: list[dict[str, Any]] | None = None,
+        chunk_inputs: list[dict[str, Any]],
         concurrency: int = 1,
         backend: ModelBackend,
         provider: str,
@@ -2005,28 +2726,33 @@ class Extractor(QObject):
         video_fps: float,
         max_output_tokens: int,
         video_input_mode: VideoInputMode,
+        run_plan: FormalExtractionRunPlan,
         progress_base: int = 5,
         progress_span: int = 90,
         emit_token_usage: Callable[[dict[str, int]], None] | None = None,
         emit_event: Callable[[dict], None] | None = None,
         emit_progress: Callable[[int], None] | None = None,
     ) -> tuple[int, dict[str, int], list[ChunkExtractionResult], dict[str, int]]:
-        if chunk_inputs is None:
-            chunk_inputs = self._collect_formal_video_chunk_inputs(config.project_id, manifest)
         stats = self._empty_full_extraction_stats(total_chunks=len(chunk_inputs))
         if not chunk_inputs:
             return (0, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, [], stats)
 
+        video_handler = self._video_unit_handler(
+            provider=provider,
+            video_fps=video_fps,
+            video_input_mode=video_input_mode,
+            max_output_tokens=max_output_tokens,
+        )
         total_chunks = len(chunk_inputs)
         normalized_concurrency = self._normalize_fast_concurrency(concurrency)
         worker_count = min(normalized_concurrency, total_chunks)
         usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         extracted_chunks_with_index: list[tuple[int, ChunkExtractionResult]] = []
         transcripts_by_episode: dict[tuple[str, str], EpisodeTranscript] = {}
-        if self._video_mode_requires_transcript(video_input_mode):
-            transcripts = self.ensure_episode_transcripts_from_manifest(
+        if video_handler.requires_transcript():
+            transcripts = self.ensure_episode_transcripts_from_run_plan(
                 config.project_id,
-                manifest,
+                run_plan,
                 emit_event=emit_event,
             )
             transcripts_by_episode = {
@@ -2058,11 +2784,9 @@ class Extractor(QObject):
                     )
                     return {"index": index, "status": "skipped"}
 
-                duration_seconds = self._video_duration_seconds(video_path)
-                request_max_output_tokens = scale_cloud_max_output_tokens_for_video_duration(
-                    max_output_tokens,
-                    duration_seconds,
-                )
+                budget = video_handler.prepare_budget(video_path)
+                duration_seconds = budget.duration_seconds
+                request_max_output_tokens = budget.request_max_output_tokens
                 if max_output_tokens < FULL_EXTRACTION_MIN_OUTPUT_TOKENS_PER_MINUTE:
                     LOGGER.warning(
                         "Fast extraction chunk output token budget is too small; "
@@ -2104,7 +2828,7 @@ class Extractor(QObject):
                     )
 
                 transcript_context = ""
-                if self._video_mode_requires_transcript(video_input_mode):
+                if video_handler.requires_transcript():
                     transcript = transcripts_by_episode.get(
                         (chunk_input["season_id"], chunk_input["episode_id"])
                     )
@@ -2132,17 +2856,14 @@ class Extractor(QObject):
                         "reason": "fast_parallel_chunk_extraction",
                     }
                 }
-                request = self._build_full_video_chunk_request(
-                    config,
+                request = video_handler.build_formal_chunk_request(
+                    project_id=config.project_id,
                     chunk_input=chunk_input,
                     backend=backend,
-                    provider=provider,
                     model_name=model_name,
                     base_url=base_url,
                     api_key=api_key,
-                    video_fps=video_fps,
                     request_max_output_tokens=request_max_output_tokens,
-                    video_input_mode=video_input_mode,
                     transcript_context=transcript_context,
                     formal_context=fast_context,
                 )
@@ -2157,6 +2878,7 @@ class Extractor(QObject):
                     run_type=FULL_EXTRACTION_RUN_TYPE,
                     source_path=source_path,
                     source_kind="video",
+                    source_trace=self._source_trace_from_chunk_input(chunk_input),
                     source_counts={
                         "current_episode_extracted_chunks": 0,
                         "selected_episode_contexts": 0,
@@ -2735,12 +3457,12 @@ class Extractor(QObject):
 
         return (usage_total, stats)
 
-    def _extract_full_chunk_json_from_manifest(
+    def _extract_full_video_units(
         self,
         config: ProjectConfig,
         manifest: dict[str, Any],
         *,
-        chunk_inputs: list[dict[str, Any]] | None = None,
+        chunk_inputs: list[dict[str, Any]],
         backend: ModelBackend,
         text_backend: ModelBackend,
         provider: str,
@@ -2750,17 +3472,22 @@ class Extractor(QObject):
         video_fps: float,
         max_output_tokens: int,
         video_input_mode: VideoInputMode,
+        run_plan: FormalExtractionRunPlan,
         context_window_tokens: int | None = None,
         emit_token_usage: Callable[[dict[str, int]], None] | None = None,
         emit_event: Callable[[dict], None] | None = None,
         emit_progress: Callable[[int], None] | None = None,
     ) -> tuple[int, dict[str, int], list[ChunkExtractionResult], dict[str, int]]:
-        if chunk_inputs is None:
-            chunk_inputs = self._collect_formal_video_chunk_inputs(config.project_id, manifest)
         stats = self._empty_full_extraction_stats(total_chunks=len(chunk_inputs))
         if not chunk_inputs:
             return (0, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, [], stats)
 
+        video_handler = self._video_unit_handler(
+            provider=provider,
+            video_fps=video_fps,
+            video_input_mode=video_input_mode,
+            max_output_tokens=max_output_tokens,
+        )
         episode_groups = self._group_formal_video_chunk_inputs_by_episode(chunk_inputs)
         created = 0
         processed = 0
@@ -2769,10 +3496,10 @@ class Extractor(QObject):
         total_chunks = len(chunk_inputs)
         extraction_run_id = self._manifest_string(manifest.get("extraction_run_id"))
         transcripts_by_episode: dict[tuple[str, str], EpisodeTranscript] = {}
-        if self._video_mode_requires_transcript(video_input_mode):
-            transcripts = self.ensure_episode_transcripts_from_manifest(
+        if video_handler.requires_transcript():
+            transcripts = self.ensure_episode_transcripts_from_run_plan(
                 config.project_id,
-                manifest,
+                run_plan,
                 emit_event=emit_event,
             )
             transcripts_by_episode = {
@@ -2831,11 +3558,9 @@ class Extractor(QObject):
                         stats["skipped_chunks"] += 1
                         continue
 
-                    duration_seconds = self._video_duration_seconds(video_path)
-                    request_max_output_tokens = scale_cloud_max_output_tokens_for_video_duration(
-                        max_output_tokens,
-                        duration_seconds,
-                    )
+                    budget = video_handler.prepare_budget(video_path)
+                    duration_seconds = budget.duration_seconds
+                    request_max_output_tokens = budget.request_max_output_tokens
                     if max_output_tokens < FULL_EXTRACTION_MIN_OUTPUT_TOKENS_PER_MINUTE:
                         LOGGER.warning(
                             "Full extraction chunk output token budget is too small; "
@@ -2882,10 +3607,10 @@ class Extractor(QObject):
                                 ),
                                 status=InsightStatus.RUNNING,
                             ).model_dump(mode="json")
-                        )
+                    )
 
                     transcript_context = ""
-                    if self._video_mode_requires_transcript(video_input_mode):
+                    if video_handler.requires_transcript():
                         transcript = transcripts_by_episode.get(
                             (chunk_input["season_id"], chunk_input["episode_id"])
                         )
@@ -2915,17 +3640,14 @@ class Extractor(QObject):
                         previous_episode_id=previous_episode_id,
                         extraction_run_id=extraction_run_id,
                     )
-                    request = self._build_full_video_chunk_request(
-                        config,
+                    request = video_handler.build_formal_chunk_request(
+                        project_id=config.project_id,
                         chunk_input=chunk_input,
                         backend=backend,
-                        provider=provider,
                         model_name=model_name,
                         base_url=base_url,
                         api_key=api_key,
-                        video_fps=video_fps,
                         request_max_output_tokens=request_max_output_tokens,
-                        video_input_mode=video_input_mode,
                         transcript_context=transcript_context,
                         formal_context=chunk_context,
                     )
@@ -2948,6 +3670,7 @@ class Extractor(QObject):
                         run_type=FULL_EXTRACTION_RUN_TYPE,
                         source_path=source_path,
                         source_kind="video",
+                        source_trace=self._source_trace_from_chunk_input(chunk_input),
                         source_counts={
                             "current_episode_extracted_chunks": len(current_episode_chunks),
                             "selected_episode_contexts": len(
@@ -3177,100 +3900,6 @@ class Extractor(QObject):
             else:
                 stats["failed_seasons"] += 1
         return (created, usage_total, extracted_chunks, stats)
-
-    def _build_full_video_chunk_request(
-        self,
-        config: ProjectConfig,
-        *,
-        chunk_input: dict[str, Any],
-        backend: ModelBackend,
-        provider: str,
-        model_name: str,
-        base_url: str,
-        api_key: str,
-        video_fps: float,
-        request_max_output_tokens: int,
-        video_input_mode: VideoInputMode,
-        transcript_context: str = "",
-        formal_context: dict[str, Any] | None = None,
-    ) -> ModelCallRequest:
-        video_path = chunk_input["video_path"]
-        context = formal_context or {}
-        system_prompt, user_text = render_prompt_texts(
-            purpose="formal_contextual_video_chunk_extraction",
-            variables={
-                "season_id": chunk_input["season_id"],
-                "episode_id": chunk_input["episode_id"],
-                "chunk_id": chunk_input["chunk_id"],
-                "source_path": chunk_input["source_path"],
-                "transcript_section": self._format_transcript_prompt_section(
-                    video_input_mode,
-                    transcript_context,
-                ),
-                "current_episode_extracted_chunks": context.get(
-                    "current_episode_extracted_chunks",
-                    [],
-                ),
-                "current_season_completed_episodes": context.get(
-                    "current_season_completed_episodes",
-                    [],
-                ),
-                "previous_season_backgrounds": context.get(
-                    "previous_season_backgrounds",
-                    [],
-                ),
-            },
-        )
-        content_parts: list[dict[str, Any]] = [{"type": "text", "text": user_text}]
-        if video_input_mode != "audio_transcript_only":
-            content_parts.append(self._build_video_chunk_part(video_path, video_fps))
-        return ModelCallRequest(
-            purpose="formal_contextual_video_chunk_extraction",
-            backend=backend,
-            model_name=model_name,
-            base_url=base_url,
-            api_key=api_key,
-            messages=[
-                ModelMessage(
-                    role="system",
-                    content=system_prompt,
-                ),
-                ModelMessage(
-                    role="user",
-                    content=content_parts,
-                ),
-            ],
-            temperature=0.2,
-            max_tokens=request_max_output_tokens,
-            stream=False,
-            timeout_seconds=240,
-            response_format={"type": "json_object"},
-            extra_body=self._video_model_extra_body(provider),
-            metadata={
-                "project_id": config.project_id,
-                "stage": "full_chunk_extraction",
-                "season_id": chunk_input["season_id"],
-                "episode_id": chunk_input["episode_id"],
-                "chunk_id": chunk_input["chunk_id"],
-                "source_path": chunk_input["source_path"],
-                "video_input_mode": video_input_mode,
-                "context_policy": context.get("context_policy", {}),
-            },
-        )
-
-    def _format_transcript_prompt_section(
-        self,
-        video_input_mode: VideoInputMode,
-        transcript_context: str,
-    ) -> str:
-        if not self._video_mode_requires_transcript(video_input_mode):
-            return ""
-        context = transcript_context.strip() or t("extractor.transcript.context.empty")
-        if video_input_mode == "audio_transcript_only":
-            note = t("extractor.transcript.prompt.audioOnly")
-        else:
-            note = t("extractor.transcript.prompt.withFrames")
-        return f"[TRANSCRIPT_CONTEXT]\n{context}\n\n{note}"
 
     def _emit_full_warning(self, emit_event: Callable[[dict], None] | None, description: str) -> None:
         if emit_event is None:
@@ -3752,11 +4381,18 @@ class Extractor(QObject):
             extraction_mode = ExtractionMode.FAST
         else:
             extraction_mode = ExtractionMode.FULL
-        manifest = self.prepare_formal_video_extraction_plan(
+        run_plan = self.prepare_formal_extraction_run_plan(
             config.project_id,
             mode=extraction_mode,
         )
-        chunk_inputs = self._collect_formal_video_chunk_inputs(config.project_id, manifest)
+        manifest = self._legacy_manifest_from_run_plan(run_plan)
+        kb.save_extraction_run_plan(config.project_id, run_plan)
+        kb.initialize_structure_from_run_plan(config.project_id, run_plan)
+        kb.save_source_manifest(config.project_id, manifest)
+        chunk_inputs = self._collect_formal_video_chunk_inputs_from_run_plan(
+            config.project_id,
+            run_plan,
+        )
         if not chunk_inputs:
             message = t("extractor.full.noVideoMaterials")
             emit_event(
@@ -3767,7 +4403,7 @@ class Extractor(QObject):
                 ).model_dump(mode="json")
             )
             LOGGER.warning(
-                "Full extraction stopped because no formal video chunks were found; project_id=%s",
+                "Full extraction stopped because no formal extraction units were found; project_id=%s",
                 config.project_id,
             )
             raise ValueError(message)
@@ -3787,9 +4423,16 @@ class Extractor(QObject):
 
         video_input_mode = normalize_video_input_mode(preset.video_input_mode, preset.provider)
         provider_profile = cloud_model_provider(preset.provider)
+        if self._video_mode_requires_transcript(video_input_mode):
+            TranscriptProvider().prepare_run_plan(config.project_id, run_plan)
+            kb.save_extraction_run_plan(config.project_id, run_plan)
+            chunk_inputs = self._collect_formal_video_chunk_inputs_from_run_plan(
+                config.project_id,
+                run_plan,
+            )
         if is_fast_mode:
             created_count, extraction_usage, extracted_chunks, run_stats = (
-                self._extract_fast_chunk_json_from_manifest(
+                self._extract_fast_video_units(
                     config,
                     manifest,
                     chunk_inputs=chunk_inputs,
@@ -3802,6 +4445,7 @@ class Extractor(QObject):
                     video_fps=preset.video_fps,
                     max_output_tokens=preset.max_output_tokens,
                     video_input_mode=video_input_mode,
+                    run_plan=run_plan,
                     progress_base=5,
                     progress_span=75,
                     emit_token_usage=emit_token_usage,
@@ -3811,7 +4455,7 @@ class Extractor(QObject):
             )
         else:
             created_count, extraction_usage, extracted_chunks, run_stats = (
-                self._extract_full_chunk_json_from_manifest(
+                self._extract_full_video_units(
                     config,
                     manifest,
                     chunk_inputs=chunk_inputs,
@@ -3824,6 +4468,7 @@ class Extractor(QObject):
                     video_fps=preset.video_fps,
                     max_output_tokens=preset.max_output_tokens,
                     video_input_mode=video_input_mode,
+                    run_plan=run_plan,
                     context_window_tokens=context_window_budget_tokens(preset),
                     emit_token_usage=emit_token_usage,
                     emit_event=emit_event,

@@ -10,7 +10,9 @@ APP_ROOT = Path(__file__).resolve().parents[1]
 if str(APP_ROOT) not in sys.path:
     sys.path.insert(0, str(APP_ROOT))
 
+from core import extractor as extractor_module  # noqa: E402
 from core import knowledge_base as kb  # noqa: E402
+from core import source_scanner  # noqa: E402
 from core.character_card_store import (  # noqa: E402
     load_card,
     mark_compiled_official_cards_stale,
@@ -26,6 +28,7 @@ from core.models import (  # noqa: E402
     CharacterCard,
     CharacterCardKind,
     CharacterCardStatus,
+    ChunkExtractionResult,
     ExtractionArtifactStage,
     ExtractionMode,
     ProjectConfig,
@@ -37,6 +40,8 @@ from utils.ai_model_middleware import ModelCallRequest, ModelCallResult, ModelMe
 @contextmanager
 def _isolated_project_tree(project_id: str = "validation-project") -> Iterator[ProjectPaths]:
     original_ensure_project_tree = kb.ensure_project_tree
+    original_scanner_ensure_project_tree = source_scanner.ensure_project_tree
+    original_extractor_ensure_project_tree = extractor_module.ensure_project_tree
     with TemporaryDirectory(prefix="charapicker-validation-") as temp_dir:
         projects_root = Path(temp_dir) / "projects"
 
@@ -65,10 +70,14 @@ def _isolated_project_tree(project_id: str = "validation-project") -> Iterator[P
             return paths
 
         kb.ensure_project_tree = fake_ensure_project_tree
+        source_scanner.ensure_project_tree = fake_ensure_project_tree
+        extractor_module.ensure_project_tree = fake_ensure_project_tree
         try:
             yield fake_ensure_project_tree(project_id)
         finally:
             kb.ensure_project_tree = original_ensure_project_tree
+            source_scanner.ensure_project_tree = original_scanner_ensure_project_tree
+            extractor_module.ensure_project_tree = original_extractor_ensure_project_tree
 
 
 def _assert_fast_concurrency_bounds() -> None:
@@ -248,18 +257,7 @@ def _assert_full_extraction_modes_stop_before_completion_without_chunks() -> Non
             extractor = Extractor()
             progress: list[int] = []
             events: list[dict] = []
-            plan_modes: list[ExtractionMode] = []
-
-            def fake_prepare_formal_video_extraction_plan(
-                _project_id: str,
-                *,
-                mode: ExtractionMode,
-            ) -> dict:
-                plan_modes.append(mode)
-                return {"extraction_run_id": f"run-{configured_mode.value}", "seasons": []}
-
-            extractor.prepare_formal_video_extraction_plan = fake_prepare_formal_video_extraction_plan
-            extractor._collect_formal_video_chunk_inputs = lambda _project_id, _manifest: []
+            previous_plan_paths = set(kb.extraction_runs_root_path(project_id).glob("*/plan.json"))
 
             config = ProjectConfig(project_id=project_id, extraction_mode=configured_mode)
             try:
@@ -275,15 +273,23 @@ def _assert_full_extraction_modes_stop_before_completion_without_chunks() -> Non
             else:
                 raise AssertionError(f"expected {configured_mode.value} mode to stop without chunks")
 
-            assert plan_modes == [expected_plan_mode]
             assert progress
             assert max(progress) < 100
             assert any(event.get("status") == "warning" for event in events)
+            run_plan = _load_new_run_plan(project_id, previous_plan_paths)
+            assert run_plan.mode.value == expected_plan_mode.value
 
 
 def _write_chunk_payload(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     kb.write_json(path, payload)
+
+
+def _load_new_run_plan(project_id: str, previous_plan_paths: set[Path]):
+    plan_paths = sorted(kb.extraction_runs_root_path(project_id).glob("*/plan.json"))
+    new_plan_paths = [path for path in plan_paths if path not in previous_plan_paths]
+    assert len(new_plan_paths) == 1, new_plan_paths
+    return kb.load_extraction_run_plan(project_id, new_plan_paths[0].parent.name)
 
 
 def _assert_run_artifact_filtering() -> None:
@@ -323,11 +329,178 @@ def _assert_run_artifact_filtering() -> None:
         assert kb.is_matching_run_artifact_payload(old_payload, "") is True
 
 
+def _assert_chunk_result_source_trace_serialization() -> None:
+    chunk = ChunkExtractionResult(
+        season_id="season_001",
+        episode_id="episode_001",
+        chunk_id="chunk_0001",
+        extraction_stage=ExtractionArtifactStage.FULL,
+        extraction_run_id="run-current",
+        source_kind="video",
+        source_trace={
+            "material_refs": [{"material_id": "material_video_001", "source_media_type": "video"}],
+            "unit_refs": ["unit_video_001"],
+            "derived_artifact_refs": ["transcript_season_001_episode_001"],
+        },
+    )
+    payload = chunk.model_dump(mode="json")
+    assert payload["source_trace"]["material_refs"][0]["source_media_type"] == "video"
+    assert payload["source_trace"]["unit_refs"] == ["unit_video_001"]
+    assert payload["source_trace"]["derived_artifact_refs"] == ["transcript_season_001_episode_001"]
+
+
+def _assert_episode_merge_source_trace() -> None:
+    project_id = "validation-episode-source-trace"
+    with _isolated_project_tree(project_id):
+        chunks = [
+            ChunkExtractionResult(
+                season_id="season_001",
+                episode_id="episode_001",
+                chunk_id="chunk_0001",
+                extraction_stage=ExtractionArtifactStage.FULL,
+                extraction_run_id="run-current",
+                run_type="formal_extraction",
+                source_kind="video",
+                source_path="Episode 01/segment_0001.mp4",
+                source_trace={
+                    "material_refs": [
+                        {
+                            "material_id": "material_video_001",
+                            "relative_path": "Episode 01/segment_0001.mp4",
+                            "source_media_type": "video",
+                        }
+                    ],
+                    "unit_refs": ["unit_video_001"],
+                    "derived_artifact_refs": ["transcript_season_001_episode_001"],
+                },
+                facts=["fact one"],
+            ),
+            ChunkExtractionResult(
+                season_id="season_001",
+                episode_id="episode_001",
+                chunk_id="chunk_0002",
+                extraction_stage=ExtractionArtifactStage.FULL,
+                extraction_run_id="run-current",
+                run_type="formal_extraction",
+                source_kind="video",
+                source_path="Episode 01/segment_0002.mp4",
+                source_trace={
+                    "material_refs": [
+                        {
+                            "material_id": "material_video_002",
+                            "relative_path": "Episode 01/segment_0002.mp4",
+                            "source_media_type": "video",
+                        }
+                    ],
+                    "unit_refs": ["unit_video_002"],
+                    "derived_artifact_refs": ["transcript_season_001_episode_001"],
+                },
+                facts=["fact two"],
+            ),
+        ]
+        for chunk in chunks:
+            kb.save_chunk_result(project_id, chunk)
+
+        Extractor().merge_episode_content(
+            project_id,
+            "season_001",
+            "episode_001",
+            extraction_run_id="run-current",
+        )
+        payload = kb.load_episode_content(project_id, "season_001", "episode_001")
+        source_trace = payload["source_trace"]
+        assert source_trace["unit_refs"] == ["unit_video_001", "unit_video_002"]
+        assert source_trace["derived_artifact_refs"] == ["transcript_season_001_episode_001"]
+        assert len(source_trace["material_refs"]) == 2
+        assert source_trace["media_types"] == ["video"]
+        assert payload["media_types"] == ["video"]
+        assert source_trace["source_breakdown"] == {
+            "chunks": 2,
+            "materials": 2,
+            "units": 2,
+            "derived_artifacts": 1,
+            "media_types": {"video": 2},
+        }
+        assert payload["source_counts"]["source_trace_units"] == 2
+        assert payload["source_counts"]["source_trace_derived_artifacts"] == 1
+
+        Extractor().generate_episode_summary(
+            project_id,
+            "season_001",
+            "episode_001",
+            extraction_run_id="run-current",
+        )
+        episode_summary = kb.load_episode_summary(project_id, "season_001", "episode_001")
+        episode_summary_trace = episode_summary["source_trace"]
+        assert episode_summary["media_types"] == ["video"]
+        assert episode_summary_trace["episode_content_refs"] == [
+            {
+                "artifact_type": "episode_content",
+                "season_id": "season_001",
+                "episode_id": "episode_001",
+                "path": "seasons/season_001/episodes/episode_001/episode_content.json",
+                "extraction_run_id": "run-current",
+            }
+        ]
+        assert episode_summary_trace["unit_refs"] == ["unit_video_001", "unit_video_002"]
+
+        Extractor().merge_season_content(
+            project_id,
+            "season_001",
+            extraction_run_id="run-current",
+        )
+        season_content = kb.load_season_content(project_id, "season_001")
+        season_content_trace = season_content["source_trace"]
+        assert season_content["media_types"] == ["video"]
+        assert season_content_trace["episode_content_refs"] == [
+            {
+                "artifact_type": "episode_content",
+                "season_id": "season_001",
+                "episode_id": "episode_001",
+                "path": "seasons/season_001/episodes/episode_001/episode_content.json",
+                "extraction_run_id": "run-current",
+            }
+        ]
+        assert season_content_trace["unit_refs"] == ["unit_video_001", "unit_video_002"]
+        assert season_content_trace["source_breakdown"]["episode_contents"] == 1
+
+        Extractor().generate_season_summary(
+            project_id,
+            "season_001",
+            extraction_run_id="run-current",
+        )
+        season_summary = kb.load_season_summary(project_id, "season_001")
+        season_summary_trace = season_summary["source_trace"]
+        assert season_summary["media_types"] == ["video"]
+        assert season_summary_trace["season_content_refs"] == [
+            {
+                "artifact_type": "season_content",
+                "season_id": "season_001",
+                "path": "seasons/season_001/season_content.json",
+                "extraction_run_id": "run-current",
+            }
+        ]
+        assert season_summary_trace["episode_summary_refs"] == [
+            {
+                "artifact_type": "episode_summary",
+                "season_id": "season_001",
+                "episode_id": "episode_001",
+                "path": "seasons/season_001/episodes/episode_001/episode_summary.json",
+                "extraction_run_id": "run-current",
+            }
+        ]
+        assert season_summary_trace["unit_refs"] == ["unit_video_001", "unit_video_002"]
+        assert season_summary_trace["source_breakdown"]["season_contents"] == 1
+        assert season_summary_trace["source_breakdown"]["episode_summaries"] == 1
+
+
 def _assert_clean_regenerable_artifacts_scope() -> None:
     project_id = "validation-clean-scope"
     with _isolated_project_tree(project_id) as paths:
         regenerable_paths = [
             kb.source_manifest_path(project_id),
+            kb.extraction_run_plan_path(project_id, "run-current"),
+            kb.extraction_run_path(project_id, "run-current") / "derived_artifacts.json",
             kb.season_path(project_id, "season_001") / "season_content.json",
             kb.season_path(project_id, "season_001") / "season_summary.json",
             kb.season_path(project_id, "season_001") / "character_stage_states.json",
@@ -347,6 +520,7 @@ def _assert_clean_regenerable_artifacts_scope() -> None:
             kb.character_card_json_path(project_id, "official_card"),
             kb.preview_character_card_json_path(project_id),
             kb.root_path(project_id) / "facts.json",
+            kb.extraction_run_path(project_id, "run-current") / "notes.txt",
             kb.root_path(project_id) / "seasons" / "season_001" / "episodes" / "episode_001" / "notes.txt",
         ]
         for path in protected_paths:
@@ -419,6 +593,8 @@ def main() -> None:
     _assert_fast_episode_and_season_skip_without_inputs()
     _assert_full_extraction_modes_stop_before_completion_without_chunks()
     _assert_run_artifact_filtering()
+    _assert_chunk_result_source_trace_serialization()
+    _assert_episode_merge_source_trace()
     _assert_clean_regenerable_artifacts_scope()
     _assert_stale_marking_only_updates_compiled_official_cards()
     print("formal extraction workflow validation passed")
