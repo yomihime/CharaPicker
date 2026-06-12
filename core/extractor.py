@@ -1466,6 +1466,18 @@ class Extractor(QObject):
             if handler.supports(unit)
         ]
 
+    def _collect_audio_transcript_units_from_run_plan(
+        self,
+        run_plan: FormalExtractionRunPlan,
+    ) -> list[tuple[str, ExtractionUnit]]:
+        return [
+            (episode.season_id, unit)
+            for episode in run_plan.episodes
+            for unit in episode.units
+            if unit.media_type == MediaType.AUDIO
+            and unit.handler_options.get("transcript_candidate") is True
+        ]
+
     def _text_unit_handler(self, preset: CloudModelPreset) -> TextUnitHandler:
         context_tokens = context_window_budget_tokens(preset)
         max_input_chars = TEXT_UNIT_DEFAULT_INPUT_CHARS
@@ -1513,7 +1525,7 @@ class Extractor(QObject):
             return 0, usage_total, [], stats
 
         text_handler = handler or self._text_unit_handler(preset)
-        materials_root = ensure_project_tree(project_id).materials
+        project_paths = ensure_project_tree(project_id)
         extracted_chunks: list[ChunkExtractionResult] = []
         remaining_chunks = chunk_limit
         total_units = len(unit_inputs)
@@ -1522,7 +1534,11 @@ class Extractor(QObject):
                 break
             try:
                 result = text_handler.execute(
-                    materials_root=materials_root,
+                    source_root=(
+                        project_paths.knowledge_base
+                        if unit.handler_options.get("storage_root") == "knowledge_base"
+                        else project_paths.materials
+                    ),
                     unit=unit,
                     season_id=season_id,
                     extraction_stage=extraction_stage,
@@ -2737,6 +2753,9 @@ class Extractor(QObject):
             options=TranscriptionOptions(language=language, force_rebuild=force_rebuild),
         )
 
+    def _transcript_provider(self) -> TranscriptProvider:
+        return TranscriptProvider()
+
     def ensure_episode_transcripts_from_manifest(
         self,
         project_id: str,
@@ -2821,11 +2840,24 @@ class Extractor(QObject):
         language: str = "auto",
         force_rebuild: bool = False,
         emit_event: Callable[[dict], None] | None = None,
+        include_video: bool = True,
+        include_audio: bool = True,
+        provider: TranscriptProvider | None = None,
     ) -> list[EpisodeTranscript]:
-        provider = TranscriptProvider()
-        provider.prepare_run_plan(project_id, run_plan)
+        provider = provider or self._transcript_provider()
+        provider.prepare_run_plan(
+            project_id,
+            run_plan,
+            include_video=include_video,
+            include_audio=include_audio,
+        )
         kb.save_extraction_run_plan(project_id, run_plan)
-        requests = provider.collect_requests(project_id, run_plan)
+        requests = provider.collect_requests(
+            project_id,
+            run_plan,
+            include_video=include_video,
+            include_audio=include_audio,
+        )
         transcripts: list[EpisodeTranscript] = []
         total = len(requests)
         for index, request in enumerate(requests, start=1):
@@ -2836,6 +2868,7 @@ class Extractor(QObject):
                     DerivedArtifactStatus.MISSING,
                     warning="no_material_paths",
                 )
+                provider.remove_text_unit(run_plan, request.artifact_id)
                 continue
             self._emit_transcript_event(emit_event, request, index, total, InsightStatus.RUNNING)
             try:
@@ -2845,7 +2878,8 @@ class Extractor(QObject):
                     language=language,
                     force_rebuild=force_rebuild,
                 )
-            except AudioTranscriptionError as exc:
+                provider.materialize_text_unit(run_plan, request.artifact_id, transcript)
+            except (AudioTranscriptionError, ValueError) as exc:
                 warning = self._compact_exception_message(exc)
                 provider.mark_status(
                     run_plan,
@@ -2853,6 +2887,7 @@ class Extractor(QObject):
                     DerivedArtifactStatus.FAILED,
                     warning=warning,
                 )
+                provider.remove_text_unit(run_plan, request.artifact_id)
                 LOGGER.warning(
                     "Episode transcription failed; project_id=%s season_id=%s episode_id=%s error=%s",
                     project_id,
@@ -2873,7 +2908,6 @@ class Extractor(QObject):
                         ).model_dump(mode="json")
                     )
                 continue
-            provider.mark_status(run_plan, request.artifact_id, DerivedArtifactStatus.READY)
             transcripts.append(transcript)
             self._emit_transcript_event(
                 emit_event,
@@ -3112,6 +3146,8 @@ class Extractor(QObject):
                 config.project_id,
                 run_plan,
                 emit_event=emit_event,
+                include_video=True,
+                include_audio=False,
             )
             transcripts_by_episode = {
                 (transcript.source.season_id, transcript.source.episode_id): transcript
@@ -3859,6 +3895,8 @@ class Extractor(QObject):
                 config.project_id,
                 run_plan,
                 emit_event=emit_event,
+                include_video=True,
+                include_audio=False,
             )
             transcripts_by_episode = {
                 (transcript.source.season_id, transcript.source.episode_id): transcript
@@ -4753,7 +4791,13 @@ class Extractor(QObject):
         )
         text_unit_inputs = self._collect_text_units_from_run_plan(run_plan)
         image_unit_inputs = self._collect_image_units_from_run_plan(run_plan)
-        if not chunk_inputs and not text_unit_inputs and not image_unit_inputs:
+        audio_transcript_inputs = self._collect_audio_transcript_units_from_run_plan(run_plan)
+        if (
+            not chunk_inputs
+            and not text_unit_inputs
+            and not image_unit_inputs
+            and not audio_transcript_inputs
+        ):
             message = t("extractor.full.noVideoMaterials")
             emit_event(
                 InsightEvent(
@@ -4783,8 +4827,22 @@ class Extractor(QObject):
 
         video_input_mode = normalize_video_input_mode(preset.video_input_mode, preset.provider)
         provider_profile = cloud_model_provider(preset.provider)
+        if audio_transcript_inputs:
+            self.ensure_episode_transcripts_from_run_plan(
+                config.project_id,
+                run_plan,
+                emit_event=emit_event,
+                include_video=False,
+                include_audio=True,
+            )
+            text_unit_inputs = self._collect_text_units_from_run_plan(run_plan)
         if chunk_inputs and self._video_mode_requires_transcript(video_input_mode):
-            TranscriptProvider().prepare_run_plan(config.project_id, run_plan)
+            self._transcript_provider().prepare_run_plan(
+                config.project_id,
+                run_plan,
+                include_video=True,
+                include_audio=False,
+            )
             kb.save_extraction_run_plan(config.project_id, run_plan)
             chunk_inputs = self._collect_formal_video_chunk_inputs_from_run_plan(
                 config.project_id,
@@ -5094,6 +5152,46 @@ class Extractor(QObject):
                 extracted_chunks = []
             for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
                 overall_usage[key] += extraction_usage.get(key, 0)
+        if created_count <= 0:
+            run_plan = self.prepare_formal_extraction_run_plan(config.project_id)
+            if self._collect_audio_transcript_units_from_run_plan(run_plan):
+                self.ensure_episode_transcripts_from_run_plan(
+                    config.project_id,
+                    run_plan,
+                    emit_event=emit_event,
+                    include_video=False,
+                    include_audio=True,
+                )
+                try:
+                    created_count, extraction_usage, extracted_chunks, _ = (
+                        self._extract_text_units(
+                            config.project_id,
+                            run_plan,
+                            preset=preset,
+                            extraction_stage=ExtractionArtifactStage.PREVIEW,
+                            chunk_limit=PREVIEW_MAX_CHUNKS,
+                            emit_progress=emit_progress,
+                            progress_base=30,
+                            progress_span=55,
+                        )
+                    )
+                except ExtractionStoppedError:
+                    raise
+                except Exception:  # noqa: BLE001
+                    LOGGER.error(
+                        "Preview chunk extraction from transcript failed; project_id=%s",
+                        config.project_id,
+                        exc_info=True,
+                    )
+                    created_count = 0
+                    extraction_usage = {
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0,
+                    }
+                    extracted_chunks = []
+                for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                    overall_usage[key] += extraction_usage.get(key, 0)
         if created_count <= 0:
             run_plan = self.prepare_formal_extraction_run_plan(config.project_id)
             try:

@@ -19,8 +19,12 @@ from core.extraction_plan import (
     TextRange,
     TimeRange,
 )
-from core.models import ChunkExtractionResult, ExtractionArtifactStage
-from core.timed_text_parser import TimedTextSegment, parse_timed_text
+from core.models import ChunkExtractionResult, EpisodeTranscript, ExtractionArtifactStage
+from core.timed_text_parser import (
+    TimedTextSegment,
+    build_timed_text_document,
+    parse_timed_text,
+)
 from utils.ai_model_middleware import ModelBackend, ModelCallRequest
 from utils.chunker import TextChunkingResult, chunk_text_with_ranges
 from utils.media_types import SUPPORTED_TIMED_TEXT_SUFFIXES
@@ -28,6 +32,7 @@ from utils.media_types import SUPPORTED_TIMED_TEXT_SUFFIXES
 
 TEXT_DOCUMENT_UNIT_KINDS = frozenset({"document_text", "controlled_json_text"})
 TIMED_TEXT_UNIT_KINDS = frozenset({"subtitle_text"})
+TRANSCRIPT_TEXT_UNIT_KINDS = frozenset({"transcript_text"})
 TEXT_DOCUMENT_SUFFIXES = frozenset({".txt", ".md", ".json"})
 TEXT_DECODE_ENCODINGS = ("utf-8-sig", "utf-8", "gb18030", "shift_jis")
 ModelJsonCall = Callable[[ModelCallRequest], FormalExtractionJsonResult]
@@ -56,6 +61,7 @@ class PreparedTextChunk:
     text: str
     start_offset: int
     end_offset: int
+    timed_text_format: str = ""
     timed_segments: list[TimedTextSegment] = field(default_factory=list)
 
 
@@ -81,6 +87,8 @@ class TextUnitHandler:
             return False
         if unit.unit_kind in TEXT_DOCUMENT_UNIT_KINDS:
             return True
+        if unit.unit_kind in TRANSCRIPT_TEXT_UNIT_KINDS:
+            return True
         return (
             unit.unit_kind in TIMED_TEXT_UNIT_KINDS
             and Path(unit.material_ref.relative_path).suffix.lower()
@@ -90,7 +98,7 @@ class TextUnitHandler:
     def execute(
         self,
         *,
-        materials_root: Path,
+        source_root: Path,
         unit: ExtractionUnit,
         season_id: str,
         extraction_stage: ExtractionArtifactStage,
@@ -105,8 +113,8 @@ class TextUnitHandler:
         if not self.supports(unit):
             raise ValueError(f"unsupported text extraction unit: {unit.unit_kind}")
 
-        source_path = self._material_path(materials_root, unit)
-        parsed = self.parse_material(source_path)
+        source_path = self._source_path(source_root, unit)
+        parsed = self.parse_material(source_path, unit_kind=unit.unit_kind)
         prepared_chunks, chunk_warnings = self._prepare_chunks(parsed, chunk_limit=chunk_limit)
         warnings = [*parsed.warnings, *chunk_warnings]
         output: list[ChunkExtractionResult] = []
@@ -180,7 +188,7 @@ class TextUnitHandler:
             token_usage=usage_total,
         )
 
-    def parse_material(self, path: Path) -> ParsedTextMaterial:
+    def parse_material(self, path: Path, *, unit_kind: str = "") -> ParsedTextMaterial:
         suffix = path.suffix.lower()
         if suffix not in TEXT_DOCUMENT_SUFFIXES | SUPPORTED_TIMED_TEXT_SUFFIXES:
             raise ValueError(f"unsupported text material suffix: {suffix or '<none>'}")
@@ -189,6 +197,8 @@ class TextUnitHandler:
         warnings: list[str] = []
         if encoding not in {"utf-8", "utf-8-sig"}:
             warnings.append(f"text_decoded_with_fallback:{encoding}")
+        if unit_kind in TRANSCRIPT_TEXT_UNIT_KINDS:
+            return self._parse_transcript_material(text, encoding=encoding, warnings=warnings)
         if suffix in SUPPORTED_TIMED_TEXT_SUFFIXES:
             document = parse_timed_text(path, text)
             return ParsedTextMaterial(
@@ -207,6 +217,53 @@ class TextUnitHandler:
                 raise ValueError("controlled JSON text must contain an object or array")
             text = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
         return ParsedTextMaterial(text=text, encoding=encoding, warnings=warnings)
+
+    def _parse_transcript_material(
+        self,
+        text: str,
+        *,
+        encoding: str,
+        warnings: list[str],
+    ) -> ParsedTextMaterial:
+        try:
+            transcript = EpisodeTranscript.model_validate(json.loads(text))
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise ValueError("transcript material is not a valid EpisodeTranscript") from exc
+        segments = [
+            TimedTextSegment(
+                index=index,
+                source_line=None,
+                start_seconds=segment.start_seconds,
+                end_seconds=max(segment.start_seconds, segment.end_seconds),
+                text=segment.text.strip(),
+                raw_text=segment.text,
+            )
+            for index, segment in enumerate(transcript.segments, start=1)
+            if segment.text.strip()
+        ]
+        if not segments and transcript.plain_text.strip():
+            segments.append(
+                TimedTextSegment(
+                    index=1,
+                    source_line=None,
+                    start_seconds=0.0,
+                    end_seconds=0.0,
+                    text=transcript.plain_text.strip(),
+                    raw_text=transcript.plain_text,
+                )
+            )
+        document = build_timed_text_document(
+            segments,
+            format_name="transcript",
+            warnings=warnings,
+        )
+        return ParsedTextMaterial(
+            text=document.text,
+            encoding=encoding,
+            warnings=document.warnings,
+            timed_text_format=document.format_name,
+            timed_segments=document.segments,
+        )
 
     def _prepare_chunks(
         self,
@@ -246,7 +303,14 @@ class TextUnitHandler:
             candidate = [*current, segment]
             candidate_text = self._timed_chunk_text(parsed.text, candidate)
             if current and len(candidate_text) > self.config.max_input_chars:
-                chunks.append(self._prepared_timed_chunk(parsed.text, current, len(chunks) + 1))
+                chunks.append(
+                    self._prepared_timed_chunk(
+                        parsed.text,
+                        current,
+                        len(chunks) + 1,
+                        parsed.timed_text_format,
+                    )
+                )
                 if len(chunks) >= max_chunks:
                     remaining = len(parsed.timed_segments) - sum(
                         len(chunk.timed_segments) for chunk in chunks
@@ -271,7 +335,14 @@ class TextUnitHandler:
                     f"remaining_segments={len(current)}"
                 )
             else:
-                chunks.append(self._prepared_timed_chunk(parsed.text, current, len(chunks) + 1))
+                chunks.append(
+                    self._prepared_timed_chunk(
+                        parsed.text,
+                        current,
+                        len(chunks) + 1,
+                        parsed.timed_text_format,
+                    )
+                )
         if len(chunks) > 1:
             warnings.append(f"timed_text_split_into_chunks:count={len(chunks)}")
         return chunks, warnings
@@ -314,8 +385,6 @@ class TextUnitHandler:
             evidence_locator.update(
                 {
                     "time_range": time_range.model_dump(mode="json"),
-                    "source_line_start": timed_segments[0].source_line,
-                    "source_line_end": timed_segments[-1].source_line,
                     "timed_text_segments": [
                         {
                             "index": segment.index,
@@ -330,6 +399,14 @@ class TextUnitHandler:
                     ],
                 }
             )
+            source_lines = [
+                segment.source_line
+                for segment in timed_segments
+                if segment.source_line is not None
+            ]
+            if source_lines:
+                evidence_locator["source_line_start"] = source_lines[0]
+                evidence_locator["source_line_end"] = source_lines[-1]
         evidence = EvidenceRef(
             evidence_id=f"evidence_{chunk_id}",
             material_ref=material_ref,
@@ -369,6 +446,9 @@ class TextUnitHandler:
                 "units": 1,
                 "text_ranges": 1,
                 "timed_text_segments": len(timed_segments),
+                "transcript_segments": (
+                    len(timed_segments) if unit.unit_kind == "transcript_text" else 0
+                ),
             },
             aggregation_warnings=list(warnings),
             model_metadata=result.model_metadata,
@@ -391,12 +471,14 @@ class TextUnitHandler:
         source_text: str,
         segments: list[TimedTextSegment],
         index: int,
+        timed_text_format: str,
     ) -> PreparedTextChunk:
         return PreparedTextChunk(
             index=index,
             text=self._timed_chunk_text(source_text, segments),
             start_offset=segments[0].start_offset,
             end_offset=segments[-1].end_offset,
+            timed_text_format=timed_text_format,
             timed_segments=list(segments),
         )
 
@@ -419,16 +501,29 @@ class TextUnitHandler:
     def _source_locator(chunk: PreparedTextChunk) -> str:
         if not chunk.timed_segments:
             return f"text={chunk.start_offset}:{chunk.end_offset}"
-        return (
-            f"lines={chunk.timed_segments[0].source_line}-{chunk.timed_segments[-1].source_line};"
+        parts: list[str] = []
+        source_lines = [
+            segment.source_line
+            for segment in chunk.timed_segments
+            if segment.source_line is not None
+        ]
+        if source_lines:
+            parts.append(f"lines={source_lines[0]}-{source_lines[-1]}")
+        parts.append(
             f"time={chunk.timed_segments[0].start_seconds:.3f}-"
             f"{max(segment.end_seconds for segment in chunk.timed_segments):.3f}"
         )
+        return ";".join(parts)
 
     @staticmethod
     def _evidence_guidance(chunk: PreparedTextChunk) -> str:
         if not chunk.timed_segments:
             return "只依据当前文本范围提取；证据不足时保留不确定性。"
+        if chunk.timed_text_format == "transcript":
+            return (
+                "保留每段转写文本的时间范围。speaker=unknown 表示转写结果没有提供说话人，"
+                "不得根据台词内容猜测或强行归属；仅可使用显式 speaker 字段。"
+            )
         return (
             "保留每条字幕的时间与源行号。speaker=unknown 表示素材没有提供说话人，"
             "不得根据台词内容猜测或强行归属；仅可使用显式 speaker 字段。"
@@ -441,22 +536,29 @@ class TextUnitHandler:
         timed_segments: list[TimedTextSegment],
     ) -> str:
         if timed_segments:
-            return (
+            evidence = (
                 f"{relative_path}#time={timed_segments[0].start_seconds:.3f}-"
                 f"{max(segment.end_seconds for segment in timed_segments):.3f}"
-                f"&lines={timed_segments[0].source_line}-{timed_segments[-1].source_line}"
             )
+            source_lines = [
+                segment.source_line
+                for segment in timed_segments
+                if segment.source_line is not None
+            ]
+            if source_lines:
+                evidence += f"&lines={source_lines[0]}-{source_lines[-1]}"
+            return evidence
         return f"{relative_path}#text={text_range.start_offset}-{text_range.end_offset}"
 
-    def _material_path(self, materials_root: Path, unit: ExtractionUnit) -> Path:
-        root = materials_root.resolve()
+    def _source_path(self, source_root: Path, unit: ExtractionUnit) -> Path:
+        root = source_root.resolve()
         path = (root / unit.material_ref.relative_path).resolve()
         try:
             path.relative_to(root)
         except ValueError as exc:
-            raise ValueError("text material path escapes materials root") from exc
+            raise ValueError("text source path escapes source root") from exc
         if not path.is_file():
-            raise ValueError(f"text material does not exist: {unit.material_ref.relative_path}")
+            raise ValueError(f"text source does not exist: {unit.material_ref.relative_path}")
         return path
 
     def _decode_text(self, raw: bytes, path: Path) -> tuple[str, str]:

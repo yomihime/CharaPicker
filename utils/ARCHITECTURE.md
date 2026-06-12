@@ -33,7 +33,7 @@
 - `network_middleware.py`：统一应用内 HTTP(S) 请求、代理读取、连通性测试、URL/错误脱敏和 DashScope 临时代理环境。
 - `llamacpp_downloader.py`：下载并安装 llama.cpp 运行时到 `bin/`。
 - `whispercpp_downloader.py`：下载并安装 whisper.cpp 运行时到 `bin/whisper.cpp/`，下载 Whisper 模型到 `models/whisper/`。
-- `audio_transcription.py`：封装本地 whisper.cpp episode 转写、缓存命中判断、音轨准备和 `episode_transcript.json` 写入。
+- `audio_transcription.py`：封装本地 whisper.cpp episode 转写、音频/视频输入准备、缓存命中判断和 `episode_transcript.json` 写入；缓存键覆盖素材指纹、运行时、模型和语言，日志不记录完整转写文本。
 - `ffmpeg_downloader.py`：下载并安装 ffmpeg 运行时到 `bin/`。
 - `source_importer.py`：把外部原始素材按项目目录规则复制到 `projects/{project_id}/raw`，计算外部路径对应的 raw 目标，准备 `materials`，并支持 raw 清理和素材移除。
 - `source_status.py`：计算项目页需要的素材显示名、raw/materials 映射、项目内素材列表和素材状态。

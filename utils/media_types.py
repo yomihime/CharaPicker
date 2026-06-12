@@ -92,8 +92,9 @@ _AUDIO_PROFILE = SourceSupportProfile(
     media_type="audio",
     content_form_hint="unknown",
     import_supported=True,
-    preview_support=SourceSupportLevel.PLANNED,
-    formal_support=SourceSupportLevel.PLANNED,
+    preview_support=SourceSupportLevel.SUPPORTED,
+    formal_support=SourceSupportLevel.SUPPORTED,
+    reason="transcript_required",
 )
 _TEXT_PROFILE = SourceSupportProfile(
     media_type="text",

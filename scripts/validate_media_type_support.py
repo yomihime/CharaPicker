@@ -54,6 +54,11 @@ def _assert_suffix_matrix() -> None:
 
 
 def _assert_special_support_states() -> None:
+    audio_profile = source_support_profile("drama.wav")
+    assert audio_profile.preview_support == SourceSupportLevel.SUPPORTED
+    assert audio_profile.formal_support == SourceSupportLevel.SUPPORTED
+    assert audio_profile.reason == "transcript_required"
+
     for suffix in SUPPORTED_STATIC_IMAGE_SUFFIXES:
         profile = source_support_profile(f"portrait{suffix}")
         assert profile.preview_support == SourceSupportLevel.SUPPORTED

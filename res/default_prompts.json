@@ -10,11 +10,11 @@
       "user_template": "以下是一个预览试跑中的视频 chunk。\n[SOURCE_PATH] {source_path}\n\n本次任务只用于虚构作品的角色人格档案、素材索引和内部知识库中间产物，不用于生成新剧情，也不请求生成情色、暴力、违法、自伤或其他违规内容。提取结果会作为后续编译流程读取的结构化 JSON，不会作为最终文本直接展示给用户。请完整提取片段中的所有有效角色相关信息，不要按任何预设关注对象筛选，不要接收、使用或推断用户在界面中填写的关注对象列表，也不要把信息先标记为属于某个指定关注对象。只根据当前 chunk 中实际出现的画面、对白、动作和关系互动提取信息，并把其中的人物和事件视作虚构叙事内容。请聚焦角色身份、情绪、行为和关系变化；与角色档案无关的画面细节可以跳过，涉及角色状态的画面只做中立概括，不要扩写、渲染或细节化画面内容。如果出现敏感或可能受限内容，请使用中立、克制、非刺激性的概括，必要时写“未确认”或“需人工复核”，不要生成新增剧情、情色描写、暴力细节、违法步骤或安全规避建议。每条涉及角色的列表项必须显式写出素材中可见或可听到的角色姓名/称呼，不要只写“他/她/对方”，也不要把一个角色的行为、情绪或台词归给另一个角色。请只输出 JSON 对象，字段必须包含：facts, behavior_traits, dialogue_style, relationships, conflicts, character_state_changes, insight_summary, evidence_refs。所有列表字段都返回字符串数组；insight_summary 不超过 50 个中文字符。只输出一个原始 JSON 对象，不要输出 Markdown、解释、思考过程或代码块；第一个字符必须是 {{，最后一个字符必须是 }}。"
     },
     "preview_text_unit_extraction": {
-      "system": "你是 CharaPicker 的文本素材提取助手。你只分析用户提供的小说、设定集、台本或结构化文本片段，提取可追溯的角色与剧情事实，不续写、不臆造，不把片段之外的信息当作事实。输出必须是可直接解析的 JSON object。",
+      "system": "你是 CharaPicker 的文本素材提取助手。你只分析用户提供的小说、设定集、台本、字幕、音频转写或结构化文本片段，提取可追溯的角色与剧情事实，不续写、不臆造，不把片段之外的信息当作事实。输出必须是可直接解析的 JSON object。",
       "user_template": "以下是文本素材的预览片段。\n[SEASON_ID] {season_id}\n[EPISODE_ID] {episode_id}\n[CHUNK_ID] {chunk_id}\n[SOURCE_PATH] {source_path}\n[CONTENT_FORM] {content_form}\n[SOURCE_LOCATOR] {source_locator}\n[EVIDENCE_GUIDANCE] {evidence_guidance}\n\n[TEXT]\n{chunk_text}\n\n请返回 JSON object，字段包含 facts、behavior_traits、dialogue_style、relationship_interactions、conflicts、character_state_changes、insight_summary、evidence_refs。所有列表字段返回字符串数组；证据不足时保持克制，不要强行归属角色或关系。"
     },
     "formal_text_unit_extraction": {
-      "system": "你是 CharaPicker 的正式文本素材提取助手。你只依据当前小说、设定集、台本或受控 JSON 文本片段生成内部结构化中间产物。保留角色、事件、行为、对话风格、关系变化、冲突与状态变化；不得续写、补完或把上下文猜测写成事实。输出必须是可直接解析的 JSON object。",
+      "system": "你是 CharaPicker 的正式文本素材提取助手。你只依据当前小说、设定集、台本、字幕、音频转写或受控 JSON 文本片段生成内部结构化中间产物。保留角色、事件、行为、对话风格、关系变化、冲突与状态变化；不得续写、补完或把上下文猜测写成事实。输出必须是可直接解析的 JSON object。",
       "user_template": "以下是正式提取流程中的文本片段。\n[SEASON_ID] {season_id}\n[EPISODE_ID] {episode_id}\n[CHUNK_ID] {chunk_id}\n[SOURCE_PATH] {source_path}\n[CONTENT_FORM] {content_form}\n[SOURCE_LOCATOR] {source_locator}\n[EVIDENCE_GUIDANCE] {evidence_guidance}\n\n[TEXT]\n{chunk_text}\n\n请返回 JSON object，字段包含 facts、behavior_traits、dialogue_style、relationship_interactions、conflicts、character_state_changes、insight_summary、evidence_refs。所有列表字段返回字符串数组；每条结论只依据当前片段，证据不足时不要强行归属角色、动机或关系。"
     },
     "preview_image_unit_extraction": {

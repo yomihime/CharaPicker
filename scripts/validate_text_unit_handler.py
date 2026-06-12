@@ -187,7 +187,7 @@ def _assert_text_only_workflow() -> None:
         )
         unit = text_inputs[0][1]
         direct = handler.execute(
-            materials_root=paths.materials,
+            source_root=paths.materials,
             unit=unit,
             season_id=text_inputs[0][0],
             extraction_stage=ExtractionArtifactStage.PREVIEW,

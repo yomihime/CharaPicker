@@ -208,7 +208,7 @@ def _assert_scan_and_extraction() -> None:
         assert handler.supports(text_units["deferred.vtt"]) is False
 
         result = handler.execute(
-            materials_root=paths.materials,
+            source_root=paths.materials,
             unit=associated_srt,
             season_id=video_episode.season_id,
             extraction_stage=ExtractionArtifactStage.PREVIEW,

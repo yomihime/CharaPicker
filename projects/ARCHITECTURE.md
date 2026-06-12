@@ -25,7 +25,7 @@
 - `{project_id}/knowledge_base/extraction_runs/{run_id}/plan.json`：正式提取 run plan，记录本次运行的素材引用、unit、媒体类型和派生成果索引入口。
 - `{project_id}/knowledge_base/source_manifest.json`：旧结构兼容/调试用的素材根目录、季、集与稳定内部 ID 映射；正式提取初始化以 run plan 为主。
 - `{project_id}/knowledge_base/seasons/{season_id}/episodes/{episode_id}/chunks/{chunk_id}.json`：当前分层知识库中的 chunk 结构化结果。
-- `{project_id}/knowledge_base/seasons/{season_id}/episodes/{episode_id}/episode_transcript.json`：单集音频转写结果，保存可追溯对白/旁白文本、时间段、来源素材指纹和转写后端信息。
+- `{project_id}/knowledge_base/seasons/{season_id}/episodes/{episode_id}/episode_transcript.json`：单集音频转写结果，保存可追溯对白/旁白文本、时间段、来源素材指纹和转写后端信息；run plan 以 text 型 `DerivedArtifact` 和 `transcript_text` 派生 unit 引用它，原始 audio/video 仍保留为 source refs。
 - `{project_id}/knowledge_base/seasons/{season_id}/episodes/{episode_id}/episode_content.json`：单集完整结构化内容合并结果。
 - `{project_id}/knowledge_base/seasons/{season_id}/episodes/{episode_id}/episode_summary.json`：单集压缩摘要。
 - `{project_id}/knowledge_base/seasons/{season_id}/season_content.json`：单季完整结构化内容合并结果。

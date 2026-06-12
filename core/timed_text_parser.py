@@ -19,7 +19,7 @@ _HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 @dataclass(frozen=True, slots=True)
 class TimedTextSegment:
     index: int
-    source_line: int
+    source_line: int | None
     start_seconds: float
     end_seconds: float
     text: str
@@ -43,9 +43,9 @@ def parse_timed_text(path: Path, text: str) -> TimedTextDocument:
         raise ValueError(f"unsupported timed text suffix: {suffix or '<none>'}")
     if suffix == ".srt":
         segments, warnings = _parse_srt(text)
-        return _build_document(segments, format_name="srt", warnings=warnings)
+        return build_timed_text_document(segments, format_name="srt", warnings=warnings)
     segments, warnings = _parse_ass(text)
-    return _build_document(segments, format_name="ass", warnings=warnings)
+    return build_timed_text_document(segments, format_name="ass", warnings=warnings)
 
 
 def _parse_srt(text: str) -> tuple[list[TimedTextSegment], list[str]]:
@@ -147,22 +147,29 @@ def _parse_ass(text: str) -> tuple[list[TimedTextSegment], list[str]]:
     return segments, warnings
 
 
-def _build_document(
+def build_timed_text_document(
     segments: list[TimedTextSegment],
     *,
     format_name: str,
-    warnings: list[str],
+    warnings: list[str] | None = None,
 ) -> TimedTextDocument:
+    document_warnings = list(warnings or [])
     rendered_parts: list[str] = []
     positioned_segments: list[TimedTextSegment] = []
     offset = 0
     for segment in segments:
         speaker = segment.speaker or "unknown"
-        rendered = (
-            f"[cue={segment.index} line={segment.source_line} "
-            f"time={_format_seconds(segment.start_seconds)}-{_format_seconds(segment.end_seconds)} "
-            f"speaker={speaker}]\n{segment.text}"
+        locator_parts = [f"cue={segment.index}"]
+        if segment.source_line is not None:
+            locator_parts.append(f"line={segment.source_line}")
+        locator_parts.extend(
+            [
+                f"time={_format_seconds(segment.start_seconds)}-"
+                f"{_format_seconds(segment.end_seconds)}",
+                f"speaker={speaker}",
+            ]
         )
+        rendered = f"[{' '.join(locator_parts)}]\n{segment.text}"
         if rendered_parts:
             rendered = "\n" + rendered
         start_offset = offset + (1 if rendered_parts else 0)
@@ -176,12 +183,12 @@ def _build_document(
             )
         )
     if not positioned_segments:
-        warnings.append(f"{format_name}_no_usable_segments")
+        document_warnings.append(f"{format_name}_no_usable_segments")
     return TimedTextDocument(
         text="".join(rendered_parts),
         segments=positioned_segments,
         format_name=format_name,
-        warnings=warnings,
+        warnings=document_warnings,
     )
 
 

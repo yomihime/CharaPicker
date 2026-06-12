@@ -23,10 +23,10 @@
 - `source_scanner.py`：保留旧视频目录扫描、正式扫描入口、预览视频 chunk 收集和预览 chunk 标识生成，并把非视频 unit 扩展委托给 `material_unit_scanner.py`。
 - `material_unit_scanner.py`：把文本、字幕、音频、图片和 GIF 映射为正式 run plan unit，负责唯一字幕关联、图片页组候选、稳定 ID、定位 metadata 和不支持状态；不执行解析或模型提取。
 - `timed_text_parser.py`：使用标准库解析首批支持的 `.srt` 和 `.ass`，保留开始/结束时间、源行号、原始文本和 ASS 显式 speaker；不推断未知说话人，不把字幕当成 transcript 派生成果。
-- `text_unit_handler.py`：负责普通 `.txt`、`.md`、受控 `.json` 以及首批 `.srt` / `.ass` 文本 unit 的解码、结构校验、预算分块、文本/时间范围 evidence、文本模型请求和 `ChunkExtractionResult` 构建；字幕 evidence 保留 segment 定位，speaker 只接受素材中的显式字段。
+- `text_unit_handler.py`：负责普通 `.txt`、`.md`、受控 `.json`、首批 `.srt` / `.ass` 以及派生 `episode_transcript.json` 文本 unit 的解码、结构校验、预算分块、文本/时间范围 evidence、文本模型请求和 `ChunkExtractionResult` 构建；字幕与 transcript evidence 保留 segment 定位，speaker 只接受素材中的显式字段。
 - `image_unit_handler.py`：负责 `.png`、`.jpg` / `.jpeg`、`.webp` 静态图片的文件上限与签名校验、图片模型请求、每张图片内部输出预算、页码/可选区域 evidence 和 `ChunkExtractionResult` 构建；不接管 BMP/GIF，也不复用视频每分钟输出口径。
-- `extractor.py`：定义 `Extractor`，作为 UI-facing 提取入口，负责知识库分层初始化、预览提取、完整/洁净/快速正式提取、chunk/episode/season 内容合并、episode transcript 入口，并委托知识库读写与素材扫描 helper；文本-only 或图片-only 项目可进入预览和正式提取，具体 unit 由对应 handler 执行。
-- `transcript_provider.py`：把 transcript 表达为 run plan 中的 text 型 `DerivedArtifact`，收集每集可转写素材并调用既有音频转写实现；不把 transcript 作为新的 `MediaType`。
+- `extractor.py`：定义 `Extractor`，作为 UI-facing 提取入口，负责知识库分层初始化、预览提取、完整/洁净/快速正式提取、chunk/episode/season 内容合并、episode transcript 入口，并委托知识库读写与素材扫描 helper；文本-only、图片-only 或音频转写项目可进入预览和正式提取，具体 unit 由对应 handler 执行。
+- `transcript_provider.py`：把 transcript 表达为 run plan 中的 text 型 `DerivedArtifact`，收集每集 video/audio 可转写素材并调用既有音频转写实现；READY artifact 会物化为短稳定 ID 的 `transcript_text` 派生 unit，引用知识库内 `episode_transcript.json`，不把 transcript 作为新的 `MediaType`。
 - `video_unit_handler.py`：封装正式视频 unit 的时长探测、按时长缩放输出 token 和 `ModelCallRequest` 构造；模型调用仍由 `utils.ai_model_middleware` 执行。
 - `compiler.py`：定义 `build_character_compile_request()`、`compile_character_state()`、`compile_character_state_by_season_episode()`、`write_character_stage_states()` 和 `final_polish_character_state()`，负责从知识库聚合角色阶段状态。
 - `character_card_store.py`：管理 `knowledge_base/character_cards/` 与 `preview_character_cards/` 下角色卡的创建、读取、保存、列表、删除和封面路径登记。
@@ -59,6 +59,7 @@
 - 完整提取和洁净提取保持线性上下文流程；快速提取允许 chunk 并发且不带上下文，随后用 AI 并发重整理集和季。
 - 文本 unit 使用独立输入字符预算和固定内部输出 token 上限，不复用视频“每分钟输出 token”语义；文本 chunk 必须保留原文 offset、素材引用和结构化 evidence。
 - `.srt` / `.ass` 通过普通 `text` handler 进入预览与正式提取；`.vtt` / `.lrc` 当前只允许导入和扫描，必须保留 unsupported warning，不能静默当普通文档处理。
+- 音频素材通过 `audio -> DerivedArtifactKind.TRANSCRIPT -> transcript_text` 进入文本提取；转写失败只标记对应 artifact 并发出 warning，不得阻断同次运行中不依赖 transcript 的文本、图片或视频流程。
 - PNG/JPEG/WEBP 静态图片通过 `image` handler 进入预览与正式提取；图片证据至少保留项目内相对路径，并按可用信息附带页码、像素尺寸和 region。BMP/GIF 当前只允许导入和扫描，必须保留 unsupported warning。
 - 图片输出预算当前使用 handler 内部“每张”默认值并记录 `output_budget_basis=per_image`；在独立用户设置接线前，不得复用视频 `max_output_tokens` 的每分钟语义。
 - `source_kind` 是旧兼容摘要字段；聚合产物必须优先根据 `source_trace` 中的 `media_types` 推导单一来源或 `mixed`，不得把文本、图片或音频产物硬编码为 `video`。
