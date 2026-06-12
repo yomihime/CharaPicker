@@ -18,6 +18,7 @@
 - `validate_media_type_support.py`：执行不联网的媒体支持矩阵验证，覆盖四种媒体类型后缀、GIF/压缩包状态、集合内容形态提示和导入过滤。
 - `validate_multi_material_scanner.py`：执行不联网的通用素材扫描验证，覆盖视频兼容、字幕关联、文本/音频/图片 unit、GIF warning、稳定排序和 run plan 持久化。
 - `validate_text_unit_handler.py`：执行不联网的普通文本提取验证，覆盖文本/受控 JSON 解析、预算分块、offset/evidence、超长文本 warning、文本-only 预览与正式聚合，以及视频 unit 不被文本 handler 接管。
+- `validate_timed_text_handler.py`：执行不联网的时间文本验证，覆盖 SRT/ASS 解析、视频 episode 关联、独立字幕预览与正式提取、时间/行号/原始文本 evidence、显式 speaker 策略和 VTT 暂不支持反馈。
 
 ## 与其他目录的关系
 

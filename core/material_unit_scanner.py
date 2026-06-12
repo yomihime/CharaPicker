@@ -16,6 +16,7 @@ from core.extraction_plan import (
 )
 from utils.media_types import (
     IMAGE_SUFFIXES,
+    SUPPORTED_TIMED_TEXT_SUFFIXES,
     TIMED_TEXT_SUFFIXES,
     classify_source_collection,
     source_media_type,
@@ -255,6 +256,10 @@ def _material_unit(
         "support_reason": support.reason,
         **(metadata or {}),
     }
+    if path.suffix.lower() in TIMED_TEXT_SUFFIXES:
+        unit_metadata["timed_text_supported"] = (
+            path.suffix.lower() in SUPPORTED_TIMED_TEXT_SUFFIXES
+        )
     material_ref = MaterialRef(
         material_id=_stable_material_id(media_type, relative_path),
         relative_path=relative_path,
@@ -275,6 +280,13 @@ def _material_unit(
     }
     if media_type == MediaType.AUDIO:
         handler_options["transcript_candidate"] = True
+    if path.suffix.lower() in TIMED_TEXT_SUFFIXES:
+        handler_options.update(
+            {
+                "timed_text_format": path.suffix.lower().lstrip("."),
+                "speaker_policy": "explicit_only",
+            }
+        )
     return ExtractionUnit(
         unit_id=_stable_unit_id(media_type, relative_path),
         episode_id=episode_id,

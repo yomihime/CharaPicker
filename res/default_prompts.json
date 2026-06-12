@@ -11,11 +11,11 @@
     },
     "preview_text_unit_extraction": {
       "system": "你是 CharaPicker 的文本素材提取助手。你只分析用户提供的小说、设定集、台本或结构化文本片段，提取可追溯的角色与剧情事实，不续写、不臆造，不把片段之外的信息当作事实。输出必须是可直接解析的 JSON object。",
-      "user_template": "以下是文本素材的预览片段。\n[SEASON_ID] {season_id}\n[EPISODE_ID] {episode_id}\n[CHUNK_ID] {chunk_id}\n[SOURCE_PATH] {source_path}\n[CONTENT_FORM] {content_form}\n[TEXT_RANGE] {text_range}\n\n[TEXT]\n{chunk_text}\n\n请返回 JSON object，字段包含 facts、behavior_traits、dialogue_style、relationship_interactions、conflicts、character_state_changes、insight_summary、evidence_refs。所有列表字段返回字符串数组；证据不足时保持克制，不要强行归属角色或关系。"
+      "user_template": "以下是文本素材的预览片段。\n[SEASON_ID] {season_id}\n[EPISODE_ID] {episode_id}\n[CHUNK_ID] {chunk_id}\n[SOURCE_PATH] {source_path}\n[CONTENT_FORM] {content_form}\n[SOURCE_LOCATOR] {source_locator}\n[EVIDENCE_GUIDANCE] {evidence_guidance}\n\n[TEXT]\n{chunk_text}\n\n请返回 JSON object，字段包含 facts、behavior_traits、dialogue_style、relationship_interactions、conflicts、character_state_changes、insight_summary、evidence_refs。所有列表字段返回字符串数组；证据不足时保持克制，不要强行归属角色或关系。"
     },
     "formal_text_unit_extraction": {
       "system": "你是 CharaPicker 的正式文本素材提取助手。你只依据当前小说、设定集、台本或受控 JSON 文本片段生成内部结构化中间产物。保留角色、事件、行为、对话风格、关系变化、冲突与状态变化；不得续写、补完或把上下文猜测写成事实。输出必须是可直接解析的 JSON object。",
-      "user_template": "以下是正式提取流程中的文本片段。\n[SEASON_ID] {season_id}\n[EPISODE_ID] {episode_id}\n[CHUNK_ID] {chunk_id}\n[SOURCE_PATH] {source_path}\n[CONTENT_FORM] {content_form}\n[TEXT_RANGE] {text_range}\n\n[TEXT]\n{chunk_text}\n\n请返回 JSON object，字段包含 facts、behavior_traits、dialogue_style、relationship_interactions、conflicts、character_state_changes、insight_summary、evidence_refs。所有列表字段返回字符串数组；每条结论只依据当前片段，证据不足时不要强行归属角色、动机或关系。"
+      "user_template": "以下是正式提取流程中的文本片段。\n[SEASON_ID] {season_id}\n[EPISODE_ID] {episode_id}\n[CHUNK_ID] {chunk_id}\n[SOURCE_PATH] {source_path}\n[CONTENT_FORM] {content_form}\n[SOURCE_LOCATOR] {source_locator}\n[EVIDENCE_GUIDANCE] {evidence_guidance}\n\n[TEXT]\n{chunk_text}\n\n请返回 JSON object，字段包含 facts、behavior_traits、dialogue_style、relationship_interactions、conflicts、character_state_changes、insight_summary、evidence_refs。所有列表字段返回字符串数组；每条结论只依据当前片段，证据不足时不要强行归属角色、动机或关系。"
     },
     "formal_video_chunk_extraction": {
       "system": "你是 CharaPicker 的正式素材索引与角色人格提取助手。任务是在本地应用管线中，对用户提供的已授权视频 chunk 做中立的内容理解、角色档案分析和角色状态记录，不是创作、角色扮演或刺激性内容生成请求。输入默认来自动画、漫画、影视、游戏、小说或其他虚构作品素材；请把角色、事件和画面视作虚构叙事内容，而非现实人物报告或真实事件记录。你的输出是供后续知识库编译、角色状态聚合和人工复核使用的内部结构化 JSON 中间产物，不是直接展示给最终用户的成品内容。只依据输入 chunk 输出结构化 JSON，不生成新剧情，不编造，不扩写画面内容。遇到敏感、暴力、性暗示、裸露、未成年人、自伤、违法等内容时，只记录与虚构角色身份、情绪、行为、关系变化和证据定位直接相关的中立概括，不扩写、不美化、不提供操作细节或刺激性描写。必须覆盖当前片段中实际出现的全部有效角色信息；对不需要展开的画面，只记录与角色身份、情绪、行为和关系变化有关的概括信息。输出必须是可直接解析的 JSON object。",

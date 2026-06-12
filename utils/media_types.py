@@ -49,7 +49,9 @@ VIDEO_SUFFIXES = frozenset(
 )
 IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"})
 AUDIO_SUFFIXES = frozenset({".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma"})
-TIMED_TEXT_SUFFIXES = frozenset({".srt", ".ass", ".vtt", ".lrc"})
+SUPPORTED_TIMED_TEXT_SUFFIXES = frozenset({".srt", ".ass"})
+DEFERRED_TIMED_TEXT_SUFFIXES = frozenset({".vtt", ".lrc"})
+TIMED_TEXT_SUFFIXES = SUPPORTED_TIMED_TEXT_SUFFIXES | DEFERRED_TIMED_TEXT_SUFFIXES
 TEXT_SUFFIXES = frozenset({".txt", ".md", ".json"}) | TIMED_TEXT_SUFFIXES
 COMIC_ARCHIVE_SUFFIXES = frozenset({".cbz", ".cbr", ".zip", ".rar", ".7z"})
 SUPPORTED_SOURCE_SUFFIXES = VIDEO_SUFFIXES | IMAGE_SUFFIXES | AUDIO_SUFFIXES | TEXT_SUFFIXES
@@ -95,8 +97,24 @@ _TIMED_TEXT_PROFILE = SourceSupportProfile(
     media_type="text",
     content_form_hint="script",
     import_supported=True,
-    preview_support=SourceSupportLevel.PLANNED,
-    formal_support=SourceSupportLevel.PLANNED,
+    preview_support=SourceSupportLevel.SUPPORTED,
+    formal_support=SourceSupportLevel.SUPPORTED,
+)
+_VTT_PROFILE = SourceSupportProfile(
+    media_type="text",
+    content_form_hint="script",
+    import_supported=True,
+    preview_support=SourceSupportLevel.UNSUPPORTED,
+    formal_support=SourceSupportLevel.UNSUPPORTED,
+    reason="vtt_timed_text_not_supported",
+)
+_LRC_PROFILE = SourceSupportProfile(
+    media_type="text",
+    content_form_hint="script",
+    import_supported=True,
+    preview_support=SourceSupportLevel.UNSUPPORTED,
+    formal_support=SourceSupportLevel.UNSUPPORTED,
+    reason="lrc_timed_text_not_supported",
 )
 _CONTROLLED_JSON_PROFILE = SourceSupportProfile(
     media_type="text",
@@ -144,8 +162,12 @@ def source_support_profile(path_or_suffix: str | Path) -> SourceSupportProfile:
         return _IMAGE_PROFILE
     if suffix in AUDIO_SUFFIXES:
         return _AUDIO_PROFILE
-    if suffix in TIMED_TEXT_SUFFIXES:
+    if suffix in SUPPORTED_TIMED_TEXT_SUFFIXES:
         return _TIMED_TEXT_PROFILE
+    if suffix == ".vtt":
+        return _VTT_PROFILE
+    if suffix == ".lrc":
+        return _LRC_PROFILE
     if suffix == ".json":
         return _CONTROLLED_JSON_PROFILE
     if suffix in TEXT_SUFFIXES:

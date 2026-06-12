@@ -11,7 +11,9 @@ if str(REPO_ROOT) not in sys.path:
 
 from utils.media_types import (  # noqa: E402
     AUDIO_SUFFIXES,
+    DEFERRED_TIMED_TEXT_SUFFIXES,
     IMAGE_SUFFIXES,
+    SUPPORTED_TIMED_TEXT_SUFFIXES,
     SUPPORTED_SOURCE_SUFFIXES,
     TEXT_SUFFIXES,
     VIDEO_SUFFIXES,
@@ -45,6 +47,8 @@ def _assert_suffix_matrix() -> None:
     assert source_media_type("portrait.PNG") == "image"
     assert source_media_type("voice.flac") == "audio"
     assert source_media_type("dialogue.srt") == "text"
+    assert SUPPORTED_TIMED_TEXT_SUFFIXES == {".srt", ".ass"}
+    assert DEFERRED_TIMED_TEXT_SUFFIXES == {".vtt", ".lrc"}
 
 
 def _assert_special_support_states() -> None:
@@ -57,6 +61,21 @@ def _assert_special_support_states() -> None:
     json_profile = source_support_profile("setting.json")
     assert json_profile.import_supported is True
     assert json_profile.reason == "controlled_json_only"
+
+    for suffix in SUPPORTED_TIMED_TEXT_SUFFIXES:
+        profile = source_support_profile(f"dialogue{suffix}")
+        assert profile.preview_support == SourceSupportLevel.SUPPORTED
+        assert profile.formal_support == SourceSupportLevel.SUPPORTED
+
+    vtt_profile = source_support_profile("dialogue.vtt")
+    assert vtt_profile.preview_support == SourceSupportLevel.UNSUPPORTED
+    assert vtt_profile.formal_support == SourceSupportLevel.UNSUPPORTED
+    assert vtt_profile.reason == "vtt_timed_text_not_supported"
+
+    lrc_profile = source_support_profile("lyrics.lrc")
+    assert lrc_profile.preview_support == SourceSupportLevel.UNSUPPORTED
+    assert lrc_profile.formal_support == SourceSupportLevel.UNSUPPORTED
+    assert lrc_profile.reason == "lrc_timed_text_not_supported"
 
     archive_profile = source_support_profile("chapter.cbz")
     assert archive_profile.import_supported is False
