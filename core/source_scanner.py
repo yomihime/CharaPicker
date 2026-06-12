@@ -70,10 +70,6 @@ def scan_source_directory(source_root: str) -> dict[str, Any]:
     }
 
 
-def scan_formal_video_materials(project_id: str) -> dict[str, Any]:
-    return _scan_formal_video_materials(project_id)
-
-
 def scan_formal_materials(project_id: str) -> list[EpisodePlan]:
     video_scan = _scan_formal_video_materials(project_id)
     episodes: list[EpisodePlan] = []

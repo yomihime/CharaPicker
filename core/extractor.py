@@ -111,16 +111,8 @@ class Extractor(QObject):
     def scan_source_directory(self, source_root: str) -> dict[str, Any]:
         return source_scanner.scan_source_directory(source_root)
 
-    def scan_formal_video_materials(self, project_id: str) -> dict[str, Any]:
-        return source_scanner.scan_formal_video_materials(project_id)
-
     def scan_formal_materials(self, project_id: str) -> list[EpisodePlan]:
         return source_scanner.scan_formal_materials(project_id)
-
-    def generate_source_manifest(self, project_id: str, source_root: str) -> Path:
-        manifest = self.scan_source_directory(source_root)
-        manifest = self._with_extraction_run_metadata(manifest, mode=ExtractionMode.FULL)
-        return kb.save_source_manifest(project_id, manifest)
 
     def prepare_formal_extraction_run_plan(
         self,
@@ -136,18 +128,6 @@ class Extractor(QObject):
             episodes=episodes,
             metadata={"run_type": FULL_EXTRACTION_RUN_TYPE},
         )
-
-    def prepare_formal_video_extraction_plan(
-        self,
-        project_id: str,
-        mode: ExtractionMode = ExtractionMode.FULL,
-    ) -> dict[str, Any]:
-        run_plan = self.prepare_formal_extraction_run_plan(project_id, mode=mode)
-        manifest = self._legacy_manifest_from_run_plan(run_plan)
-        kb.save_extraction_run_plan(project_id, run_plan)
-        kb.initialize_structure_from_run_plan(project_id, run_plan)
-        kb.save_source_manifest(project_id, manifest)
-        return manifest
 
     def _formal_extraction_mode(self, mode: ExtractionMode) -> FormalExtractionMode:
         if mode == ExtractionMode.CLEAN:
@@ -1376,44 +1356,6 @@ class Extractor(QObject):
                 max_output_tokens_per_minute=max_output_tokens,
             )
         )
-
-    def _collect_formal_video_chunk_inputs(
-        self,
-        project_id: str,
-        manifest: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        chunk_inputs: list[dict[str, Any]] = []
-        extraction_run_id = self._manifest_string(manifest.get("extraction_run_id"))
-        for season in manifest.get("seasons", []):
-            if not isinstance(season, dict):
-                continue
-            season_id = self._manifest_string(season.get("season_id"))
-            if not season_id:
-                continue
-            for episode in season.get("episodes", []):
-                if not isinstance(episode, dict):
-                    continue
-                episode_id = self._manifest_string(episode.get("episode_id"))
-                if not episode_id:
-                    continue
-                for chunk in episode.get("chunks", []):
-                    if not isinstance(chunk, dict):
-                        continue
-                    chunk_id = self._manifest_string(chunk.get("chunk_id"))
-                    source_path = self._manifest_string(chunk.get("source_path"))
-                    if not chunk_id or not source_path:
-                        continue
-                    chunk_inputs.append(
-                        {
-                            "season_id": season_id,
-                            "episode_id": episode_id,
-                            "chunk_id": chunk_id,
-                            "source_path": source_path,
-                            "extraction_run_id": extraction_run_id,
-                            "video_path": self._formal_material_video_path(project_id, source_path),
-                        }
-                    )
-        return chunk_inputs
 
     def _collect_formal_video_chunk_inputs_from_run_plan(
         self,
@@ -2772,12 +2714,12 @@ class Extractor(QObject):
             value = 1
         return max(1, min(500, value))
 
-    def _extract_fast_chunk_json_from_manifest(
+    def _extract_fast_video_units(
         self,
         config: ProjectConfig,
         manifest: dict[str, Any],
         *,
-        chunk_inputs: list[dict[str, Any]] | None = None,
+        chunk_inputs: list[dict[str, Any]],
         concurrency: int = 1,
         backend: ModelBackend,
         provider: str,
@@ -2787,15 +2729,13 @@ class Extractor(QObject):
         video_fps: float,
         max_output_tokens: int,
         video_input_mode: VideoInputMode,
-        run_plan: FormalExtractionRunPlan | None = None,
+        run_plan: FormalExtractionRunPlan,
         progress_base: int = 5,
         progress_span: int = 90,
         emit_token_usage: Callable[[dict[str, int]], None] | None = None,
         emit_event: Callable[[dict], None] | None = None,
         emit_progress: Callable[[int], None] | None = None,
     ) -> tuple[int, dict[str, int], list[ChunkExtractionResult], dict[str, int]]:
-        if chunk_inputs is None:
-            chunk_inputs = self._collect_formal_video_chunk_inputs(config.project_id, manifest)
         stats = self._empty_full_extraction_stats(total_chunks=len(chunk_inputs))
         if not chunk_inputs:
             return (0, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, [], stats)
@@ -2813,18 +2753,11 @@ class Extractor(QObject):
         extracted_chunks_with_index: list[tuple[int, ChunkExtractionResult]] = []
         transcripts_by_episode: dict[tuple[str, str], EpisodeTranscript] = {}
         if video_handler.requires_transcript():
-            if run_plan is not None:
-                transcripts = self.ensure_episode_transcripts_from_run_plan(
-                    config.project_id,
-                    run_plan,
-                    emit_event=emit_event,
-                )
-            else:
-                transcripts = self.ensure_episode_transcripts_from_manifest(
-                    config.project_id,
-                    manifest,
-                    emit_event=emit_event,
-                )
+            transcripts = self.ensure_episode_transcripts_from_run_plan(
+                config.project_id,
+                run_plan,
+                emit_event=emit_event,
+            )
             transcripts_by_episode = {
                 (transcript.source.season_id, transcript.source.episode_id): transcript
                 for transcript in transcripts
@@ -3527,12 +3460,12 @@ class Extractor(QObject):
 
         return (usage_total, stats)
 
-    def _extract_full_chunk_json_from_manifest(
+    def _extract_full_video_units(
         self,
         config: ProjectConfig,
         manifest: dict[str, Any],
         *,
-        chunk_inputs: list[dict[str, Any]] | None = None,
+        chunk_inputs: list[dict[str, Any]],
         backend: ModelBackend,
         text_backend: ModelBackend,
         provider: str,
@@ -3542,14 +3475,12 @@ class Extractor(QObject):
         video_fps: float,
         max_output_tokens: int,
         video_input_mode: VideoInputMode,
-        run_plan: FormalExtractionRunPlan | None = None,
+        run_plan: FormalExtractionRunPlan,
         context_window_tokens: int | None = None,
         emit_token_usage: Callable[[dict[str, int]], None] | None = None,
         emit_event: Callable[[dict], None] | None = None,
         emit_progress: Callable[[int], None] | None = None,
     ) -> tuple[int, dict[str, int], list[ChunkExtractionResult], dict[str, int]]:
-        if chunk_inputs is None:
-            chunk_inputs = self._collect_formal_video_chunk_inputs(config.project_id, manifest)
         stats = self._empty_full_extraction_stats(total_chunks=len(chunk_inputs))
         if not chunk_inputs:
             return (0, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, [], stats)
@@ -3569,18 +3500,11 @@ class Extractor(QObject):
         extraction_run_id = self._manifest_string(manifest.get("extraction_run_id"))
         transcripts_by_episode: dict[tuple[str, str], EpisodeTranscript] = {}
         if video_handler.requires_transcript():
-            if run_plan is not None:
-                transcripts = self.ensure_episode_transcripts_from_run_plan(
-                    config.project_id,
-                    run_plan,
-                    emit_event=emit_event,
-                )
-            else:
-                transcripts = self.ensure_episode_transcripts_from_manifest(
-                    config.project_id,
-                    manifest,
-                    emit_event=emit_event,
-                )
+            transcripts = self.ensure_episode_transcripts_from_run_plan(
+                config.project_id,
+                run_plan,
+                emit_event=emit_event,
+            )
             transcripts_by_episode = {
                 (transcript.source.season_id, transcript.source.episode_id): transcript
                 for transcript in transcripts
@@ -4511,7 +4435,7 @@ class Extractor(QObject):
             )
         if is_fast_mode:
             created_count, extraction_usage, extracted_chunks, run_stats = (
-                self._extract_fast_chunk_json_from_manifest(
+                self._extract_fast_video_units(
                     config,
                     manifest,
                     chunk_inputs=chunk_inputs,
@@ -4534,7 +4458,7 @@ class Extractor(QObject):
             )
         else:
             created_count, extraction_usage, extracted_chunks, run_stats = (
-                self._extract_full_chunk_json_from_manifest(
+                self._extract_full_video_units(
                     config,
                     manifest,
                     chunk_inputs=chunk_inputs,

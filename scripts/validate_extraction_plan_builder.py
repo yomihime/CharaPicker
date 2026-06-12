@@ -90,19 +90,14 @@ def _assert_video_materials_build_run_plan() -> None:
         _write_material(paths.materials / "Season 01" / "Episode 01" / "segment_0002.mp4")
         _write_material(paths.materials / "standalone.mp4")
 
-        original_legacy_scanner = source_scanner.scan_formal_video_materials
-
-        def fail_if_legacy_public_scanner_is_used(_project_id: str) -> dict:
-            raise AssertionError("prepare_formal_extraction_run_plan used legacy public scanner")
-
-        source_scanner.scan_formal_video_materials = fail_if_legacy_public_scanner_is_used
-        try:
-            plan = Extractor().prepare_formal_extraction_run_plan(
-                project_id,
-                mode=ExtractionMode.FAST,
-            )
-        finally:
-            source_scanner.scan_formal_video_materials = original_legacy_scanner
+        legacy_scanner_api = "scan_formal_" "video_materials"
+        legacy_plan_api = "prepare_formal_" "video_extraction_plan"
+        assert not hasattr(source_scanner, legacy_scanner_api)
+        assert not hasattr(Extractor(), legacy_plan_api)
+        plan = Extractor().prepare_formal_extraction_run_plan(
+            project_id,
+            mode=ExtractionMode.FAST,
+        )
 
         assert plan.mode == FormalExtractionMode.FAST
         assert plan.media_types == [MediaType.VIDEO]
