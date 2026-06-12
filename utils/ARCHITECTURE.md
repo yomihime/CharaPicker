@@ -24,7 +24,7 @@
 - `proxy_preferences.py`：封装内置代理设置的默认值、归一化、读写和代理 URL 构造。
 - `state_manager.py`：保存、读取和列出项目配置，项目配置写入 `projects/{project_id}/config.json`。
 - `theme.py`：管理主题偏好，并调用 qfluentwidgets 应用亮色、暗色或系统主题。
-- `chunker.py`：预留文本或素材分块工具。
+- `chunker.py`：提供兼容旧调用的固定长度分块，以及保留起止 offset、段落边界、重叠范围、最大 chunk 数和截断 warning 的文本预算分块。
 - `env_manager.py`：提供 conda 命令前缀、llama.cpp/whisper.cpp 二进制发现和可用性检测。
 - `ffmpeg_tool.py`：封装 ffmpeg 工具可用性校验与素材转码/分段执行。
 - `ffmpeg_detection.py`：封装 FFmpeg 设备/CPU 探测相关 helper，供 `ffmpeg_tool.py` 复用。

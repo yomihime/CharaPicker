@@ -58,6 +58,7 @@ from core.models import (
     ProjectConfig,
 )
 from core.transcript_provider import TranscriptArtifactRequest, TranscriptProvider
+from core.text_unit_handler import TextUnitHandler, TextUnitHandlerConfig
 from core.video_unit_handler import VideoUnitHandler, VideoUnitHandlerConfig
 from utils.ai_model_middleware import (
     ModelBackend,
@@ -98,6 +99,8 @@ PREVIEW_CHUNK_MIN_OUTPUT_TOKENS = 1024
 PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE = 512
 FULL_EXTRACTION_RUN_TYPE = "formal_extraction"
 FULL_EXTRACTION_MIN_OUTPUT_TOKENS_PER_MINUTE = PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE
+TEXT_UNIT_DEFAULT_INPUT_CHARS = 12_000
+TEXT_UNIT_MAX_OUTPUT_TOKENS = 2_048
 
 
 class ExtractionStoppedError(RuntimeError):
@@ -332,6 +335,7 @@ class Extractor(QObject):
             conflicts.extend(chunk.conflicts)
             character_state_changes.extend(chunk.character_state_changes)
             evidence_refs.extend(chunk.evidence_refs)
+            aggregation_warnings.extend(chunk.aggregation_warnings)
 
         if not chunk_paths:
             warning = f"no_chunk_files:{season_id}/{episode_id}"
@@ -360,7 +364,7 @@ class Extractor(QObject):
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
             "extraction_run_id": extraction_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
-            "source_kind": "video",
+            "source_kind": self._source_kind_from_media_types(media_types),
             "media_types": media_types,
             "schema_version": 1,
             "source_trace": source_trace,
@@ -374,7 +378,7 @@ class Extractor(QObject):
                     source_trace.get("derived_artifact_refs", [])
                 ),
             },
-            "aggregation_warnings": aggregation_warnings,
+            "aggregation_warnings": self._deduplicate_preserve_order(aggregation_warnings),
             "targets": self._deduplicate_preserve_order(targets),
             "chunk_results": chunk_results,
             "facts": self._deduplicate_preserve_order(facts),
@@ -721,6 +725,21 @@ class Extractor(QObject):
             ]
         return []
 
+    def _source_kind_from_media_types(
+        self,
+        media_types: list[str],
+        *,
+        fallback: str = "",
+    ) -> str:
+        normalized = self._deduplicate_preserve_order(
+            [value for value in (self._manifest_string(item) for item in media_types) if value]
+        )
+        if len(normalized) == 1:
+            return normalized[0]
+        if len(normalized) > 1:
+            return "mixed"
+        return fallback
+
     def _load_episode_summaries_for_source_trace(
         self,
         project_id: str,
@@ -762,9 +781,12 @@ class Extractor(QObject):
         conflicts: list[str] = []
         character_state_changes: list[str] = []
         evidence_refs: list[str] = []
+        aggregation_warnings: list[str] = []
+        preview_chunks: list[ChunkExtractionResult] = []
 
         for chunk_path in chunk_paths:
             chunk = kb.load_chunk_result(chunk_path)
+            preview_chunks.append(chunk)
             chunk_results.append(chunk.model_dump(mode="json"))
             targets.extend(chunk.targets)
             facts.extend(chunk.facts)
@@ -774,14 +796,25 @@ class Extractor(QObject):
             conflicts.extend(chunk.conflicts)
             character_state_changes.extend(chunk.character_state_changes)
             evidence_refs.extend(chunk.evidence_refs)
+            aggregation_warnings.extend(chunk.aggregation_warnings)
 
+        source_trace = self._source_trace_from_chunks(preview_chunks)
+        media_types = self._media_types_from_source_trace(source_trace)
         episode_content = {
             "season_id": season_id,
             "episode_id": episode_id,
             "extraction_stage": kb.PREVIEW_EXTRACTION_STAGE,
             "run_type": "preview_trial",
-            "source_kind": "video",
+            "source_kind": self._source_kind_from_media_types(media_types),
+            "media_types": media_types,
             "schema_version": 1,
+            "source_trace": source_trace,
+            "source_counts": {
+                "preview_chunks": len(chunk_results),
+                "source_trace_units": len(source_trace.get("unit_refs", [])),
+                "source_trace_materials": len(source_trace.get("material_refs", [])),
+            },
+            "aggregation_warnings": self._deduplicate_preserve_order(aggregation_warnings),
             "targets": self._deduplicate_preserve_order(targets),
             "chunk_results": chunk_results,
             "facts": self._deduplicate_preserve_order(facts),
@@ -833,14 +866,15 @@ class Extractor(QObject):
         source_counts = episode_content.get("source_counts", {})
         if not isinstance(source_counts, dict):
             source_counts = {}
+        media_types = self._media_types_from_source_trace(source_trace)
         summary = {
             "season_id": season_id,
             "episode_id": episode_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
             "extraction_run_id": artifact_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
-            "source_kind": "video",
-            "media_types": self._media_types_from_source_trace(source_trace),
+            "source_kind": self._source_kind_from_media_types(media_types),
+            "media_types": media_types,
             "schema_version": 1,
             "source_trace": source_trace,
             "source_counts": {
@@ -937,6 +971,7 @@ class Extractor(QObject):
             conflicts.extend(payload.get("conflicts", []))
             character_state_changes.extend(payload.get("character_state_changes", []))
             evidence_refs.extend(payload.get("evidence_refs", []))
+            aggregation_warnings.extend(payload.get("aggregation_warnings", []))
 
         if not episode_contents:
             warning = f"no_full_episode_contents:{season_id}"
@@ -948,13 +983,14 @@ class Extractor(QObject):
             )
 
         source_trace = self._source_trace_for_season_content(episode_contents)
+        media_types = self._media_types_from_source_trace(source_trace)
         season_content = {
             "season_id": season_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
             "extraction_run_id": extraction_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
-            "source_kind": "video",
-            "media_types": self._media_types_from_source_trace(source_trace),
+            "source_kind": self._source_kind_from_media_types(media_types),
+            "media_types": media_types,
             "schema_version": 1,
             "source_trace": source_trace,
             "source_counts": {
@@ -970,7 +1006,7 @@ class Extractor(QObject):
                     source_trace.get("derived_artifact_refs", [])
                 ),
             },
-            "aggregation_warnings": aggregation_warnings,
+            "aggregation_warnings": self._deduplicate_preserve_order(aggregation_warnings),
             "episode_contents": episode_contents,
             "targets": self._deduplicate_preserve_order(targets),
             "facts": self._deduplicate_preserve_order(facts),
@@ -1029,13 +1065,14 @@ class Extractor(QObject):
         source_counts = season_content.get("source_counts", {})
         if not isinstance(source_counts, dict):
             source_counts = {}
+        media_types = self._media_types_from_source_trace(source_trace)
         summary = {
             "season_id": season_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
             "extraction_run_id": artifact_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
-            "source_kind": "video",
-            "media_types": self._media_types_from_source_trace(source_trace),
+            "source_kind": self._source_kind_from_media_types(media_types),
+            "media_types": media_types,
             "schema_version": 1,
             "source_trace": source_trace,
             "source_counts": {
@@ -1402,6 +1439,188 @@ class Extractor(QObject):
                     }
                 )
         return chunk_inputs
+
+    def _collect_text_units_from_run_plan(
+        self,
+        run_plan: FormalExtractionRunPlan,
+    ) -> list[tuple[str, ExtractionUnit]]:
+        handler = TextUnitHandler()
+        return [
+            (episode.season_id, unit)
+            for episode in run_plan.episodes
+            for unit in episode.units
+            if handler.supports(unit)
+        ]
+
+    def _text_unit_handler(self, preset: CloudModelPreset) -> TextUnitHandler:
+        context_tokens = context_window_budget_tokens(preset)
+        max_input_chars = TEXT_UNIT_DEFAULT_INPUT_CHARS
+        if context_tokens is not None:
+            reserved_tokens = TEXT_UNIT_MAX_OUTPUT_TOKENS + 1_000
+            available_input_tokens = max(1_000, context_tokens - reserved_tokens)
+            max_input_chars = min(TEXT_UNIT_DEFAULT_INPUT_CHARS, available_input_tokens * 3)
+        return TextUnitHandler(
+            TextUnitHandlerConfig(
+                max_input_chars=max_input_chars,
+                max_output_tokens=TEXT_UNIT_MAX_OUTPUT_TOKENS,
+            )
+        )
+
+    def _extract_text_units(
+        self,
+        project_id: str,
+        run_plan: FormalExtractionRunPlan,
+        *,
+        preset: CloudModelPreset,
+        extraction_stage: ExtractionArtifactStage,
+        chunk_limit: int | None = None,
+        handler: TextUnitHandler | None = None,
+        emit_progress: Callable[[int], None] | None = None,
+        progress_base: int = 0,
+        progress_span: int = 0,
+    ) -> tuple[int, dict[str, int], list[ChunkExtractionResult], dict[str, int]]:
+        unit_inputs = self._collect_text_units_from_run_plan(run_plan)
+        usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        stats = {
+            "succeeded_chunks": 0,
+            "skipped_chunks": 0,
+            "failed_chunks": 0,
+            "succeeded_episodes": 0,
+            "skipped_episodes": 0,
+            "failed_episodes": 0,
+            "succeeded_seasons": 0,
+            "skipped_seasons": 0,
+            "failed_seasons": 0,
+        }
+        if not unit_inputs:
+            return 0, usage_total, [], stats
+
+        text_handler = handler or self._text_unit_handler(preset)
+        materials_root = ensure_project_tree(project_id).materials
+        extracted_chunks: list[ChunkExtractionResult] = []
+        remaining_chunks = chunk_limit
+        total_units = len(unit_inputs)
+        for index, (season_id, unit) in enumerate(unit_inputs, start=1):
+            if remaining_chunks is not None and remaining_chunks <= 0:
+                break
+            try:
+                result = text_handler.execute(
+                    materials_root=materials_root,
+                    unit=unit,
+                    season_id=season_id,
+                    extraction_stage=extraction_stage,
+                    extraction_run_id=(
+                        run_plan.run_id
+                        if extraction_stage == ExtractionArtifactStage.FULL
+                        else ""
+                    ),
+                    run_type=(
+                        FULL_EXTRACTION_RUN_TYPE
+                        if extraction_stage == ExtractionArtifactStage.FULL
+                        else "preview_trial"
+                    ),
+                    backend=cloud_model_provider(preset.provider).backend_for("text"),
+                    model_name=preset.model_name,
+                    base_url=preset.base_url,
+                    api_key=preset.api_key,
+                    chunk_limit=remaining_chunks,
+                )
+            except (ModelCallError, OSError, ValueError):
+                stats["failed_chunks"] += 1
+                LOGGER.warning(
+                    "Text extraction unit failed; project_id=%s unit_id=%s source_path=%s",
+                    project_id,
+                    unit.unit_id,
+                    unit.material_ref.relative_path,
+                    exc_info=True,
+                )
+                continue
+
+            if not result.chunks:
+                stats["skipped_chunks"] += 1
+                continue
+            for key in usage_total:
+                usage_total[key] += result.token_usage.get(key, 0)
+            for chunk in result.chunks:
+                if extraction_stage == ExtractionArtifactStage.PREVIEW:
+                    self.save_preview_chunk_extraction_result(project_id, chunk)
+                else:
+                    self.save_chunk_extraction_result(project_id, chunk)
+                extracted_chunks.append(chunk)
+            stats["succeeded_chunks"] += len(result.chunks)
+            if remaining_chunks is not None:
+                remaining_chunks -= len(result.chunks)
+            if emit_progress is not None and progress_span > 0:
+                emit_progress(progress_base + int(index * progress_span / total_units))
+
+        if extraction_stage == ExtractionArtifactStage.FULL and extracted_chunks:
+            self._finalize_text_contexts(
+                project_id,
+                extracted_chunks,
+                extraction_run_id=run_plan.run_id,
+                stats=stats,
+            )
+        return len(extracted_chunks), usage_total, extracted_chunks, stats
+
+    def _finalize_text_contexts(
+        self,
+        project_id: str,
+        chunks: list[ChunkExtractionResult],
+        *,
+        extraction_run_id: str,
+        stats: dict[str, int],
+    ) -> None:
+        episode_keys = sorted({(chunk.season_id, chunk.episode_id) for chunk in chunks})
+        successful_seasons: set[str] = set()
+        for season_id, episode_id in episode_keys:
+            try:
+                self.merge_episode_content(
+                    project_id,
+                    season_id,
+                    episode_id,
+                    extraction_run_id=extraction_run_id,
+                )
+                self.generate_episode_summary(
+                    project_id,
+                    season_id,
+                    episode_id,
+                    extraction_run_id=extraction_run_id,
+                )
+            except (OSError, ValueError):
+                stats["failed_episodes"] += 1
+                LOGGER.warning(
+                    "Text episode aggregation failed; project_id=%s season_id=%s episode_id=%s",
+                    project_id,
+                    season_id,
+                    episode_id,
+                    exc_info=True,
+                )
+                continue
+            stats["succeeded_episodes"] += 1
+            successful_seasons.add(season_id)
+
+        for season_id in sorted(successful_seasons):
+            try:
+                self.merge_season_content(
+                    project_id,
+                    season_id,
+                    extraction_run_id=extraction_run_id,
+                )
+                self.generate_season_summary(
+                    project_id,
+                    season_id,
+                    extraction_run_id=extraction_run_id,
+                )
+            except (OSError, ValueError):
+                stats["failed_seasons"] += 1
+                LOGGER.warning(
+                    "Text season aggregation failed; project_id=%s season_id=%s",
+                    project_id,
+                    season_id,
+                    exc_info=True,
+                )
+                continue
+            stats["succeeded_seasons"] += 1
 
     def _source_trace_for_unit(self, unit: ExtractionUnit) -> SourceTrace:
         return SourceTrace(
@@ -4409,7 +4628,8 @@ class Extractor(QObject):
             config.project_id,
             run_plan,
         )
-        if not chunk_inputs:
+        text_unit_inputs = self._collect_text_units_from_run_plan(run_plan)
+        if not chunk_inputs and not text_unit_inputs:
             message = t("extractor.full.noVideoMaterials")
             emit_event(
                 InsightEvent(
@@ -4439,14 +4659,28 @@ class Extractor(QObject):
 
         video_input_mode = normalize_video_input_mode(preset.video_input_mode, preset.provider)
         provider_profile = cloud_model_provider(preset.provider)
-        if self._video_mode_requires_transcript(video_input_mode):
+        if chunk_inputs and self._video_mode_requires_transcript(video_input_mode):
             TranscriptProvider().prepare_run_plan(config.project_id, run_plan)
             kb.save_extraction_run_plan(config.project_id, run_plan)
             chunk_inputs = self._collect_formal_video_chunk_inputs_from_run_plan(
                 config.project_id,
                 run_plan,
             )
-        if is_fast_mode:
+        created_count = 0
+        extraction_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        extracted_chunks: list[ChunkExtractionResult] = []
+        run_stats = {
+            "succeeded_chunks": 0,
+            "skipped_chunks": 0,
+            "failed_chunks": 0,
+            "succeeded_episodes": 0,
+            "skipped_episodes": 0,
+            "failed_episodes": 0,
+            "succeeded_seasons": 0,
+            "skipped_seasons": 0,
+            "failed_seasons": 0,
+        }
+        if chunk_inputs and is_fast_mode:
             created_count, extraction_usage, extracted_chunks, run_stats = (
                 self._extract_fast_video_units(
                     config,
@@ -4469,7 +4703,7 @@ class Extractor(QObject):
                     emit_progress=emit_progress,
                 )
             )
-        else:
+        elif chunk_inputs:
             created_count, extraction_usage, extracted_chunks, run_stats = (
                 self._extract_full_video_units(
                     config,
@@ -4491,7 +4725,7 @@ class Extractor(QObject):
                     emit_progress=emit_progress,
                 )
             )
-        if is_fast_mode:
+        if is_fast_mode and chunk_inputs:
             extraction_usage, episode_stats = self._finalize_fast_episode_contexts_from_chunks(
                 config,
                 manifest,
@@ -4526,6 +4760,24 @@ class Extractor(QObject):
             )
             for key, value in season_stats.items():
                 run_stats[key] = run_stats.get(key, 0) + value
+
+        text_created, text_usage, text_chunks, text_stats = self._extract_text_units(
+            config.project_id,
+            run_plan,
+            preset=preset,
+            extraction_stage=ExtractionArtifactStage.FULL,
+            emit_progress=emit_progress,
+            progress_base=80 if chunk_inputs else 5,
+            progress_span=15 if chunk_inputs else 90,
+        )
+        created_count += text_created
+        extracted_chunks.extend(text_chunks)
+        for key in extraction_usage:
+            extraction_usage[key] += text_usage.get(key, 0)
+        for key, value in text_stats.items():
+            run_stats[key] = run_stats.get(key, 0) + value
+        if emit_token_usage is not None and any(extraction_usage.values()):
+            emit_token_usage(extraction_usage)
         emit_progress(96)
         stale_card_ids: list[str] = []
         if extracted_chunks and (not is_fast_mode or run_stats.get("succeeded_seasons", 0) > 0):
@@ -4657,6 +4909,36 @@ class Extractor(QObject):
             extracted_chunks = []
         for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
             overall_usage[key] += extraction_usage.get(key, 0)
+        if created_count <= 0:
+            run_plan = self.prepare_formal_extraction_run_plan(config.project_id)
+            try:
+                created_count, extraction_usage, extracted_chunks, _ = self._extract_text_units(
+                    config.project_id,
+                    run_plan,
+                    preset=preset,
+                    extraction_stage=ExtractionArtifactStage.PREVIEW,
+                    chunk_limit=PREVIEW_MAX_CHUNKS,
+                    emit_progress=emit_progress,
+                    progress_base=30,
+                    progress_span=55,
+                )
+            except ExtractionStoppedError:
+                raise
+            except Exception:  # noqa: BLE001
+                LOGGER.error(
+                    "Preview chunk extraction from text failed; project_id=%s",
+                    config.project_id,
+                    exc_info=True,
+                )
+                created_count = 0
+                extraction_usage = {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                }
+                extracted_chunks = []
+            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                overall_usage[key] += extraction_usage.get(key, 0)
         if created_count > 0:
             self._merge_preview_episode_contents(config.project_id, extracted_chunks)
             preview_chunks = extracted_chunks[:PREVIEW_MAX_CHUNKS]

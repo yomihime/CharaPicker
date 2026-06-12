@@ -17,6 +17,7 @@
 - `validate_formal_extraction_workflow.py`：执行不联网的正式提取流程边界验证，覆盖 FAST 并发数归一化、正式 JSON 三次重试，以及 FAST episode/season 无输入跳过策略。
 - `validate_media_type_support.py`：执行不联网的媒体支持矩阵验证，覆盖四种媒体类型后缀、GIF/压缩包状态、集合内容形态提示和导入过滤。
 - `validate_multi_material_scanner.py`：执行不联网的通用素材扫描验证，覆盖视频兼容、字幕关联、文本/音频/图片 unit、GIF warning、稳定排序和 run plan 持久化。
+- `validate_text_unit_handler.py`：执行不联网的普通文本提取验证，覆盖文本/受控 JSON 解析、预算分块、offset/evidence、超长文本 warning、文本-only 预览与正式聚合，以及视频 unit 不被文本 handler 接管。
 
 ## 与其他目录的关系
 

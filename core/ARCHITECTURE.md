@@ -22,7 +22,8 @@
 - `knowledge_base.py`：集中管理 `projects/{project_id}/knowledge_base/` 下常用产物的路径、JSON 读写和结构校验。
 - `source_scanner.py`：保留旧视频目录扫描、正式扫描入口、预览视频 chunk 收集和预览 chunk 标识生成，并把非视频 unit 扩展委托给 `material_unit_scanner.py`。
 - `material_unit_scanner.py`：把文本、字幕、音频、图片和 GIF 映射为正式 run plan unit，负责唯一字幕关联、图片页组候选、稳定 ID、定位 metadata 和不支持状态；不执行解析或模型提取。
-- `extractor.py`：定义 `Extractor`，作为 UI-facing 提取入口，负责知识库分层初始化、预览提取、完整/洁净/快速正式提取、chunk/episode/season 内容合并、episode transcript 入口，并委托知识库读写与素材扫描 helper。
+- `text_unit_handler.py`：负责普通 `.txt`、`.md` 和受控 `.json` 文本 unit 的解码、结构校验、预算分块、文本范围 evidence、文本模型请求和 `ChunkExtractionResult` 构建；字幕、歌词和台词时间轴解析不属于本模块当前职责。
+- `extractor.py`：定义 `Extractor`，作为 UI-facing 提取入口，负责知识库分层初始化、预览提取、完整/洁净/快速正式提取、chunk/episode/season 内容合并、episode transcript 入口，并委托知识库读写与素材扫描 helper；文本-only 项目可进入预览和正式提取，普通文本通过 `text_unit_handler.py` 执行。
 - `transcript_provider.py`：把 transcript 表达为 run plan 中的 text 型 `DerivedArtifact`，收集每集可转写素材并调用既有音频转写实现；不把 transcript 作为新的 `MediaType`。
 - `video_unit_handler.py`：封装正式视频 unit 的时长探测、按时长缩放输出 token 和 `ModelCallRequest` 构造；模型调用仍由 `utils.ai_model_middleware` 执行。
 - `compiler.py`：定义 `build_character_compile_request()`、`compile_character_state()`、`compile_character_state_by_season_episode()`、`write_character_stage_states()` 和 `final_polish_character_state()`，负责从知识库聚合角色阶段状态。
@@ -54,6 +55,8 @@
 - 素材处理配置只描述用户选择和项目状态；文件复制、链接、清理等副作用放在 `utils/source_importer.py`。
 - `extractor` 只做素材解析、事实提取和洞察产出。
 - 完整提取和洁净提取保持线性上下文流程；快速提取允许 chunk 并发且不带上下文，随后用 AI 并发重整理集和季。
+- 文本 unit 使用独立输入字符预算和固定内部输出 token 上限，不复用视频“每分钟输出 token”语义；文本 chunk 必须保留原文 offset、素材引用和结构化 evidence。
+- `source_kind` 是旧兼容摘要字段；聚合产物必须优先根据 `source_trace` 中的 `media_types` 推导单一来源或 `mixed`，不得把文本、图片或音频产物硬编码为 `video`。
 - `compiler` 只做角色状态迭代、长文本阅读和冲突处理；角色卡证据分层和质量规则由 `character_card_compiler` 负责。
 - 角色卡编译、存储、渲染、导入和导出分别放在 `character_card_*` 模块；页面层不直接拼接知识库路径或导出字段。
 - 角色卡固定协议值优先放在 `character_card_constants.py`，避免在 store、compiler、renderer 和 GUI 层重复硬编码。
