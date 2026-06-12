@@ -257,6 +257,7 @@ def _assert_full_extraction_modes_stop_before_completion_without_chunks() -> Non
             extractor = Extractor()
             progress: list[int] = []
             events: list[dict] = []
+            previous_plan_paths = set(kb.extraction_runs_root_path(project_id).glob("*/plan.json"))
 
             config = ProjectConfig(project_id=project_id, extraction_mode=configured_mode)
             try:
@@ -275,17 +276,20 @@ def _assert_full_extraction_modes_stop_before_completion_without_chunks() -> Non
             assert progress
             assert max(progress) < 100
             assert any(event.get("status") == "warning" for event in events)
-            manifest = kb.read_json_object(kb.source_manifest_path(project_id))
-            assert manifest["extraction_mode"] == expected_plan_mode.value
-            run_plan_path = kb.extraction_run_plan_path(project_id, manifest["extraction_run_id"])
-            assert run_plan_path.exists()
-            run_plan = kb.load_extraction_run_plan(project_id, manifest["extraction_run_id"])
+            run_plan = _load_new_run_plan(project_id, previous_plan_paths)
             assert run_plan.mode.value == expected_plan_mode.value
 
 
 def _write_chunk_payload(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     kb.write_json(path, payload)
+
+
+def _load_new_run_plan(project_id: str, previous_plan_paths: set[Path]):
+    plan_paths = sorted(kb.extraction_runs_root_path(project_id).glob("*/plan.json"))
+    new_plan_paths = [path for path in plan_paths if path not in previous_plan_paths]
+    assert len(new_plan_paths) == 1, new_plan_paths
+    return kb.load_extraction_run_plan(project_id, new_plan_paths[0].parent.name)
 
 
 def _assert_run_artifact_filtering() -> None:

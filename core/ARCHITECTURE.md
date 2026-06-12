@@ -16,7 +16,7 @@
 
 ## 关键文件
 
-- `models.py`：定义 `ProjectConfig`、`SourceProcessingConfig`、`InsightEvent`、`CharacterState`、`ChunkExtractionResult`、`EpisodeTranscript`、`ExtractionRunPlan`、`ProjectPaths` 等 Pydantic 模型。
+- `models.py`：定义 `ProjectConfig`、`SourceProcessingConfig`、`InsightEvent`、`CharacterState`、`ChunkExtractionResult`、`EpisodeTranscript`、`ProjectPaths` 等 Pydantic 模型。
 - `extraction_plan.py`：定义新正式提取 run plan 词汇与 Pydantic 模型，包括 `MediaType`、`ContentForm`、`MaterialRef`、`ExtractionUnit`、`EpisodePlan`、`FormalExtractionRunPlan`、`DerivedArtifact`、`EvidenceRef` 和 `SourceTrace`；不依赖 GUI，也不复用旧 `ExtractionRunPlan` 语义。
 - `character_card_constants.py`：集中保存角色卡固定文件名、预览卡保留 ID 和 stale warning reason 等跨模块共享常量。
 - `knowledge_base.py`：集中管理 `projects/{project_id}/knowledge_base/` 下常用产物的路径、JSON 读写和结构校验。

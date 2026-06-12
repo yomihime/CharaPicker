@@ -22,27 +22,6 @@ class ExtractionArtifactStage(str, Enum):
     LEGACY_UNKNOWN = "legacy_unknown"
 
 
-class ExtractionRunStage(str, Enum):
-    PREPARE = "prepare"
-    TRANSCRIPT = "transcript"
-    CHUNK_EXTRACTION = "chunk_extraction"
-    EPISODE_MERGE = "episode_merge"
-    EPISODE_SUMMARY = "episode_summary"
-    SEASON_MERGE = "season_merge"
-    SEASON_SUMMARY = "season_summary"
-    DONE = "done"
-    FAILED = "failed"
-
-
-class ExtractionRunStepStatus(str, Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    SUCCEEDED = "succeeded"
-    PARTIAL = "partial"
-    FAILED = "failed"
-    SKIPPED = "skipped"
-
-
 class SourceProcessingPreset(str, Enum):
     ORIGINAL = "original"
     SEGMENT_TRANSCODE = "segment_transcode"
@@ -146,75 +125,6 @@ class InsightEvent(BaseModel):
     status: InsightStatus = InsightStatus.QUEUED
     meta: dict[str, Any] = Field(default_factory=dict)
     timestamp: datetime = Field(default_factory=datetime.now)
-
-
-class ExtractionRunChunkRef(BaseModel):
-    season_id: str
-    episode_id: str
-    chunk_id: str
-    source_path: str = ""
-    source_kind: str = ""
-    display_title: str = ""
-    sort_key: str = ""
-
-
-class ExtractionRunEpisodeRef(BaseModel):
-    season_id: str
-    episode_id: str
-    source_path: str = ""
-    source_kind: str = ""
-    display_title: str = ""
-    sort_key: str = ""
-    chunks: list[ExtractionRunChunkRef] = Field(default_factory=list)
-
-
-class ExtractionRunSeasonRef(BaseModel):
-    season_id: str
-    source_path: str = ""
-    display_title: str = ""
-    sort_key: str = ""
-    episodes: list[ExtractionRunEpisodeRef] = Field(default_factory=list)
-
-
-class ExtractionRunStageState(BaseModel):
-    stage: ExtractionRunStage
-    status: ExtractionRunStepStatus = ExtractionRunStepStatus.PENDING
-    season_id: str = ""
-    episode_id: str = ""
-    chunk_id: str = ""
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    warnings: list[str] = Field(default_factory=list)
-    error: str = ""
-    meta: dict[str, Any] = Field(default_factory=dict)
-
-
-class ExtractionRunBudgetPlan(BaseModel):
-    context_window_tokens: int | None = Field(default=None, ge=1)
-    episode_context_cap_tokens: int = Field(default=128000, ge=1)
-    output_token_budget_strategy: str = "separate_text_merge_budget"
-    context_window_source: str = ""
-
-
-class ExtractionRunPlan(BaseModel):
-    project_id: str
-    extraction_run_id: str = Field(default_factory=lambda: f"run-{uuid4().hex[:12]}")
-    mode: ExtractionMode = ExtractionMode.FULL
-    manifest_path: str = ""
-    source_manifest: dict[str, Any] = Field(default_factory=dict)
-    seasons: list[ExtractionRunSeasonRef] = Field(default_factory=list)
-    current_stage: ExtractionRunStage = ExtractionRunStage.PREPARE
-    status: ExtractionRunStepStatus = ExtractionRunStepStatus.PENDING
-    stage_states: list[ExtractionRunStageState] = Field(default_factory=list)
-    model_profile_id: str = ""
-    model_metadata: dict[str, Any] = Field(default_factory=dict)
-    video_input_mode: str = ""
-    transcript_required: bool = False
-    transcript_ready: bool = False
-    budget: ExtractionRunBudgetPlan = Field(default_factory=ExtractionRunBudgetPlan)
-    warnings: list[str] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.now)
-    updated_at: datetime = Field(default_factory=datetime.now)
 
 
 class CharacterState(BaseModel):

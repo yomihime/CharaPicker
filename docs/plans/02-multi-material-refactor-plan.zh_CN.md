@@ -442,7 +442,7 @@ episode/season 聚合必须能说明：
 - `scan_formal_materials(project_id)`。
 - 首版视频素材扫描到 `MaterialRef` 和 `ExtractionUnit`。
 - `prepare_formal_extraction_run_plan(project_id, mode)`。
-- 旧 `scan_formal_video_materials()` 不再作为生产主入口；可短期保留为私有视频扫描 helper，供 `scan_formal_materials()` 内部复用，后续在 M11 前删除或内联。
+- 旧 `scan_formal_video_materials()` 不再作为生产主入口；公开函数在 M11 删除，私有 `_scan_formal_video_materials()` 暂供 `scan_formal_materials()` 内部复用，后续由 03 的通用扫描器替换或内联。
 
 验收：
 

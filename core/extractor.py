@@ -231,9 +231,6 @@ class Extractor(QObject):
         output["run_type"] = FULL_EXTRACTION_RUN_TYPE
         return output
 
-    def initialize_knowledge_base_structure(self, project_id: str, manifest: dict | None = None) -> Path:
-        return kb.initialize_structure(project_id, manifest)
-
     def save_chunk_extraction_result(self, project_id: str, result: ChunkExtractionResult) -> Path:
         return kb.save_chunk_result(project_id, result)
 

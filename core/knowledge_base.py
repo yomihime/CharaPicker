@@ -188,13 +188,6 @@ def save_source_manifest(project_id: str, manifest: dict[str, Any]) -> Path:
     return write_json(source_manifest_path(project_id), manifest)
 
 
-def load_source_manifest(project_id: str) -> dict[str, Any]:
-    path = source_manifest_path(project_id)
-    if not path.exists():
-        raise ValueError("source manifest not found; generate source_manifest.json first")
-    return read_json_object(path)
-
-
 def save_extraction_run_plan(project_id: str, run_plan: FormalExtractionRunPlan) -> Path:
     if run_plan.project_id != project_id:
         raise ValueError(
@@ -224,25 +217,6 @@ def initialize_structure_from_run_plan(project_id: str, run_plan: FormalExtracti
         if not season_id or not episode_id:
             continue
         chunks_root_path(project_id, season_id, episode_id).mkdir(parents=True, exist_ok=True)
-    return seasons_root
-
-
-def initialize_structure(project_id: str, manifest: dict[str, Any] | None = None) -> Path:
-    manifest_data = manifest if manifest is not None else load_source_manifest(project_id)
-    seasons_root = seasons_root_path(project_id)
-    for season in manifest_data.get("seasons", []):
-        if not isinstance(season, dict):
-            continue
-        season_id = season.get("season_id")
-        if not isinstance(season_id, str) or not season_id.strip():
-            continue
-        for episode in season.get("episodes", []):
-            if not isinstance(episode, dict):
-                continue
-            episode_id = episode.get("episode_id")
-            if not isinstance(episode_id, str) or not episode_id.strip():
-                continue
-            chunks_root_path(project_id, season_id, episode_id).mkdir(parents=True, exist_ok=True)
     return seasons_root
 
 
