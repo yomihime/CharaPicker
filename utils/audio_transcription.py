@@ -16,12 +16,11 @@ from core.models import EpisodeTranscript, TranscriptMetadata, TranscriptSegment
 from utils.env_manager import whisper_status
 from utils.ffmpeg_tool import FfmpegProcessError, extract_audio_to_wav
 from utils.material_processing_events import SOURCE_PROCESSING_CANCELLED_MESSAGE
-from utils.media_types import VIDEO_SUFFIXES
+from utils.media_types import AUDIO_SUFFIXES, VIDEO_SUFFIXES
 from utils.paths import ensure_project_tree
 
 
 LOGGER = logging.getLogger(__name__)
-AUDIO_SUFFIXES = frozenset({".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma"})
 WHISPER_BACKEND_ID = "whisper.cpp"
 ProgressCallback = Callable[[str, int], None]
 CancelCallback = Callable[[], bool]

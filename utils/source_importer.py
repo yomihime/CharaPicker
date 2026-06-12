@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from utils.material_processing_events import SOURCE_PROCESSING_CANCELLED_MESSAGE
-from utils.media_types import SUPPORTED_SOURCE_SUFFIXES
+from utils.media_types import is_import_supported_source
 from utils.paths import ensure_project_tree, project_paths
 
 LOGGER = logging.getLogger(__name__)
@@ -187,7 +187,7 @@ def _iter_existing_sources(root: Path) -> list[Path]:
         [
             path
             for path in root.rglob("*")
-            if path.is_file() and (not path.suffix or path.suffix.lower() in SUPPORTED_SOURCE_SUFFIXES)
+            if path.is_file() and is_import_supported_source(path)
         ],
         key=lambda path: path.relative_to(root).as_posix().lower(),
     )
@@ -353,4 +353,4 @@ def _remove_empty_parents(start: Path, stop: Path) -> None:
 
 
 def _is_supported_source(path: Path) -> bool:
-    return not path.suffix or path.suffix.lower() in SUPPORTED_SOURCE_SUFFIXES
+    return is_import_supported_source(path)

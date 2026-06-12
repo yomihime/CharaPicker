@@ -17,7 +17,7 @@
 
 - `i18n.py`：管理语言偏好、系统语言归一化、文案加载和 `t()` 翻译函数。
 - `app_metadata.py`：集中保存应用名、组织名、当前运行时版本/阶段和 HTTP User-Agent。
-- `media_types.py`：集中保存视频、图片、文本和可导入素材的后缀集合。
+- `media_types.py`：集中保存视频、图片、音频、文本后缀，以及导入、预览、正式提取支持状态和集合内容形态提示。
 - `material_processing_events.py`：集中保存素材处理取消消息和 FFmpeg 进度事件前缀等跨层协议常量。
 - `paths.py`：定义应用根目录、项目根目录和单个项目的标准目录结构。
 - `global_store.py`：提供全局用户数据和配置选项的读写中间件，默认使用根目录 `config.yaml`。
