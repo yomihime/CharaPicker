@@ -126,8 +126,24 @@ class Extractor(QObject):
             media_types=self._media_types_from_episode_plans(episodes),
             content_forms=self._content_forms_from_episode_plans(episodes),
             episodes=episodes,
-            metadata={"run_type": FULL_EXTRACTION_RUN_TYPE},
+            warnings=self._scan_warnings_from_episode_plans(episodes),
+            metadata={
+                "run_type": FULL_EXTRACTION_RUN_TYPE,
+                "scan_type": source_scanner.FORMAL_MATERIAL_SCAN_TYPE,
+            },
         )
+
+    def _scan_warnings_from_episode_plans(self, episodes: list[EpisodePlan]) -> list[str]:
+        warnings: list[str] = []
+        for episode in episodes:
+            episode_warnings = episode.metadata.get("warnings")
+            if not isinstance(episode_warnings, list):
+                continue
+            for warning in episode_warnings:
+                normalized = self._manifest_string(warning)
+                if normalized and normalized not in warnings:
+                    warnings.append(normalized)
+        return warnings
 
     def _formal_extraction_mode(self, mode: ExtractionMode) -> FormalExtractionMode:
         if mode == ExtractionMode.CLEAN:
