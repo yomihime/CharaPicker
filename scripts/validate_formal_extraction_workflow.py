@@ -408,14 +408,86 @@ def _assert_episode_merge_source_trace() -> None:
         assert source_trace["unit_refs"] == ["unit_video_001", "unit_video_002"]
         assert source_trace["derived_artifact_refs"] == ["transcript_season_001_episode_001"]
         assert len(source_trace["material_refs"]) == 2
+        assert source_trace["media_types"] == ["video"]
+        assert payload["media_types"] == ["video"]
         assert source_trace["source_breakdown"] == {
             "chunks": 2,
             "materials": 2,
             "units": 2,
             "derived_artifacts": 1,
+            "media_types": {"video": 2},
         }
         assert payload["source_counts"]["source_trace_units"] == 2
         assert payload["source_counts"]["source_trace_derived_artifacts"] == 1
+
+        Extractor().generate_episode_summary(
+            project_id,
+            "season_001",
+            "episode_001",
+            extraction_run_id="run-current",
+        )
+        episode_summary = kb.load_episode_summary(project_id, "season_001", "episode_001")
+        episode_summary_trace = episode_summary["source_trace"]
+        assert episode_summary["media_types"] == ["video"]
+        assert episode_summary_trace["episode_content_refs"] == [
+            {
+                "artifact_type": "episode_content",
+                "season_id": "season_001",
+                "episode_id": "episode_001",
+                "path": "seasons/season_001/episodes/episode_001/episode_content.json",
+                "extraction_run_id": "run-current",
+            }
+        ]
+        assert episode_summary_trace["unit_refs"] == ["unit_video_001", "unit_video_002"]
+
+        Extractor().merge_season_content(
+            project_id,
+            "season_001",
+            extraction_run_id="run-current",
+        )
+        season_content = kb.load_season_content(project_id, "season_001")
+        season_content_trace = season_content["source_trace"]
+        assert season_content["media_types"] == ["video"]
+        assert season_content_trace["episode_content_refs"] == [
+            {
+                "artifact_type": "episode_content",
+                "season_id": "season_001",
+                "episode_id": "episode_001",
+                "path": "seasons/season_001/episodes/episode_001/episode_content.json",
+                "extraction_run_id": "run-current",
+            }
+        ]
+        assert season_content_trace["unit_refs"] == ["unit_video_001", "unit_video_002"]
+        assert season_content_trace["source_breakdown"]["episode_contents"] == 1
+
+        Extractor().generate_season_summary(
+            project_id,
+            "season_001",
+            extraction_run_id="run-current",
+        )
+        season_summary = kb.load_season_summary(project_id, "season_001")
+        season_summary_trace = season_summary["source_trace"]
+        assert season_summary["media_types"] == ["video"]
+        assert season_summary_trace["season_content_refs"] == [
+            {
+                "artifact_type": "season_content",
+                "season_id": "season_001",
+                "path": "seasons/season_001/season_content.json",
+                "extraction_run_id": "run-current",
+            }
+        ]
+        assert season_summary_trace["episode_summary_refs"] == [
+            {
+                "artifact_type": "episode_summary",
+                "season_id": "season_001",
+                "episode_id": "episode_001",
+                "path": "seasons/season_001/episodes/episode_001/episode_summary.json",
+                "extraction_run_id": "run-current",
+            }
+        ]
+        assert season_summary_trace["unit_refs"] == ["unit_video_001", "unit_video_002"]
+        assert season_summary_trace["source_breakdown"]["season_contents"] == 1
+        assert season_summary_trace["source_breakdown"]["episode_summaries"] == 1
 
 
 def _assert_clean_regenerable_artifacts_scope() -> None:
