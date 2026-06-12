@@ -48,6 +48,7 @@ from core.extraction_plan import (
     MediaType,
     SourceTrace,
 )
+from core.image_unit_handler import ImageUnitHandler, ImageUnitHandlerConfig
 from core.models import (
     ChunkExtractionResult,
     EpisodeTranscript,
@@ -79,6 +80,7 @@ from utils.cloud_model_presets import (
     load_cloud_model_presets,
     normalize_video_input_mode,
     provider_requires_aliyun_extra_body,
+    provider_supports_capability,
     scale_cloud_max_output_tokens_for_video_duration,
 )
 from utils.audio_transcription import (
@@ -1452,6 +1454,18 @@ class Extractor(QObject):
             if handler.supports(unit)
         ]
 
+    def _collect_image_units_from_run_plan(
+        self,
+        run_plan: FormalExtractionRunPlan,
+    ) -> list[tuple[str, ExtractionUnit]]:
+        handler = ImageUnitHandler()
+        return [
+            (episode.season_id, unit)
+            for episode in run_plan.episodes
+            for unit in episode.units
+            if handler.supports(unit)
+        ]
+
     def _text_unit_handler(self, preset: CloudModelPreset) -> TextUnitHandler:
         context_tokens = context_window_budget_tokens(preset)
         max_input_chars = TEXT_UNIT_DEFAULT_INPUT_CHARS
@@ -1465,6 +1479,9 @@ class Extractor(QObject):
                 max_output_tokens=TEXT_UNIT_MAX_OUTPUT_TOKENS,
             )
         )
+
+    def _image_unit_handler(self, preset: CloudModelPreset) -> ImageUnitHandler:
+        return ImageUnitHandler(ImageUnitHandlerConfig(provider=preset.provider))
 
     def _extract_text_units(
         self,
@@ -1554,7 +1571,7 @@ class Extractor(QObject):
                 emit_progress(progress_base + int(index * progress_span / total_units))
 
         if extraction_stage == ExtractionArtifactStage.FULL and extracted_chunks:
-            self._finalize_text_contexts(
+            self._finalize_serial_unit_contexts(
                 project_id,
                 extracted_chunks,
                 extraction_run_id=run_plan.run_id,
@@ -1562,7 +1579,112 @@ class Extractor(QObject):
             )
         return len(extracted_chunks), usage_total, extracted_chunks, stats
 
-    def _finalize_text_contexts(
+    def _extract_image_units(
+        self,
+        project_id: str,
+        run_plan: FormalExtractionRunPlan,
+        *,
+        preset: CloudModelPreset,
+        extraction_stage: ExtractionArtifactStage,
+        chunk_limit: int | None = None,
+        handler: ImageUnitHandler | None = None,
+        emit_progress: Callable[[int], None] | None = None,
+        progress_base: int = 0,
+        progress_span: int = 0,
+    ) -> tuple[int, dict[str, int], list[ChunkExtractionResult], dict[str, int]]:
+        unit_inputs = self._collect_image_units_from_run_plan(run_plan)
+        usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        stats = {
+            "succeeded_chunks": 0,
+            "skipped_chunks": 0,
+            "failed_chunks": 0,
+            "succeeded_episodes": 0,
+            "skipped_episodes": 0,
+            "failed_episodes": 0,
+            "succeeded_seasons": 0,
+            "skipped_seasons": 0,
+            "failed_seasons": 0,
+        }
+        if not unit_inputs:
+            return 0, usage_total, [], stats
+        if not provider_supports_capability(preset.provider, "image"):
+            stats["skipped_chunks"] = len(unit_inputs)
+            LOGGER.warning(
+                "Image extraction skipped because the provider does not support image input; "
+                "project_id=%s provider=%s units=%s",
+                project_id,
+                preset.provider,
+                len(unit_inputs),
+            )
+            return 0, usage_total, [], stats
+
+        image_handler = handler or self._image_unit_handler(preset)
+        materials_root = ensure_project_tree(project_id).materials
+        extracted_chunks: list[ChunkExtractionResult] = []
+        remaining_chunks = chunk_limit
+        total_units = len(unit_inputs)
+        for index, (season_id, unit) in enumerate(unit_inputs, start=1):
+            if remaining_chunks is not None and remaining_chunks <= 0:
+                break
+            try:
+                result = image_handler.execute(
+                    materials_root=materials_root,
+                    unit=unit,
+                    season_id=season_id,
+                    extraction_stage=extraction_stage,
+                    extraction_run_id=(
+                        run_plan.run_id
+                        if extraction_stage == ExtractionArtifactStage.FULL
+                        else ""
+                    ),
+                    run_type=(
+                        FULL_EXTRACTION_RUN_TYPE
+                        if extraction_stage == ExtractionArtifactStage.FULL
+                        else "preview_trial"
+                    ),
+                    backend=cloud_model_provider(preset.provider).backend_for("image"),
+                    model_name=preset.model_name,
+                    base_url=preset.base_url,
+                    api_key=preset.api_key,
+                )
+            except (ModelCallError, OSError, ValueError):
+                stats["failed_chunks"] += 1
+                LOGGER.warning(
+                    "Image extraction unit failed; project_id=%s unit_id=%s source_path=%s",
+                    project_id,
+                    unit.unit_id,
+                    unit.material_ref.relative_path,
+                    exc_info=True,
+                )
+                continue
+
+            if not result.chunks:
+                stats["skipped_chunks"] += 1
+                continue
+            for key in usage_total:
+                usage_total[key] += result.token_usage.get(key, 0)
+            for chunk in result.chunks:
+                if extraction_stage == ExtractionArtifactStage.PREVIEW:
+                    self.save_preview_chunk_extraction_result(project_id, chunk)
+                else:
+                    self.save_chunk_extraction_result(project_id, chunk)
+                extracted_chunks.append(chunk)
+            stats["succeeded_chunks"] += len(result.chunks)
+            if remaining_chunks is not None:
+                remaining_chunks -= len(result.chunks)
+            if emit_progress is not None and progress_span > 0:
+                emit_progress(progress_base + int(index * progress_span / total_units))
+
+        if extraction_stage == ExtractionArtifactStage.FULL and extracted_chunks:
+            self._finalize_serial_unit_contexts(
+                project_id,
+                extracted_chunks,
+                extraction_run_id=run_plan.run_id,
+                stats=stats,
+            )
+        return len(extracted_chunks), usage_total, extracted_chunks, stats
+
+    def _finalize_serial_unit_contexts(
         self,
         project_id: str,
         chunks: list[ChunkExtractionResult],
@@ -1589,7 +1711,8 @@ class Extractor(QObject):
             except (OSError, ValueError):
                 stats["failed_episodes"] += 1
                 LOGGER.warning(
-                    "Text episode aggregation failed; project_id=%s season_id=%s episode_id=%s",
+                    "Serial unit episode aggregation failed; "
+                    "project_id=%s season_id=%s episode_id=%s",
                     project_id,
                     season_id,
                     episode_id,
@@ -1614,7 +1737,7 @@ class Extractor(QObject):
             except (OSError, ValueError):
                 stats["failed_seasons"] += 1
                 LOGGER.warning(
-                    "Text season aggregation failed; project_id=%s season_id=%s",
+                    "Serial unit season aggregation failed; project_id=%s season_id=%s",
                     project_id,
                     season_id,
                     exc_info=True,
@@ -4629,7 +4752,8 @@ class Extractor(QObject):
             run_plan,
         )
         text_unit_inputs = self._collect_text_units_from_run_plan(run_plan)
-        if not chunk_inputs and not text_unit_inputs:
+        image_unit_inputs = self._collect_image_units_from_run_plan(run_plan)
+        if not chunk_inputs and not text_unit_inputs and not image_unit_inputs:
             message = t("extractor.full.noVideoMaterials")
             emit_event(
                 InsightEvent(
@@ -4761,20 +4885,51 @@ class Extractor(QObject):
             for key, value in season_stats.items():
                 run_stats[key] = run_stats.get(key, 0) + value
 
+        non_video_handler_count = sum(
+            (bool(text_unit_inputs), bool(image_unit_inputs))
+        )
+        non_video_progress_base = 80 if chunk_inputs else 5
+        non_video_progress_span = 15 if chunk_inputs else 90
+        per_handler_progress_span = (
+            non_video_progress_span // non_video_handler_count
+            if non_video_handler_count
+            else 0
+        )
+        text_progress_span = per_handler_progress_span if text_unit_inputs else 0
         text_created, text_usage, text_chunks, text_stats = self._extract_text_units(
             config.project_id,
             run_plan,
             preset=preset,
             extraction_stage=ExtractionArtifactStage.FULL,
             emit_progress=emit_progress,
-            progress_base=80 if chunk_inputs else 5,
-            progress_span=15 if chunk_inputs else 90,
+            progress_base=non_video_progress_base,
+            progress_span=text_progress_span,
         )
         created_count += text_created
         extracted_chunks.extend(text_chunks)
         for key in extraction_usage:
             extraction_usage[key] += text_usage.get(key, 0)
         for key, value in text_stats.items():
+            run_stats[key] = run_stats.get(key, 0) + value
+
+        image_progress_base = non_video_progress_base + text_progress_span
+        image_progress_span = (
+            non_video_progress_span - text_progress_span if image_unit_inputs else 0
+        )
+        image_created, image_usage, image_chunks, image_stats = self._extract_image_units(
+            config.project_id,
+            run_plan,
+            preset=preset,
+            extraction_stage=ExtractionArtifactStage.FULL,
+            emit_progress=emit_progress,
+            progress_base=image_progress_base,
+            progress_span=image_progress_span,
+        )
+        created_count += image_created
+        extracted_chunks.extend(image_chunks)
+        for key in extraction_usage:
+            extraction_usage[key] += image_usage.get(key, 0)
+        for key, value in image_stats.items():
             run_stats[key] = run_stats.get(key, 0) + value
         if emit_token_usage is not None and any(extraction_usage.values()):
             emit_token_usage(extraction_usage)
@@ -4927,6 +5082,36 @@ class Extractor(QObject):
             except Exception:  # noqa: BLE001
                 LOGGER.error(
                     "Preview chunk extraction from text failed; project_id=%s",
+                    config.project_id,
+                    exc_info=True,
+                )
+                created_count = 0
+                extraction_usage = {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                }
+                extracted_chunks = []
+            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                overall_usage[key] += extraction_usage.get(key, 0)
+        if created_count <= 0:
+            run_plan = self.prepare_formal_extraction_run_plan(config.project_id)
+            try:
+                created_count, extraction_usage, extracted_chunks, _ = self._extract_image_units(
+                    config.project_id,
+                    run_plan,
+                    preset=preset,
+                    extraction_stage=ExtractionArtifactStage.PREVIEW,
+                    chunk_limit=PREVIEW_MAX_CHUNKS,
+                    emit_progress=emit_progress,
+                    progress_base=30,
+                    progress_span=55,
+                )
+            except ExtractionStoppedError:
+                raise
+            except Exception:  # noqa: BLE001
+                LOGGER.error(
+                    "Preview chunk extraction from image failed; project_id=%s",
                     config.project_id,
                     exc_info=True,
                 )

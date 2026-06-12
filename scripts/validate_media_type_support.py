@@ -13,6 +13,7 @@ from utils.media_types import (  # noqa: E402
     AUDIO_SUFFIXES,
     DEFERRED_TIMED_TEXT_SUFFIXES,
     IMAGE_SUFFIXES,
+    SUPPORTED_STATIC_IMAGE_SUFFIXES,
     SUPPORTED_TIMED_TEXT_SUFFIXES,
     SUPPORTED_SOURCE_SUFFIXES,
     TEXT_SUFFIXES,
@@ -49,14 +50,26 @@ def _assert_suffix_matrix() -> None:
     assert source_media_type("dialogue.srt") == "text"
     assert SUPPORTED_TIMED_TEXT_SUFFIXES == {".srt", ".ass"}
     assert DEFERRED_TIMED_TEXT_SUFFIXES == {".vtt", ".lrc"}
+    assert SUPPORTED_STATIC_IMAGE_SUFFIXES == {".png", ".jpg", ".jpeg", ".webp"}
 
 
 def _assert_special_support_states() -> None:
+    for suffix in SUPPORTED_STATIC_IMAGE_SUFFIXES:
+        profile = source_support_profile(f"portrait{suffix}")
+        assert profile.preview_support == SourceSupportLevel.SUPPORTED
+        assert profile.formal_support == SourceSupportLevel.SUPPORTED
+
     gif_profile = source_support_profile("scene.gif")
     assert gif_profile.import_supported is True
     assert gif_profile.preview_support == SourceSupportLevel.UNSUPPORTED
     assert gif_profile.formal_support == SourceSupportLevel.UNSUPPORTED
     assert gif_profile.reason == "animated_image_not_supported"
+
+    bmp_profile = source_support_profile("scan.bmp")
+    assert bmp_profile.import_supported is True
+    assert bmp_profile.preview_support == SourceSupportLevel.UNSUPPORTED
+    assert bmp_profile.formal_support == SourceSupportLevel.UNSUPPORTED
+    assert bmp_profile.reason == "bmp_image_not_supported"
 
     json_profile = source_support_profile("setting.json")
     assert json_profile.import_supported is True

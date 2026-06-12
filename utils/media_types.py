@@ -48,6 +48,7 @@ VIDEO_SUFFIXES = frozenset(
     }
 )
 IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"})
+SUPPORTED_STATIC_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 AUDIO_SUFFIXES = frozenset({".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma"})
 SUPPORTED_TIMED_TEXT_SUFFIXES = frozenset({".srt", ".ass"})
 DEFERRED_TIMED_TEXT_SUFFIXES = frozenset({".vtt", ".lrc"})
@@ -68,8 +69,8 @@ _IMAGE_PROFILE = SourceSupportProfile(
     media_type="image",
     content_form_hint="unknown",
     import_supported=True,
-    preview_support=SourceSupportLevel.PLANNED,
-    formal_support=SourceSupportLevel.PLANNED,
+    preview_support=SourceSupportLevel.SUPPORTED,
+    formal_support=SourceSupportLevel.SUPPORTED,
 )
 _GIF_PROFILE = SourceSupportProfile(
     media_type="image",
@@ -78,6 +79,14 @@ _GIF_PROFILE = SourceSupportProfile(
     preview_support=SourceSupportLevel.UNSUPPORTED,
     formal_support=SourceSupportLevel.UNSUPPORTED,
     reason="animated_image_not_supported",
+)
+_BMP_PROFILE = SourceSupportProfile(
+    media_type="image",
+    content_form_hint="unknown",
+    import_supported=True,
+    preview_support=SourceSupportLevel.UNSUPPORTED,
+    formal_support=SourceSupportLevel.UNSUPPORTED,
+    reason="bmp_image_not_supported",
 )
 _AUDIO_PROFILE = SourceSupportProfile(
     media_type="audio",
@@ -158,6 +167,8 @@ def source_support_profile(path_or_suffix: str | Path) -> SourceSupportProfile:
         return _VIDEO_PROFILE
     if suffix == ".gif":
         return _GIF_PROFILE
+    if suffix == ".bmp":
+        return _BMP_PROFILE
     if suffix in IMAGE_SUFFIXES:
         return _IMAGE_PROFILE
     if suffix in AUDIO_SUFFIXES:
