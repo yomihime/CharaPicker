@@ -1,14 +1,14 @@
 # Extraction Workflow Technical Overview (en_US)
 
-Last reviewed: 2026-06-04.
+Last reviewed: 2026-06-12.
 
 This document is for users, researchers, and anyone who wants to understand the design of CharaPicker. It explains how long-form video material is extracted, compressed, organized, and eventually used to generate character cards.
 
-The current stable implementation mainly covers video material, preview extraction, formal extraction, and the basic character card compilation path. Text, subtitles, transcription results, images, manga pages, and mixed media entering the unified preview/knowledge-base consumption path remain follow-up work.
+The current stable implementation mainly covers video material, preview extraction, formal extraction, and the basic character card compilation path. Roadmap 02 has moved formal extraction initialization to a run-plan structure and reserved four top-level media types: `video`, `image`, `audio`, and `text`. Text, subtitles, transcription results, images, manga pages, and mixed media entering the unified preview/knowledge-base consumption path remain follow-up work.
 
 ## 1. Design Goals
 
-CharaPicker follows the `Extract Once` principle: raw video, subtitle, or image material should be analyzed once, then preserved as reusable structured knowledge.
+CharaPicker follows the `Extract Once` principle: raw video, audio, image, subtitle, or text material should be analyzed once, then preserved as reusable structured knowledge.
 
 The workflow solves three problems:
 
@@ -21,6 +21,8 @@ The system therefore organizes material into three levels: season, episode, and 
 - `chunk` is the extraction unit used to control model context length.
 - `episode` is the smallest natural unit for plot understanding and character growth.
 - `season` is the unit for stage-level growth, relationship changes, and long-running conflicts.
+
+At the code level, top-level media types are limited to `video`, `image`, `audio`, and `text`. Anime series, manga, audio dramas, novels, subtitles, and setting books are content forms or metadata. `transcript` is not a fifth media type; it is a `text` derived artifact produced from `video` or `audio`.
 
 ## 2. Input Material Convention
 
@@ -39,7 +41,7 @@ Recommended naming:
 
 Zero-padded numbering such as `01`, `02`, and `10` is recommended. This keeps simple text sorting reliable.
 
-After import and processing, the system maintains consumable material under the project directory and generates `source_manifest.json`, which records the mapping from original folders and filenames to internal identifiers. Later steps use stable identifiers such as `season_001`, `episode_001`, and `chunk_0001`, instead of repeatedly inferring meaning from filenames.
+After import and processing, the system maintains consumable material under the project directory. When formal extraction starts, it scans `materials/` and generates a `FormalExtractionRunPlan`, stored at `knowledge_base/extraction_runs/{run_id}/plan.json`. The run plan records `MaterialRef`, `ExtractionUnit`, media types, content forms, derived artifacts, and internal identifiers. Later steps use stable identifiers such as `season_001`, `episode_001`, and `chunk_0001`, instead of repeatedly inferring meaning from filenames. `source_manifest.json` is now only a legacy observation index or debug artifact, not the formal extraction input contract.
 
 The preview path currently collects at most the first 2 video chunks from `materials/`, writes `preview__` artifacts, and stays isolated from formal extraction. Preview results are not consumed by formal character card compilation.
 
@@ -63,14 +65,16 @@ raw material
 
 ```mermaid
 flowchart TD
-    A[Raw material enters raw/materials] --> B[Scan materials and generate source_manifest]
+    A[Raw material enters raw/materials] --> B[Scan materials and build material unit view]
+    B -.-> M[source_manifest.json debug / legacy observation index]
     B --> C{Select mode}
     C -->|Preview| P[Process at most first 2 video chunks]
     P --> P1[Write preview__ chunks and preview__episode_content]
-    C -->|Full| F[Create formal extraction_run_id]
+    C -->|Full| F[Create extraction_run_id and FormalExtractionRunPlan]
     C -->|Clean| CL[Clean regenerable intermediate artifacts]
     CL --> F
-    F --> L[Run serially by season -> episode -> chunk]
+    F --> RP[Write extraction_runs/{run_id}/plan.json]
+    RP --> L[Run serially by season -> episode -> chunk]
     L --> CH[Extract chunk with same-episode, cross-episode, and cross-season context]
     CH --> EC{Current episode complete?}
     EC -->|No| L
@@ -81,7 +85,9 @@ flowchart TD
     SC -->|Yes| SM[AI merges season_content]
     SM --> SS[AI generates season_summary]
     C -->|Fast| Q[Confirm quality risk and concurrency]
-    Q --> QC[Extract chunks concurrently without context]
+    Q --> FQ[Create extraction_run_id and FormalExtractionRunPlan]
+    FQ --> RQ[Write extraction_runs/{run_id}/plan.json]
+    RQ --> QC[Extract chunks concurrently without context]
     QC --> QE[AI reorganizes episodes concurrently]
     QE --> QS[AI reorganizes seasons]
     SS --> KB[Write formal knowledge_base]
@@ -96,7 +102,7 @@ Current formal extraction has three modes:
 - `Clean extraction`: cleans regenerable extraction artifacts first, then runs the same high-quality path as full extraction. It does not delete user material, exports, or character card master files. When a new formal run is written successfully, compiled official cards are marked stale.
 - `Fast extraction`: chunk calls run concurrently with the user-confirmed concurrency value and no context. After all chunks finish, AI reorganizes episodes concurrently, then reorganizes seasons. This mode prioritizes speed and can introduce much larger deviations.
 
-Formal extraction creates a new `extraction_run_id`. Full, clean, and fast modes only aggregate schema-valid full artifacts from the same run, so failed reruns do not mix old results into new output.
+Formal extraction creates a new `extraction_run_id` and `FormalExtractionRunPlan`. Full, clean, and fast modes only aggregate schema-valid full artifacts from the same run, so failed reruns do not mix old results into new output.
 
 If a provider rejects a video segment, the project option “skip provider-rejected chunks” controls whether the flow continues. When skipping is allowed, missing sources are written into episode/season warnings. When skipping is not allowed, the formal flow fails with a clear reason.
 
@@ -143,7 +149,7 @@ Fast extraction does not include same-episode, cross-episode, or cross-season co
 
 Extraction results are written to the project `knowledge_base` and stored by season, episode, and chunk.
 
-Each full, clean, or fast extraction run creates a new `extraction_run_id`. Chunk, episode, and season artifacts record that run id. Later aggregation only reads schema-valid artifacts from the current run.
+Each full, clean, or fast extraction run creates a new `extraction_run_id` and run plan. The run plan is the formal extraction primary index and is stored as `knowledge_base/extraction_runs/{run_id}/plan.json`. Chunk, episode, and season artifacts record that run id. Later aggregation only reads schema-valid artifacts from the current run.
 
 Formal artifacts usually also record:
 
@@ -153,12 +159,17 @@ Formal artifacts usually also record:
 - `token_usage`: prompt, completion, and total token usage returned by the model provider; fields may be empty when the provider does not return usage.
 - `requested_output_tokens`: output token limit requested for text merge or summary calls.
 - `aggregation_warnings`: skipped chunks, missing chunks, partial success, budget degradation, and similar warnings.
+- `source_trace` / `media_types`: records which material units and media types produced the artifact, so video, audio, image, text, and derived results are not mixed into one unclear source.
+- `derived_artifacts`: records intermediate results such as transcripts. A transcript enters the knowledge base as a `text` artifact, not as a new top-level media type.
 
 Recommended structure:
 
 ```text
 knowledge_base/
-├── source_manifest.json
+├── extraction_runs/
+│   └── {run_id}/
+│       └── plan.json
+├── source_manifest.json              # legacy/debug observation index
 ├── seasons/
 │   ├── season_001/
 │   │   ├── season_content.json
@@ -168,6 +179,7 @@ knowledge_base/
 │   │       ├── episode_001/
 │   │       │   ├── episode_content.json
 │   │       │   ├── episode_summary.json
+│   │       │   ├── episode_transcript.json
 │   │       │   └── chunks/
 │   │       │       ├── chunk_0001.json
 │   │       │       └── chunk_0002.json

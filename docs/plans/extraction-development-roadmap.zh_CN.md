@@ -1,6 +1,6 @@
 # 提取与角色成长编译开发路线（zh_CN）
 
-最近核对日期：2026-06-01。
+最近核对日期：2026-06-12。
 
 计划阶段：长期路线基准。
 
@@ -12,6 +12,7 @@
 
 - `extractor` 负责素材解析、chunk 提取、集级合并、季级合并和摘要生成。
 - `compiler` 与 `character_card_compiler` 负责按季、按集聚合角色状态，并把正式知识库结果写入角色卡编译链路。
+- 正式提取初始化以 `FormalExtractionRunPlan` 为主索引，写入 `knowledge_base/extraction_runs/{run_id}/plan.json`；`source_manifest.json` 只作为旧观察索引或调试产物。
 - `core.character_card_*` 模块负责角色卡母本、渲染、导入、导出和外部格式映射；`generator.py` 只保留旧输出兼容渲染能力。
 - `utils/ai_model_middleware.py` 继续作为唯一模型调用入口。
 - 所有知识库产物写入 `projects/{project_id}/knowledge_base/`。
@@ -30,30 +31,49 @@
 
 - 内部 ID 使用稳定格式：`season_001`、`episode_001`、`chunk_0001`。
 - 原始文件夹名和文件名只作为展示与追溯信息。
-- 扫描结果写入 `source_manifest.json`。
+- 正式提取扫描结果写入 `FormalExtractionRunPlan`，保存为 `knowledge_base/extraction_runs/{run_id}/plan.json`。
+- `source_manifest.json` 可以继续作为旧结构兼容/调试观察索引，但后续计划和验证脚本不得把它作为正式输入契约。
 - 先实现简单排序，后续再增加 UI 手动调整顺序。
 
-`source_manifest.json` 建议结构：
+`FormalExtractionRunPlan` 最小建议结构：
 
 ```json
 {
-  "source_root": "",
-  "seasons": [
+  "project_id": "example_project",
+  "run_id": "run-202606120001",
+  "mode": "full",
+  "plan_schema_version": 1,
+  "media_types": ["video"],
+  "content_forms": ["anime"],
+  "episodes": [
     {
       "season_id": "season_001",
-      "source_folder": "",
-      "display_title": "",
-      "sort_key": "",
-      "episodes": [
+      "episode_id": "episode_001",
+      "display_title": "01 xxx",
+      "sort_key": "01",
+      "content_forms": ["anime"],
+      "units": [
         {
+          "unit_id": "unit_000001",
           "episode_id": "episode_001",
-          "source_file": "",
-          "display_title": "",
-          "sort_key": ""
+          "media_type": "video",
+          "content_form": "anime",
+          "material_ref": {
+            "material_id": "material_000001",
+            "relative_path": "materials/season_001/episode_001.mp4",
+            "source_media_type": "video",
+            "content_form": "anime",
+            "origin": "material"
+          },
+          "origin": "material",
+          "unit_kind": "video_episode",
+          "derived_refs": []
         }
-      ]
+      ],
+      "derived_artifact_ids": []
     }
-  ]
+  ],
+  "derived_artifacts": []
 }
 ```
 
@@ -63,7 +83,10 @@
 
 ```text
 knowledge_base/
-├── source_manifest.json
+├── extraction_runs/
+│   └── {run_id}/
+│       └── plan.json
+├── source_manifest.json              # 旧观察索引/调试产物
 ├── seasons/
 │   ├── season_001/
 │   │   ├── season_content.json
@@ -73,6 +96,7 @@ knowledge_base/
 │   │       ├── episode_001/
 │   │       │   ├── episode_content.json
 │   │       │   ├── episode_summary.json
+│   │       │   ├── episode_transcript.json
 │   │       │   └── chunks/
 │   │       │       ├── chunk_0001.json
 │   │       │       └── chunk_0002.json
@@ -94,6 +118,7 @@ knowledge_base/
 落盘要求：
 
 - 每个 chunk 完成后写入对应 `chunks/chunk_xxxx.json`。
+- 每次正式提取开始时写入对应 `extraction_runs/{run_id}/plan.json`，作为本次运行的素材单元、派生成果和来源追踪主索引。
 - 每集完成后写入 `episode_content.json` 和 `episode_summary.json`。
 - 每季完成后写入 `season_content.json` 和 `season_summary.json`。
 - 每季角色阶段状态写入 `character_stage_states.json`。
@@ -210,7 +235,7 @@ CURRENT_CHUNK
 每次只实现一个小功能，建议顺序如下：
 
 1. 实现素材目录扫描，按一级文件夹识别季，按文件名排序识别集。
-2. 生成 `source_manifest.json`。
+2. 生成 `FormalExtractionRunPlan`，写入 `knowledge_base/extraction_runs/{run_id}/plan.json`。
 3. 建立 `knowledge_base/seasons/season_xxx/episodes/episode_xxx/chunks/` 目录结构。
 4. 定义 chunk 结构化结果模型。
 5. 提取请求支持同集已完成 chunk 的完整结构化结果注入。
@@ -227,7 +252,7 @@ CURRENT_CHUNK
 
 ## 8. 验收标准
 
-- 输入素材根目录能按“文件夹 = 季、文件 = 集”生成稳定 `source_manifest.json`。
+- 输入素材根目录能按“文件夹 = 季、文件 = 集”生成稳定 run plan，并能在 `extraction_runs/{run_id}/plan.json` 中追溯素材来源。
 - `knowledge_base` 按季、集、chunk 层级落盘，结构清晰可恢复。
 - 同集后续 chunk 能利用前面 chunk 的完整结构化结果。
 - 单集完成后能得到可追溯的集级完整内容。
