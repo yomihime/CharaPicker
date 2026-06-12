@@ -58,6 +58,7 @@ from core.models import (
     ProjectConfig,
 )
 from core.transcript_provider import TranscriptArtifactRequest, TranscriptProvider
+from core.video_unit_handler import VideoUnitHandler, VideoUnitHandlerConfig
 from utils.ai_model_middleware import (
     ModelBackend,
     ModelCallRequest,
@@ -999,7 +1000,24 @@ class Extractor(QObject):
         return provider.backend_for("video")  # type: ignore[return-value]
 
     def _video_mode_requires_transcript(self, video_input_mode: VideoInputMode) -> bool:
-        return video_input_mode in {"frame_sampling_with_transcript", "audio_transcript_only"}
+        return VideoUnitHandler.video_mode_requires_transcript(video_input_mode)
+
+    def _video_unit_handler(
+        self,
+        *,
+        provider: str,
+        video_fps: float,
+        video_input_mode: VideoInputMode,
+        max_output_tokens: int,
+    ) -> VideoUnitHandler:
+        return VideoUnitHandler(
+            VideoUnitHandlerConfig(
+                provider=provider,
+                video_fps=video_fps,
+                video_input_mode=video_input_mode,
+                max_output_tokens_per_minute=max_output_tokens,
+            )
+        )
 
     def _collect_formal_video_chunk_inputs(
         self,
@@ -2355,13 +2373,19 @@ class Extractor(QObject):
         if not chunk_inputs:
             return (0, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, [], stats)
 
+        video_handler = self._video_unit_handler(
+            provider=provider,
+            video_fps=video_fps,
+            video_input_mode=video_input_mode,
+            max_output_tokens=max_output_tokens,
+        )
         total_chunks = len(chunk_inputs)
         normalized_concurrency = self._normalize_fast_concurrency(concurrency)
         worker_count = min(normalized_concurrency, total_chunks)
         usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         extracted_chunks_with_index: list[tuple[int, ChunkExtractionResult]] = []
         transcripts_by_episode: dict[tuple[str, str], EpisodeTranscript] = {}
-        if self._video_mode_requires_transcript(video_input_mode):
+        if video_handler.requires_transcript():
             if run_plan is not None:
                 transcripts = self.ensure_episode_transcripts_from_run_plan(
                     config.project_id,
@@ -2403,11 +2427,9 @@ class Extractor(QObject):
                     )
                     return {"index": index, "status": "skipped"}
 
-                duration_seconds = self._video_duration_seconds(video_path)
-                request_max_output_tokens = scale_cloud_max_output_tokens_for_video_duration(
-                    max_output_tokens,
-                    duration_seconds,
-                )
+                budget = video_handler.prepare_budget(video_path)
+                duration_seconds = budget.duration_seconds
+                request_max_output_tokens = budget.request_max_output_tokens
                 if max_output_tokens < FULL_EXTRACTION_MIN_OUTPUT_TOKENS_PER_MINUTE:
                     LOGGER.warning(
                         "Fast extraction chunk output token budget is too small; "
@@ -2449,7 +2471,7 @@ class Extractor(QObject):
                     )
 
                 transcript_context = ""
-                if self._video_mode_requires_transcript(video_input_mode):
+                if video_handler.requires_transcript():
                     transcript = transcripts_by_episode.get(
                         (chunk_input["season_id"], chunk_input["episode_id"])
                     )
@@ -2477,17 +2499,14 @@ class Extractor(QObject):
                         "reason": "fast_parallel_chunk_extraction",
                     }
                 }
-                request = self._build_full_video_chunk_request(
-                    config,
+                request = video_handler.build_formal_chunk_request(
+                    project_id=config.project_id,
                     chunk_input=chunk_input,
                     backend=backend,
-                    provider=provider,
                     model_name=model_name,
                     base_url=base_url,
                     api_key=api_key,
-                    video_fps=video_fps,
                     request_max_output_tokens=request_max_output_tokens,
-                    video_input_mode=video_input_mode,
                     transcript_context=transcript_context,
                     formal_context=fast_context,
                 )
@@ -3108,6 +3127,12 @@ class Extractor(QObject):
         if not chunk_inputs:
             return (0, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, [], stats)
 
+        video_handler = self._video_unit_handler(
+            provider=provider,
+            video_fps=video_fps,
+            video_input_mode=video_input_mode,
+            max_output_tokens=max_output_tokens,
+        )
         episode_groups = self._group_formal_video_chunk_inputs_by_episode(chunk_inputs)
         created = 0
         processed = 0
@@ -3116,7 +3141,7 @@ class Extractor(QObject):
         total_chunks = len(chunk_inputs)
         extraction_run_id = self._manifest_string(manifest.get("extraction_run_id"))
         transcripts_by_episode: dict[tuple[str, str], EpisodeTranscript] = {}
-        if self._video_mode_requires_transcript(video_input_mode):
+        if video_handler.requires_transcript():
             if run_plan is not None:
                 transcripts = self.ensure_episode_transcripts_from_run_plan(
                     config.project_id,
@@ -3185,11 +3210,9 @@ class Extractor(QObject):
                         stats["skipped_chunks"] += 1
                         continue
 
-                    duration_seconds = self._video_duration_seconds(video_path)
-                    request_max_output_tokens = scale_cloud_max_output_tokens_for_video_duration(
-                        max_output_tokens,
-                        duration_seconds,
-                    )
+                    budget = video_handler.prepare_budget(video_path)
+                    duration_seconds = budget.duration_seconds
+                    request_max_output_tokens = budget.request_max_output_tokens
                     if max_output_tokens < FULL_EXTRACTION_MIN_OUTPUT_TOKENS_PER_MINUTE:
                         LOGGER.warning(
                             "Full extraction chunk output token budget is too small; "
@@ -3236,10 +3259,10 @@ class Extractor(QObject):
                                 ),
                                 status=InsightStatus.RUNNING,
                             ).model_dump(mode="json")
-                        )
+                    )
 
                     transcript_context = ""
-                    if self._video_mode_requires_transcript(video_input_mode):
+                    if video_handler.requires_transcript():
                         transcript = transcripts_by_episode.get(
                             (chunk_input["season_id"], chunk_input["episode_id"])
                         )
@@ -3269,17 +3292,14 @@ class Extractor(QObject):
                         previous_episode_id=previous_episode_id,
                         extraction_run_id=extraction_run_id,
                     )
-                    request = self._build_full_video_chunk_request(
-                        config,
+                    request = video_handler.build_formal_chunk_request(
+                        project_id=config.project_id,
                         chunk_input=chunk_input,
                         backend=backend,
-                        provider=provider,
                         model_name=model_name,
                         base_url=base_url,
                         api_key=api_key,
-                        video_fps=video_fps,
                         request_max_output_tokens=request_max_output_tokens,
-                        video_input_mode=video_input_mode,
                         transcript_context=transcript_context,
                         formal_context=chunk_context,
                     )
@@ -3532,100 +3552,6 @@ class Extractor(QObject):
             else:
                 stats["failed_seasons"] += 1
         return (created, usage_total, extracted_chunks, stats)
-
-    def _build_full_video_chunk_request(
-        self,
-        config: ProjectConfig,
-        *,
-        chunk_input: dict[str, Any],
-        backend: ModelBackend,
-        provider: str,
-        model_name: str,
-        base_url: str,
-        api_key: str,
-        video_fps: float,
-        request_max_output_tokens: int,
-        video_input_mode: VideoInputMode,
-        transcript_context: str = "",
-        formal_context: dict[str, Any] | None = None,
-    ) -> ModelCallRequest:
-        video_path = chunk_input["video_path"]
-        context = formal_context or {}
-        system_prompt, user_text = render_prompt_texts(
-            purpose="formal_contextual_video_chunk_extraction",
-            variables={
-                "season_id": chunk_input["season_id"],
-                "episode_id": chunk_input["episode_id"],
-                "chunk_id": chunk_input["chunk_id"],
-                "source_path": chunk_input["source_path"],
-                "transcript_section": self._format_transcript_prompt_section(
-                    video_input_mode,
-                    transcript_context,
-                ),
-                "current_episode_extracted_chunks": context.get(
-                    "current_episode_extracted_chunks",
-                    [],
-                ),
-                "current_season_completed_episodes": context.get(
-                    "current_season_completed_episodes",
-                    [],
-                ),
-                "previous_season_backgrounds": context.get(
-                    "previous_season_backgrounds",
-                    [],
-                ),
-            },
-        )
-        content_parts: list[dict[str, Any]] = [{"type": "text", "text": user_text}]
-        if video_input_mode != "audio_transcript_only":
-            content_parts.append(self._build_video_chunk_part(video_path, video_fps))
-        return ModelCallRequest(
-            purpose="formal_contextual_video_chunk_extraction",
-            backend=backend,
-            model_name=model_name,
-            base_url=base_url,
-            api_key=api_key,
-            messages=[
-                ModelMessage(
-                    role="system",
-                    content=system_prompt,
-                ),
-                ModelMessage(
-                    role="user",
-                    content=content_parts,
-                ),
-            ],
-            temperature=0.2,
-            max_tokens=request_max_output_tokens,
-            stream=False,
-            timeout_seconds=240,
-            response_format={"type": "json_object"},
-            extra_body=self._video_model_extra_body(provider),
-            metadata={
-                "project_id": config.project_id,
-                "stage": "full_chunk_extraction",
-                "season_id": chunk_input["season_id"],
-                "episode_id": chunk_input["episode_id"],
-                "chunk_id": chunk_input["chunk_id"],
-                "source_path": chunk_input["source_path"],
-                "video_input_mode": video_input_mode,
-                "context_policy": context.get("context_policy", {}),
-            },
-        )
-
-    def _format_transcript_prompt_section(
-        self,
-        video_input_mode: VideoInputMode,
-        transcript_context: str,
-    ) -> str:
-        if not self._video_mode_requires_transcript(video_input_mode):
-            return ""
-        context = transcript_context.strip() or t("extractor.transcript.context.empty")
-        if video_input_mode == "audio_transcript_only":
-            note = t("extractor.transcript.prompt.audioOnly")
-        else:
-            note = t("extractor.transcript.prompt.withFrames")
-        return f"[TRANSCRIPT_CONTEXT]\n{context}\n\n{note}"
 
     def _emit_full_warning(self, emit_event: Callable[[dict], None] | None, description: str) -> None:
         if emit_event is None:
