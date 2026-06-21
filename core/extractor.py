@@ -48,6 +48,12 @@ from core.extraction_plan import (
     MediaType,
     SourceTrace,
 )
+from core.formal_dispatch import (
+    FormalDispatchKind,
+    FormalDispatchPlan,
+    FormalUnsupportedUnit,
+    build_formal_dispatch_plan,
+)
 from core.image_unit_handler import ImageUnitHandler, ImageUnitHandlerConfig
 from core.models import (
     ChunkExtractionResult,
@@ -133,6 +139,10 @@ PREVIEW_REASON_TRANSLATION_KEYS = {
     "lrc_timed_text_not_supported": "extractor.preview.reason.lrcNotSupported",
     "model_image_input_not_supported": "extractor.preview.reason.modelImageNotSupported",
     "preview_handler_not_available": "extractor.preview.reason.handlerNotAvailable",
+}
+FORMAL_REASON_TRANSLATION_KEYS = {
+    **PREVIEW_REASON_TRANSLATION_KEYS,
+    "formal_handler_not_available": "extractor.full.reason.handlerNotAvailable",
 }
 
 
@@ -4751,6 +4761,51 @@ class Extractor(QObject):
     ) -> dict[str, Any] | None:
         return kb.load_previous_season_summary(project_id, season_id, enabled=enabled)
 
+    def _formal_unsupported_unit_meta(self, unsupported: FormalUnsupportedUnit) -> dict[str, str]:
+        unit = unsupported.unit
+        return {
+            "media_type": unit.media_type.value,
+            "content_form": unit.content_form.value,
+            "unit_id": unit.unit_id,
+            "material_id": unit.material_ref.material_id,
+            "relative_path": unit.material_ref.relative_path,
+            "stage": "full",
+            "reason": unsupported.reason,
+        }
+
+    def _formal_warning_reason(self, reason: str) -> str:
+        translation_key = FORMAL_REASON_TRANSLATION_KEYS.get(reason)
+        if translation_key is not None:
+            return t(translation_key)
+        return t("extractor.preview.reason.unknown", reason=reason)
+
+    def _emit_formal_unsupported_units(
+        self,
+        emit_event: Callable[[dict], None],
+        unsupported_units: tuple[FormalUnsupportedUnit, ...],
+    ) -> None:
+        for unsupported in unsupported_units:
+            source_name = Path(unsupported.unit.material_ref.relative_path).name
+            emit_event(
+                InsightEvent(
+                    title=t("extractor.full.chunk.title"),
+                    description=t(
+                        "extractor.full.unitUnsupported",
+                        name=source_name,
+                        reason=self._formal_warning_reason(unsupported.reason),
+                    ),
+                    status=InsightStatus.WARNING,
+                    meta=self._formal_unsupported_unit_meta(unsupported),
+                ).model_dump(mode="json")
+            )
+
+    def _formal_dispatch_meta(self, dispatch_plan: FormalDispatchPlan) -> dict[str, Any]:
+        return {
+            "dispatch_handlers": dispatch_plan.handler_kinds,
+            "dispatch_supported_units": dispatch_plan.supported_unit_count,
+            "unsupported_units": len(dispatch_plan.unsupported_units),
+        }
+
     def run_full_extraction_streaming(
         self,
         config: ProjectConfig,
@@ -4824,19 +4879,15 @@ class Extractor(QObject):
         kb.save_extraction_run_plan(config.project_id, run_plan)
         kb.initialize_structure_from_run_plan(config.project_id, run_plan)
         kb.save_source_manifest(config.project_id, manifest)
-        chunk_inputs = self._collect_formal_video_chunk_inputs_from_run_plan(
-            config.project_id,
+        initial_dispatch_plan = build_formal_dispatch_plan(
             run_plan,
+            image_input_supported=True,
         )
-        text_unit_inputs = self._collect_text_units_from_run_plan(run_plan)
-        image_unit_inputs = self._collect_image_units_from_run_plan(run_plan)
-        audio_transcript_inputs = self._collect_audio_transcript_units_from_run_plan(run_plan)
-        if (
-            not chunk_inputs
-            and not text_unit_inputs
-            and not image_unit_inputs
-            and not audio_transcript_inputs
-        ):
+        if initial_dispatch_plan.supported_unit_count <= 0:
+            self._emit_formal_unsupported_units(
+                emit_event,
+                initial_dispatch_plan.unsupported_units,
+            )
             message = t("extractor.full.noVideoMaterials")
             emit_event(
                 InsightEvent(
@@ -4866,7 +4917,25 @@ class Extractor(QObject):
 
         video_input_mode = normalize_video_input_mode(preset.video_input_mode, preset.provider)
         provider_profile = cloud_model_provider(preset.provider)
-        if audio_transcript_inputs:
+        dispatch_plan = build_formal_dispatch_plan(
+            run_plan,
+            image_input_supported=provider_supports_capability(preset.provider, "image"),
+        )
+        self._emit_formal_unsupported_units(emit_event, dispatch_plan.unsupported_units)
+        chunk_inputs = (
+            self._collect_formal_video_chunk_inputs_from_run_plan(
+                config.project_id,
+                run_plan,
+            )
+            if dispatch_plan.has_handler(FormalDispatchKind.VIDEO)
+            else []
+        )
+        text_unit_count = dispatch_plan.handler_unit_count(FormalDispatchKind.TEXT)
+        image_unit_count = dispatch_plan.handler_unit_count(FormalDispatchKind.IMAGE)
+        audio_transcript_count = dispatch_plan.handler_unit_count(
+            FormalDispatchKind.AUDIO_TRANSCRIPT
+        )
+        if audio_transcript_count:
             self.ensure_episode_transcripts_from_run_plan(
                 config.project_id,
                 run_plan,
@@ -4874,7 +4943,12 @@ class Extractor(QObject):
                 include_video=False,
                 include_audio=True,
             )
-            text_unit_inputs = self._collect_text_units_from_run_plan(run_plan)
+            dispatch_plan = build_formal_dispatch_plan(
+                run_plan,
+                image_input_supported=provider_supports_capability(preset.provider, "image"),
+            )
+            text_unit_count = dispatch_plan.handler_unit_count(FormalDispatchKind.TEXT)
+            image_unit_count = dispatch_plan.handler_unit_count(FormalDispatchKind.IMAGE)
         if chunk_inputs and self._video_mode_requires_transcript(video_input_mode):
             self._transcript_provider().prepare_run_plan(
                 config.project_id,
@@ -4982,9 +5056,8 @@ class Extractor(QObject):
             for key, value in season_stats.items():
                 run_stats[key] = run_stats.get(key, 0) + value
 
-        non_video_handler_count = sum(
-            (bool(text_unit_inputs), bool(image_unit_inputs))
-        )
+        run_stats.update(self._formal_dispatch_meta(dispatch_plan))
+        non_video_handler_count = sum((bool(text_unit_count), bool(image_unit_count)))
         non_video_progress_base = 80 if chunk_inputs else 5
         non_video_progress_span = 15 if chunk_inputs else 90
         per_handler_progress_span = (
@@ -4992,16 +5065,22 @@ class Extractor(QObject):
             if non_video_handler_count
             else 0
         )
-        text_progress_span = per_handler_progress_span if text_unit_inputs else 0
-        text_created, text_usage, text_chunks, text_stats = self._extract_text_units(
-            config.project_id,
-            run_plan,
-            preset=preset,
-            extraction_stage=ExtractionArtifactStage.FULL,
-            emit_progress=emit_progress,
-            progress_base=non_video_progress_base,
-            progress_span=text_progress_span,
-        )
+        text_progress_span = per_handler_progress_span if text_unit_count else 0
+        if text_unit_count:
+            text_created, text_usage, text_chunks, text_stats = self._extract_text_units(
+                config.project_id,
+                run_plan,
+                preset=preset,
+                extraction_stage=ExtractionArtifactStage.FULL,
+                emit_progress=emit_progress,
+                progress_base=non_video_progress_base,
+                progress_span=text_progress_span,
+            )
+        else:
+            text_created = 0
+            text_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            text_chunks = []
+            text_stats = {}
         created_count += text_created
         extracted_chunks.extend(text_chunks)
         for key in extraction_usage:
@@ -5011,17 +5090,23 @@ class Extractor(QObject):
 
         image_progress_base = non_video_progress_base + text_progress_span
         image_progress_span = (
-            non_video_progress_span - text_progress_span if image_unit_inputs else 0
+            non_video_progress_span - text_progress_span if image_unit_count else 0
         )
-        image_created, image_usage, image_chunks, image_stats = self._extract_image_units(
-            config.project_id,
-            run_plan,
-            preset=preset,
-            extraction_stage=ExtractionArtifactStage.FULL,
-            emit_progress=emit_progress,
-            progress_base=image_progress_base,
-            progress_span=image_progress_span,
-        )
+        if image_unit_count:
+            image_created, image_usage, image_chunks, image_stats = self._extract_image_units(
+                config.project_id,
+                run_plan,
+                preset=preset,
+                extraction_stage=ExtractionArtifactStage.FULL,
+                emit_progress=emit_progress,
+                progress_base=image_progress_base,
+                progress_span=image_progress_span,
+            )
+        else:
+            image_created = 0
+            image_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            image_chunks = []
+            image_stats = {}
         created_count += image_created
         extracted_chunks.extend(image_chunks)
         for key in extraction_usage:

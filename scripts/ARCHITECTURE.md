@@ -22,6 +22,7 @@
 - `validate_image_unit_handler.py`：执行不联网的静态图片验证，覆盖图片排序、页码/region/像素 evidence、文件上限与签名失败、GIF 跳过、模型能力不足、每张图片预算，以及图片-only 预览和正式聚合。
 - `validate_audio_transcript_unit.py`：执行不联网的音频 transcript 验证，覆盖 Whisper 缓存命中、artifact 状态/coverage/source refs、派生 text unit、时间证据、音频-only 预览/正式提取，以及转写失败不阻断普通文本。
 - `validate_generic_preview_dispatch.py`：执行不联网的通用预览调度验证，覆盖跨内容形态成本排序、失败候选补位、unsupported 洞察事件、单 unit 隔离计划、音频预览不持久化正式 run plan、视频候选路径，以及 preview/full artifact 隔离。
+- `validate_formal_dispatch.py`：执行不联网的正式提取分发验证，覆盖分发表 handler 选择、audio transcript 物化后转入文本 handler、unsupported unit 洞察事件、模型不支持图片时不调用图片 handler、文本继续成功，以及视频旧提取路径回归。
 
 ## 与其他目录的关系
 
