@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
+import types
 import unittest
 import zipfile
 from pathlib import Path
@@ -15,7 +17,6 @@ from core.extraction_plan import (
     MaterialRef,
     MediaType,
 )
-from core.extractor import Extractor
 from core.refusal_samples import (
     ExtractionFailureSampleRequest,
     load_refusal_sample,
@@ -26,6 +27,30 @@ from core.models import ExtractionArtifactStage
 from utils.ai_model_middleware import ModelCallError
 from utils.cloud_model_presets import CloudModelPreset
 from utils.paths import project_paths
+
+
+class _TestQObject:
+    pass
+
+
+class _TestSignal:
+    def connect(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
+    def emit(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
+
+def _test_pyqt_signal(*_args: object, **_kwargs: object) -> _TestSignal:
+    return _TestSignal()
+
+
+qtcore = sys.modules.setdefault("PyQt6.QtCore", types.ModuleType("PyQt6.QtCore"))
+setattr(qtcore, "QObject", getattr(qtcore, "QObject", _TestQObject))
+setattr(qtcore, "pyqtSignal", getattr(qtcore, "pyqtSignal", _test_pyqt_signal))
+sys.modules.setdefault("PyQt6", types.ModuleType("PyQt6"))
+
+from core.extractor import Extractor  # noqa: E402
 
 
 class RefusalSampleTests(unittest.TestCase):
