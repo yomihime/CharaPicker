@@ -171,6 +171,7 @@ def _assert_dispatch_plan_covers_current_handlers() -> None:
         assert plan.has_handler(FormalDispatchKind.TEXT)
         assert plan.has_handler(FormalDispatchKind.IMAGE)
         assert plan.has_handler(FormalDispatchKind.AUDIO_TRANSCRIPT)
+        assert plan.has_handler(FormalDispatchKind.NATIVE_MEDIA)
         assert any(item.reason == "vtt_timed_text_not_supported" for item in plan.unsupported_units)
 
         provider = TranscriptProvider(transcribe=_FakeTranscriptRunner())
