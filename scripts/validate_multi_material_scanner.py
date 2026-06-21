@@ -77,7 +77,10 @@ def _assert_multi_material_scan() -> None:
         _write_fixture(paths.materials / "voice.wav")
         _write_fixture(paths.materials / "images" / "001.png")
         _write_fixture(paths.materials / "images" / "002.jpg")
+        _write_fixture(paths.materials / "images" / "010.png")
         _write_fixture(paths.materials / "images" / "animation.gif")
+        _write_fixture(paths.materials / "images_extra" / "001.png")
+        _write_fixture(paths.materials / "images_extra" / "002.png")
         _write_fixture(paths.materials / "season_a" / "episode02.mkv")
         kb.source_manifest_path(project_id).write_text(
             json.dumps({"seasons": [{"episode_id": "must-not-be-read"}]}),
@@ -130,16 +133,43 @@ def _assert_multi_material_scan() -> None:
         assert standalone_units["voice.wav"].handler_options["transcript_candidate"] is True
         assert standalone_units["images/001.png"].material_ref.page_range.start_page == 1
         assert standalone_units["images/002.jpg"].material_ref.page_range.start_page == 2
+        assert standalone_units["images/010.png"].material_ref.page_range.start_page == 3
+        assert standalone_units["images_extra/001.png"].material_ref.page_range.start_page == 1
         gif_unit = standalone_units["images/animation.gif"]
         assert gif_unit.handler_options["formal_support"] == "unsupported"
 
-        image_episode = next(
+        image_episodes = [
             episode
             for episode in episodes
-            if any(unit.material_ref.relative_path == "images/001.png" for unit in episode.units)
+            if any(unit.media_type == MediaType.IMAGE for unit in episode.units)
+        ]
+        assert len(image_episodes) == 2
+        image_episode = next(
+            episode for episode in image_episodes if episode.metadata["source_path"] == "images"
         )
-        assert image_episode.content_forms == [ContentForm.IMAGE_SET]
+        extra_image_episode = next(
+            episode
+            for episode in image_episodes
+            if episode.metadata["source_path"] == "images_extra"
+        )
+        assert image_episode.content_forms == [ContentForm.IMAGE_SET, ContentForm.MANGA]
+        assert image_episode.metadata["chapter_path"] == "images"
+        assert image_episode.metadata["page_count"] == 4
+        assert image_episode.metadata["supported_page_count"] == 3
+        assert image_episode.metadata["unsupported_page_count"] == 1
+        assert image_episode.metadata["page_order"] == [
+            "images/001.png",
+            "images/002.jpg",
+            "images/010.png",
+            "images/animation.gif",
+        ]
         assert image_episode.metadata["manga_candidate"] is True
+        assert extra_image_episode.content_forms == [ContentForm.IMAGE_SET, ContentForm.MANGA]
+        assert extra_image_episode.metadata["page_order"] == [
+            "images_extra/001.png",
+            "images_extra/002.png",
+        ]
+        assert extra_image_episode.episode_id != image_episode.episode_id
         assert image_episode.metadata["warnings"] == [
             "images/animation.gif: animated_image_not_supported"
         ]
@@ -151,6 +181,7 @@ def _assert_multi_material_scan() -> None:
             MediaType.AUDIO,
             MediaType.TEXT,
         }
+        assert ContentForm.MANGA in plan.content_forms
         assert "images/animation.gif: animated_image_not_supported" in plan.warnings
         assert plan.metadata["scan_type"] == source_scanner.FORMAL_MATERIAL_SCAN_TYPE
 

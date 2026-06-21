@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from hashlib import sha1
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from core.extraction_plan import (
 )
 from utils.media_types import (
     IMAGE_SUFFIXES,
+    SourceSupportLevel,
     SUPPORTED_TIMED_TEXT_SUFFIXES,
     TIMED_TEXT_SUFFIXES,
     classify_source_collection,
@@ -26,6 +28,7 @@ from utils.media_types import (
 
 FORMAL_MATERIAL_SCAN_TYPE = "formal_materials"
 GENERIC_MATERIAL_SEASON_ID = "season_materials"
+NATURAL_SORT_PATTERN = re.compile(r"\d+|\D+")
 
 
 def extend_episode_plans(materials_root: Path, episodes: list[EpisodePlan]) -> list[EpisodePlan]:
@@ -55,7 +58,7 @@ def _supported_non_video_material_paths(materials_root: Path) -> list[Path]:
         media_type = source_media_type(path)
         if path.is_file() and media_type is not None and media_type != MediaType.VIDEO.value:
             paths.append(path)
-    return sorted(paths, key=lambda path: _relative_material_path(materials_root, path).lower())
+    return sorted(paths, key=lambda path: _natural_sort_key(_relative_material_path(materials_root, path)))
 
 
 def _timed_text_associations(
@@ -151,7 +154,7 @@ def _standalone_material_episodes(
         for parent, paths in _group_paths_by_parent(image_paths)
     ]
     episodes.extend(_single_material_episode(materials_root, path) for path in other_paths)
-    return sorted(episodes, key=lambda episode: episode.sort_key)
+    return sorted(episodes, key=lambda episode: _natural_sort_key(episode.sort_key))
 
 
 def _group_paths_by_parent(paths: list[Path]) -> list[tuple[Path, list[Path]]]:
@@ -159,8 +162,11 @@ def _group_paths_by_parent(paths: list[Path]) -> list[tuple[Path, list[Path]]]:
     for path in paths:
         groups.setdefault(path.parent, []).append(path)
     return [
-        (parent, sorted(group_paths, key=lambda path: path.name.lower()))
-        for parent, group_paths in sorted(groups.items(), key=lambda item: item[0].as_posix().lower())
+        (parent, sorted(group_paths, key=lambda path: _natural_sort_key(path.name)))
+        for parent, group_paths in sorted(
+            groups.items(),
+            key=lambda item: _natural_sort_key(item[0].as_posix()),
+        )
     ]
 
 
@@ -171,36 +177,61 @@ def _image_collection_episode(
 ) -> EpisodePlan:
     relative_parent = _relative_material_path(materials_root, parent)
     episode_id = _stable_episode_id(MediaType.IMAGE, relative_parent or ".")
+    display_title = parent.name if relative_parent not in {"", "."} else materials_root.name
+    supported_page_count = sum(
+        1
+        for path in paths
+        if source_support_profile(path).formal_support == SourceSupportLevel.SUPPORTED
+    )
+    page_group = supported_page_count > 1
+    content_form = ContentForm.MANGA if page_group else ContentForm.IMAGE_SET
     units = [
         _material_unit(
             materials_root,
             path,
             season_id=GENERIC_MATERIAL_SEASON_ID,
             episode_id=episode_id,
-            content_form=ContentForm.IMAGE_SET,
+            content_form=content_form,
             unit_kind="image_page" if len(paths) > 1 else "image_source",
             page_number=index,
             metadata={
+                "chapter_id": episode_id,
+                "chapter_path": relative_parent,
+                "chapter_title": display_title,
                 "image_collection_size": len(paths),
-                "manga_candidate": len(paths) > 1,
+                "manga_candidate": page_group,
+                "page_file_name": path.name,
+                "page_number": index,
+                "page_sort_key": _natural_sort_key_for_metadata(path.name),
+                "supported_page_count": supported_page_count,
             },
         )
         for index, path in enumerate(paths, start=1)
     ]
     collection_profile = classify_source_collection(paths)
+    content_forms = [ContentForm.IMAGE_SET]
+    if page_group:
+        content_forms.append(ContentForm.MANGA)
     return EpisodePlan(
         season_id=GENERIC_MATERIAL_SEASON_ID,
         episode_id=episode_id,
-        display_title=parent.name if relative_parent not in {"", "."} else materials_root.name,
+        display_title=display_title,
         sort_key=f"image:{relative_parent.lower()}",
-        content_forms=[ContentForm.IMAGE_SET],
+        content_forms=content_forms,
         units=units,
         metadata={
+            "chapter_id": episode_id,
+            "chapter_path": relative_parent,
+            "chapter_title": display_title,
             "scan_type": FORMAL_MATERIAL_SCAN_TYPE,
             "source_path": relative_parent,
             "collection_media_types": list(collection_profile.media_types),
             "content_form_candidates": [ContentForm.IMAGE_SET.value, ContentForm.MANGA.value],
-            "manga_candidate": len(paths) > 1,
+            "manga_candidate": page_group,
+            "page_count": len(paths),
+            "page_order": [unit.material_ref.relative_path for unit in units],
+            "supported_page_count": supported_page_count,
+            "unsupported_page_count": len(paths) - supported_page_count,
             "warnings": _unit_warnings(units),
         },
     )
@@ -355,6 +386,20 @@ def _relative_material_path(materials_root: Path, path: Path) -> str:
         return path.resolve().relative_to(materials_root.resolve()).as_posix()
     except ValueError:
         return path.resolve().as_posix()
+
+
+def _natural_sort_key(value: str) -> tuple[tuple[int, int | str], ...]:
+    return tuple(
+        (0, int(part)) if part.isdigit() else (1, part.lower())
+        for part in NATURAL_SORT_PATTERN.findall(value)
+    )
+
+
+def _natural_sort_key_for_metadata(value: str) -> list[int | str]:
+    return [
+        int(part) if part.isdigit() else part.lower()
+        for part in NATURAL_SORT_PATTERN.findall(value)
+    ]
 
 
 def _stable_material_id(media_type: MediaType, source_path: str) -> str:

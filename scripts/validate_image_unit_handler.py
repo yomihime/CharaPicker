@@ -158,6 +158,7 @@ def _assert_scan_handler_and_workflows() -> None:
         image_dir.mkdir()
         image_dir.joinpath("002.png").write_bytes(PNG_1X1)
         image_dir.joinpath("001.png").write_bytes(PNG_1X1)
+        image_dir.joinpath("010.png").write_bytes(PNG_1X1)
         image_dir.joinpath("animation.gif").write_bytes(b"GIF89a")
 
         extractor = Extractor()
@@ -170,8 +171,16 @@ def _assert_scan_handler_and_workflows() -> None:
         assert [unit.material_ref.relative_path for unit in image_episode.units] == [
             "images/001.png",
             "images/002.png",
+            "images/010.png",
             "images/animation.gif",
         ]
+        assert image_episode.metadata["page_order"] == [
+            "images/001.png",
+            "images/002.png",
+            "images/010.png",
+            "images/animation.gif",
+        ]
+        assert image_episode.metadata["supported_page_count"] == 3
         assert image_episode.metadata["warnings"] == [
             "images/animation.gif: animated_image_not_supported"
         ]
@@ -185,7 +194,12 @@ def _assert_scan_handler_and_workflows() -> None:
             for unit in image_episode.units
             if unit.material_ref.relative_path.endswith(".gif")
         )
-        assert [unit.material_ref.page_range.start_page for unit in supported_units] == [1, 2]
+        assert [unit.material_ref.page_range.start_page for unit in supported_units] == [1, 2, 3]
+        assert [unit.material_ref.metadata["chapter_id"] for unit in supported_units] == [
+            image_episode.episode_id,
+            image_episode.episode_id,
+            image_episode.episode_id,
+        ]
         assert all(unit.handler_options["formal_support"] == "supported" for unit in supported_units)
         assert gif_unit.handler_options["formal_support"] == "unsupported"
 
@@ -247,7 +261,7 @@ def _assert_scan_handler_and_workflows() -> None:
             handler=handler,
         )
         assert skipped[0] == 0
-        assert skipped[3]["skipped_chunks"] == 2
+        assert skipped[3]["skipped_chunks"] == 3
 
         workflow_handler = ImageUnitHandler(
             ImageUnitHandlerConfig(provider="openai"),
@@ -265,7 +279,7 @@ def _assert_scan_handler_and_workflows() -> None:
             ProjectConfig(project_id=project_id),
             cloud_preset=_preset(),
         )
-        assert len(full_chunks) == 2
+        assert len(full_chunks) == 3
         assert all(chunk.source_kind == "image" for chunk in full_chunks)
         assert all(chunk.source_counts["images"] == 1 for chunk in full_chunks)
         episode_content = kb.load_episode_content(
@@ -274,7 +288,7 @@ def _assert_scan_handler_and_workflows() -> None:
             full_chunks[0].episode_id,
         )
         assert episode_content["source_kind"] == "image"
-        assert len(episode_content["source_trace"]["material_refs"]) == 2
+        assert len(episode_content["source_trace"]["material_refs"]) == 3
 
 
 def main() -> None:

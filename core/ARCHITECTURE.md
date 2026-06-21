@@ -21,7 +21,7 @@
 - `character_card_constants.py`：集中保存角色卡固定文件名、预览卡保留 ID 和 stale warning reason 等跨模块共享常量。
 - `knowledge_base.py`：集中管理 `projects/{project_id}/knowledge_base/` 下常用产物的路径、JSON 读写和结构校验。
 - `source_scanner.py`：保留旧视频目录扫描、正式扫描入口、预览视频 chunk 收集和预览 chunk 标识生成，并把非视频 unit 扩展委托给 `material_unit_scanner.py`。
-- `material_unit_scanner.py`：把文本、字幕、音频、图片和 GIF 映射为正式 run plan unit，负责唯一字幕关联、图片页组候选、稳定 ID、定位 metadata 和不支持状态；不执行解析或模型提取。
+- `material_unit_scanner.py`：把文本、字幕、音频、图片和 GIF 映射为正式 run plan unit，负责唯一字幕关联、漫画/图集页组自然排序、稳定 ID、页码/章节 metadata 和不支持状态；不执行解析或模型提取。
 - `preview_sampling.py`：从 `FormalExtractionRunPlan` 构建通用预览候选，按字幕/现成 transcript、普通文本、图片、需转写音频、视频的成本顺序稳定排序；负责生成单 unit 的隔离执行计划，不执行模型调用或知识库写入。
 - `formal_dispatch.py`：从 `FormalExtractionRunPlan` 构建正式提取分发表，首批覆盖 `video`、`text`、`image` 和 `audio -> transcript`，并把 VTT/LRC、BMP/GIF、模型不支持图片等情况整理为可解释 unsupported unit；不执行模型调用或聚合。
 - `timed_text_parser.py`：使用标准库解析首批支持的 `.srt` 和 `.ass`，保留开始/结束时间、源行号、原始文本和 ASS 显式 speaker；不推断未知说话人，不把字幕当成 transcript 派生成果。
@@ -66,7 +66,7 @@
 - 预览最多生成 2 个 chunk，并优先选择低成本 unit；每个候选首轮只取 1 个 chunk，以避免单个长文本占满全部预览名额。候选失败后允许继续尝试后续素材，但总尝试数限制为 4；不支持的 unit 必须携带媒体类型、内容形态、unit 和素材引用进入 warning 事件。
 - 预览可生成或复用 `episode_transcript.json` 这类派生中间体，但不得写入正式 chunk、正式 episode 内容或 `extraction_runs/{run_id}/plan.json`；正式角色卡编译不得消费 `preview__` 产物。
 - 正式提取入口只调用 `formal_dispatch.py` 选中的 handler；模型能力不足的图片、暂未支持的时间文本格式和暂无正式 handler 的 unit 只发出 warning，不再让下游 handler 自行碰运气。视频仍使用旧视频 chunk 输入和既有 `_extract_full_video_units()` / `_extract_fast_video_units()` 路径。
-- PNG/JPEG/WEBP 静态图片通过 `image` handler 进入预览与正式提取；图片证据至少保留项目内相对路径，并按可用信息附带页码、像素尺寸和 region。BMP/GIF 当前只允许导入和扫描，必须保留 unsupported warning。
+- PNG/JPEG/WEBP 静态图片通过 `image` handler 进入预览与正式提取；漫画/图集目录会按文件夹生成独立 image episode，不跨文件夹自动合并，并在 metadata 中记录章节、页序、页数和 `manga` 候选语义。图片证据至少保留项目内相对路径，并按可用信息附带页码、像素尺寸和 region。BMP/GIF 当前只允许导入和扫描，必须保留 unsupported warning。
 - 图片输出预算当前使用 handler 内部“每张”默认值并记录 `output_budget_basis=per_image`；在独立用户设置接线前，不得复用视频 `max_output_tokens` 的每分钟语义。
 - `source_kind` 是旧兼容摘要字段；聚合产物必须优先根据 `source_trace` 中的 `media_types` 推导单一来源或 `mixed`，不得把文本、图片或音频产物硬编码为 `video`。
 - `compiler` 只做角色状态迭代、长文本阅读和冲突处理；角色卡证据分层和质量规则由 `character_card_compiler` 负责。
