@@ -21,6 +21,7 @@
 - `validate_timed_text_handler.py`：执行不联网的时间文本验证，覆盖 SRT/ASS 解析、视频 episode 关联 metadata、对齐失败 warning、视频+字幕 mixed 聚合、独立字幕预览与正式提取、时间/行号/原始文本 evidence、显式 speaker 策略和 VTT 暂不支持反馈。
 - `validate_image_unit_handler.py`：执行不联网的静态图片验证，覆盖图片排序、页组章节 metadata、页码/region/像素 evidence、文件上限与签名失败、GIF 跳过、模型能力不足、每张图片预算，以及图片-only 预览和正式聚合。
 - `validate_audio_transcript_unit.py`：执行不联网的音频 transcript 验证，覆盖 Whisper 缓存命中、artifact 状态/coverage/source refs、派生 text unit、时间证据、音频-only 预览/正式提取，以及转写失败不阻断普通文本。
+- `validate_native_media_insight_handler.py`：执行不联网的原生音频/视频理解验证，覆盖支持能力请求构造、unsupported 状态、请求失败不阻断既有视频结果，以及原生视听 chunk 不覆盖 transcript。
 - `validate_generic_preview_dispatch.py`：执行不联网的通用预览调度验证，覆盖跨内容形态成本排序、失败候选补位、unsupported 洞察事件、单 unit 隔离计划、音频预览不持久化正式 run plan、视频候选路径，以及 preview/full artifact 隔离。
 - `validate_formal_dispatch.py`：执行不联网的正式提取分发验证，覆盖分发表 handler 选择、audio transcript 物化后转入文本 handler、unsupported unit 洞察事件、模型不支持图片时不调用图片 handler、文本继续成功，以及视频旧提取路径回归。
 
