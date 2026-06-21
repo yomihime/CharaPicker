@@ -29,12 +29,22 @@ from utils.media_types import (
 FORMAL_MATERIAL_SCAN_TYPE = "formal_materials"
 GENERIC_MATERIAL_SEASON_ID = "season_materials"
 NATURAL_SORT_PATTERN = re.compile(r"\d+|\D+")
+TIMED_TEXT_ALIGNMENT_AMBIGUOUS = "timed_text_episode_alignment_ambiguous"
+TIMED_TEXT_ALIGNMENT_UNMATCHED = "timed_text_episode_alignment_unmatched"
 
 
 def extend_episode_plans(materials_root: Path, episodes: list[EpisodePlan]) -> list[EpisodePlan]:
     material_paths = _supported_non_video_material_paths(materials_root)
-    timed_text_associations = _timed_text_associations(materials_root, episodes, material_paths)
-    associated_paths = {path for paths in timed_text_associations.values() for path in paths}
+    timed_text_associations, timed_text_alignment_failures = _timed_text_associations(
+        materials_root,
+        episodes,
+        material_paths,
+    )
+    associated_paths = {
+        path
+        for associations in timed_text_associations.values()
+        for path, _metadata in associations
+    }
     video_episodes = [
         _attach_timed_text_units(
             materials_root,
@@ -46,6 +56,7 @@ def extend_episode_plans(materials_root: Path, episodes: list[EpisodePlan]) -> l
     standalone_episodes = _standalone_material_episodes(
         materials_root,
         [path for path in material_paths if path not in associated_paths],
+        timed_text_alignment_failures=timed_text_alignment_failures,
     )
     return [*video_episodes, *standalone_episodes]
 
@@ -65,31 +76,47 @@ def _timed_text_associations(
     materials_root: Path,
     episodes: list[EpisodePlan],
     material_paths: list[Path],
-) -> dict[tuple[str, str], list[Path]]:
-    associations: dict[tuple[str, str], list[Path]] = {}
+) -> tuple[dict[tuple[str, str], list[tuple[Path, dict[str, Any]]]], dict[Path, dict[str, Any]]]:
+    associations: dict[tuple[str, str], list[tuple[Path, dict[str, Any]]]] = {}
+    alignment_failures: dict[Path, dict[str, Any]] = {}
     for path in material_paths:
         if path.suffix.lower() not in TIMED_TEXT_SUFFIXES:
             continue
         matches = [
-            episode
+            (episode, match_reason)
             for episode in episodes
-            if _timed_text_matches_video_episode(materials_root, path, episode)
+            if (match_reason := _timed_text_video_match_reason(materials_root, path, episode))
         ]
         if len(matches) != 1:
+            alignment_failures[path] = _timed_text_alignment_failure_metadata(
+                materials_root,
+                path,
+                matches,
+            )
             continue
-        match = matches[0]
-        associations.setdefault((match.season_id, match.episode_id), []).append(path)
-    return associations
+        match, match_reason = matches[0]
+        associations.setdefault((match.season_id, match.episode_id), []).append(
+            (
+                path,
+                _timed_text_association_metadata(
+                    materials_root,
+                    path,
+                    match,
+                    match_reason=match_reason,
+                ),
+            )
+        )
+    return associations, alignment_failures
 
 
 def _attach_timed_text_units(
     materials_root: Path,
     episode: EpisodePlan,
-    candidates: list[Path],
+    candidates: list[tuple[Path, dict[str, Any]]],
 ) -> EpisodePlan:
     candidates = sorted(
         candidates,
-        key=lambda path: _relative_material_path(materials_root, path).lower(),
+        key=lambda item: _natural_sort_key(_relative_material_path(materials_root, item[0])),
     )
     if not candidates:
         return episode
@@ -102,9 +129,12 @@ def _attach_timed_text_units(
             episode_id=episode.episode_id,
             content_form=ContentForm.SCRIPT,
             unit_kind=_text_unit_kind(path),
-            metadata={"associated_video_episode": True},
+            metadata={
+                "associated_video_episode": True,
+                "timed_text_association": association_metadata,
+            },
         )
-        for path in candidates
+        for path, association_metadata in candidates
     ]
     content_forms = list(episode.content_forms)
     if ContentForm.SCRIPT not in content_forms:
@@ -116,36 +146,81 @@ def _attach_timed_text_units(
             "metadata": {
                 **episode.metadata,
                 "associated_timed_text_count": len(added_units),
+                "associated_timed_text_paths": [
+                    unit.material_ref.relative_path for unit in added_units
+                ],
             },
         }
     )
 
 
-def _timed_text_matches_video_episode(
+def _timed_text_video_match_reason(
     materials_root: Path,
     timed_text_path: Path,
     episode: EpisodePlan,
-) -> bool:
+) -> str:
     relative_path = Path(_relative_material_path(materials_root, timed_text_path))
-    legacy_source_path = _string(episode.metadata.get("legacy_source_path"))
-    if legacy_source_path and relative_path.parent.as_posix() == legacy_source_path:
-        return True
-
     video_paths = [
         Path(unit.material_ref.relative_path)
         for unit in episode.units
         if unit.media_type == MediaType.VIDEO
     ]
-    return any(
+    if any(
         video_path.parent == relative_path.parent
         and video_path.stem.lower() == relative_path.stem.lower()
         for video_path in video_paths
+    ):
+        return "same_stem"
+
+    legacy_source_path = _string(episode.metadata.get("legacy_source_path"))
+    if legacy_source_path and relative_path.parent.as_posix() == legacy_source_path:
+        return "same_episode_directory"
+    return ""
+
+
+def _timed_text_association_metadata(
+    materials_root: Path,
+    path: Path,
+    episode: EpisodePlan,
+    *,
+    match_reason: str,
+) -> dict[str, Any]:
+    video_units = [unit for unit in episode.units if unit.media_type == MediaType.VIDEO]
+    return {
+        "status": "matched",
+        "matched_by": match_reason,
+        "season_id": episode.season_id,
+        "episode_id": episode.episode_id,
+        "timed_text_path": _relative_material_path(materials_root, path),
+        "video_unit_refs": [unit.unit_id for unit in video_units],
+        "video_paths": [unit.material_ref.relative_path for unit in video_units],
+    }
+
+
+def _timed_text_alignment_failure_metadata(
+    materials_root: Path,
+    path: Path,
+    matches: list[tuple[EpisodePlan, str]],
+) -> dict[str, Any]:
+    reason = (
+        TIMED_TEXT_ALIGNMENT_AMBIGUOUS
+        if len(matches) > 1
+        else TIMED_TEXT_ALIGNMENT_UNMATCHED
     )
+    return {
+        "status": "ambiguous" if len(matches) > 1 else "unmatched",
+        "reason": reason,
+        "timed_text_path": _relative_material_path(materials_root, path),
+        "candidate_episode_ids": [episode.episode_id for episode, _reason in matches],
+        "candidate_match_reasons": [match_reason for _episode, match_reason in matches],
+    }
 
 
 def _standalone_material_episodes(
     materials_root: Path,
     material_paths: list[Path],
+    *,
+    timed_text_alignment_failures: dict[Path, dict[str, Any]] | None = None,
 ) -> list[EpisodePlan]:
     image_paths = [path for path in material_paths if path.suffix.lower() in IMAGE_SUFFIXES]
     other_paths = [path for path in material_paths if path not in image_paths]
@@ -153,7 +228,15 @@ def _standalone_material_episodes(
         _image_collection_episode(materials_root, parent, paths)
         for parent, paths in _group_paths_by_parent(image_paths)
     ]
-    episodes.extend(_single_material_episode(materials_root, path) for path in other_paths)
+    alignment_failures = timed_text_alignment_failures or {}
+    episodes.extend(
+        _single_material_episode(
+            materials_root,
+            path,
+            timed_text_alignment_failure=alignment_failures.get(path),
+        )
+        for path in other_paths
+    )
     return sorted(episodes, key=lambda episode: _natural_sort_key(episode.sort_key))
 
 
@@ -237,7 +320,12 @@ def _image_collection_episode(
     )
 
 
-def _single_material_episode(materials_root: Path, path: Path) -> EpisodePlan:
+def _single_material_episode(
+    materials_root: Path,
+    path: Path,
+    *,
+    timed_text_alignment_failure: dict[str, Any] | None = None,
+) -> EpisodePlan:
     media_type = _material_media_type(path)
     content_form = _material_content_form(path, media_type)
     relative_path = _relative_material_path(materials_root, path)
@@ -249,6 +337,7 @@ def _single_material_episode(materials_root: Path, path: Path) -> EpisodePlan:
         episode_id=episode_id,
         content_form=content_form,
         unit_kind=_material_unit_kind(path, media_type),
+        metadata=_standalone_material_metadata(timed_text_alignment_failure),
     )
     collection_profile = classify_source_collection([path])
     return EpisodePlan(
@@ -265,6 +354,18 @@ def _single_material_episode(materials_root: Path, path: Path) -> EpisodePlan:
             "warnings": _unit_warnings([unit]),
         },
     )
+
+
+def _standalone_material_metadata(
+    timed_text_alignment_failure: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not timed_text_alignment_failure:
+        return None
+    reason = _string(timed_text_alignment_failure.get("reason"))
+    return {
+        "timed_text_association": timed_text_alignment_failure,
+        "warnings": [reason] if reason else [],
+    }
 
 
 def _material_unit(
@@ -375,6 +476,10 @@ def _text_unit_kind(path: Path) -> str:
 def _unit_warnings(units: list[ExtractionUnit]) -> list[str]:
     warnings: list[str] = []
     for unit in units:
+        for warning in unit.metadata.get("warnings", []):
+            reason = _string(warning)
+            if reason:
+                warnings.append(f"{unit.material_ref.relative_path}: {reason}")
         reason = _string(unit.material_ref.metadata.get("support_reason"))
         if reason and unit.handler_options.get("formal_support") == "unsupported":
             warnings.append(f"{unit.material_ref.relative_path}: {reason}")

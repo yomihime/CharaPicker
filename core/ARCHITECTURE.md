@@ -21,7 +21,7 @@
 - `character_card_constants.py`：集中保存角色卡固定文件名、预览卡保留 ID 和 stale warning reason 等跨模块共享常量。
 - `knowledge_base.py`：集中管理 `projects/{project_id}/knowledge_base/` 下常用产物的路径、JSON 读写和结构校验。
 - `source_scanner.py`：保留旧视频目录扫描、正式扫描入口、预览视频 chunk 收集和预览 chunk 标识生成，并把非视频 unit 扩展委托给 `material_unit_scanner.py`。
-- `material_unit_scanner.py`：把文本、字幕、音频、图片和 GIF 映射为正式 run plan unit，负责唯一字幕关联、漫画/图集页组自然排序、稳定 ID、页码/章节 metadata 和不支持状态；不执行解析或模型提取。
+- `material_unit_scanner.py`：把文本、字幕、音频、图片和 GIF 映射为正式 run plan unit，负责唯一字幕关联与失败 warning、漫画/图集页组自然排序、稳定 ID、页码/章节 metadata 和不支持状态；不执行解析或模型提取。
 - `preview_sampling.py`：从 `FormalExtractionRunPlan` 构建通用预览候选，按字幕/现成 transcript、普通文本、图片、需转写音频、视频的成本顺序稳定排序；负责生成单 unit 的隔离执行计划，不执行模型调用或知识库写入。
 - `formal_dispatch.py`：从 `FormalExtractionRunPlan` 构建正式提取分发表，首批覆盖 `video`、`text`、`image` 和 `audio -> transcript`，并把 VTT/LRC、BMP/GIF、模型不支持图片等情况整理为可解释 unsupported unit；不执行模型调用或聚合。
 - `timed_text_parser.py`：使用标准库解析首批支持的 `.srt` 和 `.ass`，保留开始/结束时间、源行号、原始文本和 ASS 显式 speaker；不推断未知说话人，不把字幕当成 transcript 派生成果。
@@ -61,7 +61,7 @@
 - 完整提取和洁净提取保持线性上下文流程；快速提取允许 chunk 并发且不带上下文，随后用 AI 并发重整理集和季。
 - 快速提取当前只对视频 chunk 启用并发；文本、图片和 audio transcript 仍通过正式串行 handler 写入 chunk，并按 `source_trace` 重建 episode/season，运行时会发出 warning 说明回退。
 - 文本 unit 使用独立输入字符预算和固定内部输出 token 上限，不复用视频“每分钟输出 token”语义；文本 chunk 必须保留原文 offset、素材引用和结构化 evidence。
-- `.srt` / `.ass` 通过普通 `text` handler 进入预览与正式提取；`.vtt` / `.lrc` 当前只允许导入和扫描，必须保留 unsupported warning，不能静默当普通文档处理。
+- `.srt` / `.ass` 通过普通 `text` handler 进入预览与正式提取；与视频同名或位于同一 episode 目录时会挂到视频 episode，并写入 `timed_text_association` metadata。对齐失败的字幕/台本继续作为独立 text episode 处理并发出 warning；`.vtt` / `.lrc` 当前只允许导入和扫描，必须保留 unsupported warning，不能静默当普通文档处理。
 - 音频素材通过 `audio -> DerivedArtifactKind.TRANSCRIPT -> transcript_text` 进入文本提取；转写失败只标记对应 artifact 并发出 warning，不得阻断同次运行中不依赖 transcript 的文本、图片或视频流程。
 - 预览最多生成 2 个 chunk，并优先选择低成本 unit；每个候选首轮只取 1 个 chunk，以避免单个长文本占满全部预览名额。候选失败后允许继续尝试后续素材，但总尝试数限制为 4；不支持的 unit 必须携带媒体类型、内容形态、unit 和素材引用进入 warning 事件。
 - 预览可生成或复用 `episode_transcript.json` 这类派生中间体，但不得写入正式 chunk、正式 episode 内容或 `extraction_runs/{run_id}/plan.json`；正式角色卡编译不得消费 `preview__` 产物。
