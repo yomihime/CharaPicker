@@ -64,6 +64,13 @@ from core.models import (
     InsightStatus,
     ProjectConfig,
 )
+from core.native_media_insight_handler import (
+    NATIVE_AUDIO_UNSUPPORTED_REASON,
+    NATIVE_VIDEO_BACKEND_UNSUPPORTED_REASON,
+    NATIVE_VIDEO_UNSUPPORTED_REASON,
+    NativeMediaInsightHandler,
+    NativeMediaInsightHandlerConfig,
+)
 from core.preview_sampling import (
     PreviewCandidate,
     PreviewCandidateKind,
@@ -143,6 +150,12 @@ PREVIEW_REASON_TRANSLATION_KEYS = {
 FORMAL_REASON_TRANSLATION_KEYS = {
     **PREVIEW_REASON_TRANSLATION_KEYS,
     "formal_handler_not_available": "extractor.full.reason.handlerNotAvailable",
+}
+NATIVE_MEDIA_REASON_TRANSLATION_KEYS = {
+    NATIVE_AUDIO_UNSUPPORTED_REASON: "extractor.nativeMedia.reason.audioUnsupported",
+    NATIVE_VIDEO_UNSUPPORTED_REASON: "extractor.nativeMedia.reason.videoUnsupported",
+    NATIVE_VIDEO_BACKEND_UNSUPPORTED_REASON: "extractor.nativeMedia.reason.videoBackendUnsupported",
+    "native_media_handler_not_available": "extractor.nativeMedia.reason.handlerNotAvailable",
 }
 
 
@@ -1507,6 +1520,17 @@ class Extractor(QObject):
             if handler.supports(unit)
         ]
 
+    def _collect_native_media_insight_units_from_run_plan(
+        self,
+        run_plan: FormalExtractionRunPlan,
+    ) -> list[tuple[str, ExtractionUnit]]:
+        return [
+            (episode.season_id, unit)
+            for episode in run_plan.episodes
+            for unit in episode.units
+            if NativeMediaInsightHandler.can_consider(unit)
+        ]
+
     def _collect_audio_transcript_units_from_run_plan(
         self,
         run_plan: FormalExtractionRunPlan,
@@ -1535,6 +1559,66 @@ class Extractor(QObject):
 
     def _image_unit_handler(self, preset: CloudModelPreset) -> ImageUnitHandler:
         return ImageUnitHandler(ImageUnitHandlerConfig(provider=preset.provider))
+
+    def _native_media_insight_handler(
+        self,
+        preset: CloudModelPreset,
+    ) -> NativeMediaInsightHandler:
+        return NativeMediaInsightHandler(
+            NativeMediaInsightHandlerConfig(
+                provider=preset.provider,
+                video_fps=preset.video_fps,
+                max_output_tokens=min(
+                    max(TEXT_UNIT_MAX_OUTPUT_TOKENS, preset.max_output_tokens),
+                    CLOUD_MAX_OUTPUT_TOKENS_MAX,
+                ),
+            )
+        )
+
+    def _native_media_warning_reason(self, reason: str) -> str:
+        translation_key = NATIVE_MEDIA_REASON_TRANSLATION_KEYS.get(reason)
+        if translation_key is not None:
+            return t(translation_key)
+        return t("extractor.preview.reason.unknown", reason=reason)
+
+    def _emit_native_media_warning(
+        self,
+        emit_event: Callable[[dict], None] | None,
+        *,
+        unit: ExtractionUnit,
+        reason: str,
+        error: str = "",
+    ) -> None:
+        if emit_event is None:
+            return
+        source_name = Path(unit.material_ref.relative_path).name
+        description = (
+            t("extractor.nativeMedia.failed", name=source_name, error=error)
+            if error
+            else t(
+                "extractor.nativeMedia.unsupported",
+                name=source_name,
+                reason=self._native_media_warning_reason(reason),
+            )
+        )
+        emit_event(
+            InsightEvent(
+                title=t("extractor.nativeMedia.title"),
+                description=description,
+                status=InsightStatus.WARNING,
+                meta={
+                    "media_type": unit.media_type.value,
+                    "content_form": unit.content_form.value,
+                    "unit_id": unit.unit_id,
+                    "material_id": unit.material_ref.material_id,
+                    "relative_path": unit.material_ref.relative_path,
+                    "stage": "full",
+                    "reason": reason,
+                    "native_media_insight": True,
+                    "transcript_policy": "supplement_only",
+                },
+            ).model_dump(mode="json")
+        )
 
     def _extract_text_units(
         self,
@@ -1624,6 +1708,116 @@ class Extractor(QObject):
             stats["succeeded_chunks"] += len(result.chunks)
             if remaining_chunks is not None:
                 remaining_chunks -= len(result.chunks)
+            if emit_progress is not None and progress_span > 0:
+                emit_progress(progress_base + int(index * progress_span / total_units))
+
+        if extraction_stage == ExtractionArtifactStage.FULL and extracted_chunks:
+            self._finalize_serial_unit_contexts(
+                project_id,
+                extracted_chunks,
+                extraction_run_id=run_plan.run_id,
+                stats=stats,
+            )
+        return len(extracted_chunks), usage_total, extracted_chunks, stats
+
+    def _extract_native_media_insight_units(
+        self,
+        project_id: str,
+        run_plan: FormalExtractionRunPlan,
+        *,
+        preset: CloudModelPreset,
+        extraction_stage: ExtractionArtifactStage,
+        handler: NativeMediaInsightHandler | None = None,
+        emit_event: Callable[[dict], None] | None = None,
+        emit_progress: Callable[[int], None] | None = None,
+        progress_base: int = 0,
+        progress_span: int = 0,
+    ) -> tuple[int, dict[str, int], list[ChunkExtractionResult], dict[str, int]]:
+        unit_inputs = self._collect_native_media_insight_units_from_run_plan(run_plan)
+        usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        stats = {
+            "succeeded_chunks": 0,
+            "skipped_chunks": 0,
+            "failed_chunks": 0,
+            "succeeded_episodes": 0,
+            "skipped_episodes": 0,
+            "failed_episodes": 0,
+            "succeeded_seasons": 0,
+            "skipped_seasons": 0,
+            "failed_seasons": 0,
+        }
+        if not unit_inputs:
+            return 0, usage_total, [], stats
+
+        native_handler = handler or self._native_media_insight_handler(preset)
+        materials_root = ensure_project_tree(project_id).materials
+        extracted_chunks: list[ChunkExtractionResult] = []
+        total_units = len(unit_inputs)
+        for index, (season_id, unit) in enumerate(unit_inputs, start=1):
+            support = native_handler.support_status(unit)
+            if not support.supported:
+                stats["skipped_chunks"] += 1
+                self._emit_native_media_warning(
+                    emit_event,
+                    unit=unit,
+                    reason=support.reason,
+                )
+                if emit_progress is not None and progress_span > 0:
+                    emit_progress(progress_base + int(index * progress_span / total_units))
+                continue
+
+            try:
+                result = native_handler.execute(
+                    materials_root=materials_root,
+                    unit=unit,
+                    season_id=season_id,
+                    extraction_stage=extraction_stage,
+                    extraction_run_id=(
+                        run_plan.run_id
+                        if extraction_stage == ExtractionArtifactStage.FULL
+                        else ""
+                    ),
+                    run_type=(
+                        FULL_EXTRACTION_RUN_TYPE
+                        if extraction_stage == ExtractionArtifactStage.FULL
+                        else "preview_trial"
+                    ),
+                    backend=support.backend,  # type: ignore[arg-type]
+                    model_name=preset.model_name,
+                    base_url=preset.base_url,
+                    api_key=preset.api_key,
+                )
+            except (ModelCallError, OSError, ValueError) as exc:
+                stats["failed_chunks"] += 1
+                LOGGER.warning(
+                    "Native media insight unit failed; project_id=%s unit_id=%s source_path=%s",
+                    project_id,
+                    unit.unit_id,
+                    unit.material_ref.relative_path,
+                    exc_info=True,
+                )
+                self._emit_native_media_warning(
+                    emit_event,
+                    unit=unit,
+                    reason="native_media_request_failed",
+                    error=self._compact_exception_message(exc),
+                )
+                if emit_progress is not None and progress_span > 0:
+                    emit_progress(progress_base + int(index * progress_span / total_units))
+                continue
+
+            if not result.chunks:
+                stats["skipped_chunks"] += 1
+                continue
+            for key in usage_total:
+                usage_total[key] += result.token_usage.get(key, 0)
+            for chunk in result.chunks:
+                if extraction_stage == ExtractionArtifactStage.PREVIEW:
+                    self.save_preview_chunk_extraction_result(project_id, chunk)
+                else:
+                    self.save_chunk_extraction_result(project_id, chunk)
+                extracted_chunks.append(chunk)
+            stats["succeeded_chunks"] += len(result.chunks)
             if emit_progress is not None and progress_span > 0:
                 emit_progress(progress_base + int(index * progress_span / total_units))
 
@@ -4939,12 +5133,16 @@ class Extractor(QObject):
         audio_transcript_count = dispatch_plan.handler_unit_count(
             FormalDispatchKind.AUDIO_TRANSCRIPT
         )
+        native_media_unit_count = dispatch_plan.handler_unit_count(
+            FormalDispatchKind.NATIVE_MEDIA
+        )
         fast_serial_handlers = [
             handler.value
             for handler, unit_count in (
                 (FormalDispatchKind.TEXT, text_unit_count),
                 (FormalDispatchKind.IMAGE, image_unit_count),
                 (FormalDispatchKind.AUDIO_TRANSCRIPT, audio_transcript_count),
+                (FormalDispatchKind.NATIVE_MEDIA, native_media_unit_count),
             )
             if unit_count
         ]
@@ -4976,6 +5174,9 @@ class Extractor(QObject):
             )
             text_unit_count = dispatch_plan.handler_unit_count(FormalDispatchKind.TEXT)
             image_unit_count = dispatch_plan.handler_unit_count(FormalDispatchKind.IMAGE)
+            native_media_unit_count = dispatch_plan.handler_unit_count(
+                FormalDispatchKind.NATIVE_MEDIA
+            )
         if chunk_inputs and self._video_mode_requires_transcript(video_input_mode):
             self._transcript_provider().prepare_run_plan(
                 config.project_id,
@@ -5086,7 +5287,9 @@ class Extractor(QObject):
         run_stats.update(self._formal_dispatch_meta(dispatch_plan))
         if fast_serial_handlers:
             run_stats["fast_serial_handlers"] = fast_serial_handlers
-        non_video_handler_count = sum((bool(text_unit_count), bool(image_unit_count)))
+        non_video_handler_count = sum(
+            (bool(text_unit_count), bool(image_unit_count), bool(native_media_unit_count))
+        )
         non_video_progress_base = 80 if chunk_inputs else 5
         non_video_progress_span = 15 if chunk_inputs else 90
         per_handler_progress_span = (
@@ -5119,7 +5322,7 @@ class Extractor(QObject):
 
         image_progress_base = non_video_progress_base + text_progress_span
         image_progress_span = (
-            non_video_progress_span - text_progress_span if image_unit_count else 0
+            per_handler_progress_span if image_unit_count else 0
         )
         if image_unit_count:
             image_created, image_usage, image_chunks, image_stats = self._extract_image_units(
@@ -5141,6 +5344,40 @@ class Extractor(QObject):
         for key in extraction_usage:
             extraction_usage[key] += image_usage.get(key, 0)
         for key, value in image_stats.items():
+            run_stats[key] = run_stats.get(key, 0) + value
+
+        native_progress_base = image_progress_base + image_progress_span
+        native_progress_span = (
+            non_video_progress_span - text_progress_span - image_progress_span
+            if native_media_unit_count
+            else 0
+        )
+        if native_media_unit_count:
+            (
+                native_created,
+                native_usage,
+                native_chunks,
+                native_stats,
+            ) = self._extract_native_media_insight_units(
+                config.project_id,
+                run_plan,
+                preset=preset,
+                extraction_stage=ExtractionArtifactStage.FULL,
+                emit_event=emit_event,
+                emit_progress=emit_progress,
+                progress_base=native_progress_base,
+                progress_span=native_progress_span,
+            )
+        else:
+            native_created = 0
+            native_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            native_chunks = []
+            native_stats = {}
+        created_count += native_created
+        extracted_chunks.extend(native_chunks)
+        for key in extraction_usage:
+            extraction_usage[key] += native_usage.get(key, 0)
+        for key, value in native_stats.items():
             run_stats[key] = run_stats.get(key, 0) + value
         if emit_token_usage is not None and any(extraction_usage.values()):
             emit_token_usage(extraction_usage)

@@ -5,6 +5,7 @@ from enum import Enum
 
 from core.extraction_plan import ExtractionUnit, FormalExtractionRunPlan, MediaType
 from core.image_unit_handler import ImageUnitHandler
+from core.native_media_insight_handler import NativeMediaInsightHandler
 from core.text_unit_handler import TextUnitHandler
 
 
@@ -13,6 +14,7 @@ class FormalDispatchKind(str, Enum):
     TEXT = "text"
     IMAGE = "image"
     AUDIO_TRANSCRIPT = "audio_transcript"
+    NATIVE_MEDIA = "native_media"
 
 
 @dataclass(frozen=True)
@@ -64,6 +66,7 @@ def build_formal_dispatch_plan(
         FormalDispatchKind.TEXT: [],
         FormalDispatchKind.IMAGE: [],
         FormalDispatchKind.AUDIO_TRANSCRIPT: [],
+        FormalDispatchKind.NATIVE_MEDIA: [],
     }
     unsupported_units: list[FormalUnsupportedUnit] = []
 
@@ -71,6 +74,8 @@ def build_formal_dispatch_plan(
         for unit in episode.units:
             if unit.media_type == MediaType.VIDEO:
                 grouped_units[FormalDispatchKind.VIDEO].append(unit.unit_id)
+                if NativeMediaInsightHandler.can_consider(unit):
+                    grouped_units[FormalDispatchKind.NATIVE_MEDIA].append(unit.unit_id)
                 continue
 
             if unit.media_type == MediaType.TEXT:
@@ -98,7 +103,10 @@ def build_formal_dispatch_plan(
             if unit.media_type == MediaType.AUDIO:
                 if unit.handler_options.get("transcript_candidate") is True:
                     grouped_units[FormalDispatchKind.AUDIO_TRANSCRIPT].append(unit.unit_id)
-                else:
+                if NativeMediaInsightHandler.can_consider(unit):
+                    grouped_units[FormalDispatchKind.NATIVE_MEDIA].append(unit.unit_id)
+                    continue
+                if unit.handler_options.get("transcript_candidate") is not True:
                     unsupported_units.append(_unsupported_unit(episode.season_id, unit))
                 continue
 
