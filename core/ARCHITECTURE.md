@@ -28,6 +28,7 @@
 - `text_unit_handler.py`：负责普通 `.txt`、`.md`、受控 `.json`、首批 `.srt` / `.ass` 以及派生 `episode_transcript.json` 文本 unit 的解码、结构校验、预算分块、文本/时间范围 evidence、文本模型请求和 `ChunkExtractionResult` 构建；字幕与 transcript evidence 保留 segment 定位，speaker 只接受素材中的显式字段。
 - `image_unit_handler.py`：负责 `.png`、`.jpg` / `.jpeg`、`.webp` 静态图片的文件上限与签名校验、图片模型请求、每张图片内部输出预算、页码/可选区域 evidence 和 `ChunkExtractionResult` 构建；不接管 BMP/GIF，也不复用视频每分钟输出口径。
 - `native_media_insight_handler.py`：负责原生音频理解和原生视频/视频音轨理解的能力判断、音频/视频模型请求和补充型 `ChunkExtractionResult` 构建；只保存听觉摘要、画面摘要、语气、环境声、音乐、画外声音等视听线索，不生成或覆盖 transcript。
+- `refusal_samples.py`：记录和打包提取失败/模型拒绝样例；样例 JSON 只保存媒体类型、内容形态、unit、项目内来源、模型/prompt purpose、错误类型和脱敏错误摘要，不保存 API Key、完整 prompt、完整响应或原始隐私文本。
 - `extractor.py`：定义 `Extractor`，作为 UI-facing 提取入口，负责知识库分层初始化、通用 unit 采样预览、完整/洁净/快速正式提取、chunk/episode/season 内容合并、episode transcript 入口，并委托知识库读写与素材扫描 helper；预览逐个执行低成本候选，正式提取先经 `formal_dispatch.py` 选中 handler，单个失败或 unsupported unit 会进入 warning 而不阻断其它可提取素材。
 - `transcript_provider.py`：把 transcript 表达为 run plan 中的 text 型 `DerivedArtifact`，收集每集 video/audio 可转写素材并调用既有音频转写实现；READY artifact 会物化为短稳定 ID 的 `transcript_text` 派生 unit，引用知识库内 `episode_transcript.json`，不把 transcript 作为新的 `MediaType`。
 - `video_unit_handler.py`：封装正式视频 unit 的时长探测、按时长缩放输出 token 和 `ModelCallRequest` 构造；模型调用仍由 `utils.ai_model_middleware` 执行。
@@ -50,6 +51,7 @@
 - 向 `gui` 通过回调传递预览进度和 token 用量。
 - 被 `utils.state_manager` 引用，用于项目配置的序列化和反序列化。
 - 被 `utils.paths` 引用，用于描述包含 `raw/`、`materials/`、`cache/`、`knowledge_base/` 和 `output/` 的项目路径。
+- 向 `projects/{project_id}/cache/refusal_samples/{sample_id}/refusal_sample.json` 写入本地失败样例描述，并可在用户明确打包时向 `output/refusal_samples/{project_name}_{created_at}_{sample_hash}.zip` 写入样例包；大型素材、缺失素材或项目外路径只进入索引/警告，不自动复制。
 - 向 `projects/{project_id}/knowledge_base/` 写入 `extraction_runs/{run_id}/plan.json`、调试/旧观察索引用 `source_manifest.json`、`seasons/*/episodes/*/chunks/*.json`、`episode_content.json`、`episode_summary.json`、`episode_transcript.json`、`season_content.json`、阶段性角色状态和 `character_cards/{card_id}/card.json`；正式提取产物带 `extraction_run_id`，聚合时只消费当前 run 的合格产物。
 - 正式角色卡的 CharaPicker 扩展字段使用 `extensions["charapicker"]` 保存编译证据和质量评估，包括 `compile_evidence_layers`、每条证据的 `source_metadata`、`alias_resolution`、`needs_review_reasons`、`conflict_groups`、`evidence_source_profile` 和 `parse_diagnostics`；这些字段属于 core 生成的结构化诊断，不应由 GUI 拼装。
 - 向 `projects/{project_id}/output/character_cards/` 写入 Markdown、HTML、CharaPicker JSON、Character Card V2 JSON 和 AstrBot 手动复制清单。
@@ -65,6 +67,7 @@
 - `.srt` / `.ass` 通过普通 `text` handler 进入预览与正式提取；与视频同名或位于同一 episode 目录时会挂到视频 episode，并写入 `timed_text_association` metadata。对齐失败的字幕/台本继续作为独立 text episode 处理并发出 warning；`.vtt` / `.lrc` 当前只允许导入和扫描，必须保留 unsupported warning，不能静默当普通文档处理。
 - 音频素材通过 `audio -> DerivedArtifactKind.TRANSCRIPT -> transcript_text` 进入文本提取；转写失败只标记对应 artifact 并发出 warning，不得阻断同次运行中不依赖 transcript 的文本、图片或视频流程。
 - 原生音频/视频理解通过 `native_media_insight_handler.py` 作为 audio/video 原始 unit 的补充正式 handler；只有 provider 声明 `audio_understanding`、`native_video` 或 `video_audio_understanding` 且当前中间件通道可承载该输入时才运行。其 chunk 会标记 `native_media_insight=true`、`transcript_policy=supplement_only` 和 `does_not_replace_transcript=true`，`source_trace.derived_artifact_refs` 不引用 transcript 派生成果。
+- 文本、图片、audio transcript、原生视听和视频 chunk 的模型调用/解析失败会通过 `refusal_samples.py` 写入本地失败样例；unsupported capability 仍只作为 warning，不冒充模型拒绝。样例写入失败不得反向中断提取流程。
 - 预览最多生成 2 个 chunk，并优先选择低成本 unit；每个候选首轮只取 1 个 chunk，以避免单个长文本占满全部预览名额。候选失败后允许继续尝试后续素材，但总尝试数限制为 4；不支持的 unit 必须携带媒体类型、内容形态、unit 和素材引用进入 warning 事件。
 - 预览可生成或复用 `episode_transcript.json` 这类派生中间体，但不得写入正式 chunk、正式 episode 内容或 `extraction_runs/{run_id}/plan.json`；正式角色卡编译不得消费 `preview__` 产物。
 - 正式提取入口只调用 `formal_dispatch.py` 选中的 handler；模型能力不足的图片、暂未支持的时间文本格式、原生视听能力不足和暂无正式 handler 的 unit 只发出 warning，不再让下游 handler 自行碰运气。视频仍使用旧视频 chunk 输入和既有 `_extract_full_video_units()` / `_extract_fast_video_units()` 路径，原生视听理解只在其后补充额外 chunk。

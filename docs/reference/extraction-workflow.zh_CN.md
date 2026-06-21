@@ -218,7 +218,27 @@ knowledge_base/
 
 正式知识库成功写入新 run 产物后，已编译的正式角色卡会标记为 stale，提示用户重新编译。草稿卡、预览卡和角色卡母本本身不会在提取清理中被删除。
 
-## 7. 角色卡生成
+## 7. 失败样例记录与打包
+
+当文本、图片、audio transcript、原生视听或视频 chunk 的模型调用、JSON 解析或转写失败时，系统会在本地记录一份结构化失败样例：
+
+```text
+projects/{project_id}/cache/refusal_samples/{sample_id}/refusal_sample.json
+```
+
+样例用于后续分析 prompt 边界、模型能力、输出截断或素材处理问题。它记录 `media_type`、`content_form`、unit、项目内来源路径、模型供应商、backend、模型名、prompt purpose、提取阶段、run/season/episode/chunk 标识、错误类型和脱敏错误摘要。它不会保存 API Key、完整 prompt、完整模型响应或原始隐私文本。
+
+用户明确打包时，样例会导出到：
+
+```text
+projects/{project_id}/output/refusal_samples/{project_name}_{created_at}_{sample_hash}.zip
+```
+
+zip 至少包含 `refusal_sample.json` 和 `package_manifest.json`。如果用户选择包含素材，系统只会复制样例引用到的项目内素材；大型素材会按索引引用，缺失素材和项目外路径会写入 warning，不会被静默复制。应用不会自动上传失败样例或素材。
+
+能力不支持、格式暂不支持或 handler 不可用这类情况仍作为 warning 进入洞察流，不冒充模型拒绝样例；它们说明当前链路不可处理，不代表模型已经拒绝了某个 prompt。
+
+## 8. 角色卡生成
 
 角色卡生成从正式知识库读取 `episode_content.json`，不会重新分析原始视频素材，也不会读取预览产物或旧的 `ProjectConfig.target_characters`。
 
@@ -298,7 +318,7 @@ flowchart TD
 
 当前基础实现：角色卡 AI 复核输入已经接入 `direct_evidence_episodes`、`mention_evidence_episodes`、`causal_context_episodes` 和 `season_context`。direct 证据由 episode 内容字段中的角色名或已验证别名命中形成；`targets` 只作为别名候选和辅助信息，不单独算 direct。mention、causal 和 season_context 用于补充动机、关系链和连续性，不能覆盖 direct 证据。分层证据和质量评估写入 `card.extensions["charapicker"]`，其中包含 `compile_evidence_layers`、每条证据的 `source_metadata`、`alias_resolution`、`needs_review_reasons`、`conflict_groups`、`evidence_source_profile` 和 `parse_diagnostics`；普通 `quality.warnings` 只保留用户可读 warning，不直接暴露内部 reason key。
 
-## 8. 当前限制
+## 9. 当前限制
 
 当前仍不做复杂剧集识别，也不联网匹配番剧数据库。
 
