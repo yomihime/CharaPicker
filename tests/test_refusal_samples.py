@@ -7,12 +7,24 @@ import zipfile
 from pathlib import Path
 from uuid import uuid4
 
+from core.extraction_plan import (
+    ContentForm,
+    EpisodePlan,
+    ExtractionUnit,
+    FormalExtractionRunPlan,
+    MaterialRef,
+    MediaType,
+)
+from core.extractor import Extractor
 from core.refusal_samples import (
     ExtractionFailureSampleRequest,
     load_refusal_sample,
     package_refusal_sample,
     record_extraction_failure_sample,
 )
+from core.models import ExtractionArtifactStage
+from utils.ai_model_middleware import ModelCallError
+from utils.cloud_model_presets import CloudModelPreset
 from utils.paths import project_paths
 
 
@@ -128,6 +140,63 @@ class RefusalSampleTests(unittest.TestCase):
         self.assertEqual(record.source_path, "<outside_project>/source.txt")
         self.assertEqual(record.source_refs[0].source_path, "<outside_project>/source.txt")
         self.assertEqual(record.source_refs[0].copy_policy, "outside_project")
+
+    def test_text_extraction_failure_records_refusal_sample(self) -> None:
+        (self.paths.materials / "novel.txt").write_text("Lala appears here.", encoding="utf-8")
+        unit = ExtractionUnit(
+            unit_id="unit_text_001",
+            episode_id="episode_001",
+            media_type=MediaType.TEXT,
+            content_form=ContentForm.NOVEL,
+            unit_kind="document_text",
+            material_ref=MaterialRef(
+                material_id="material_text_001",
+                relative_path="novel.txt",
+                source_media_type=MediaType.TEXT,
+                content_form=ContentForm.NOVEL,
+            ),
+        )
+        run_plan = FormalExtractionRunPlan(
+            project_id=self.project_id,
+            run_id="run-refusal-test",
+            episodes=[
+                EpisodePlan(
+                    season_id="season_001",
+                    episode_id="episode_001",
+                    units=[unit],
+                )
+            ],
+        )
+
+        _created, _usage, _chunks, stats = Extractor()._extract_text_units(
+            self.project_id,
+            run_plan,
+            preset=CloudModelPreset(
+                name="test",
+                provider="custom",
+                base_url="https://example.invalid",
+                api_key="",
+                model_name="test-model",
+            ),
+            extraction_stage=ExtractionArtifactStage.FULL,
+            handler=FailingTextHandler(),
+        )
+
+        sample_paths = sorted((self.paths.cache / "refusal_samples").glob("*/refusal_sample.json"))
+        record = json.loads(sample_paths[0].read_text(encoding="utf-8"))
+
+        self.assertEqual(stats["failed_chunks"], 1)
+        self.assertEqual(record["prompt_purpose"], "formal_text_unit_extraction")
+        self.assertEqual(record["media_type"], "text")
+        self.assertEqual(record["content_form"], "novel")
+        self.assertEqual(record["unit_id"], "unit_text_001")
+        self.assertEqual(record["source_refs"][0]["project_relative_path"], "materials/novel.txt")
+        self.assertEqual(record["error_type"], "ModelCallError")
+
+
+class FailingTextHandler:
+    def execute(self, **_kwargs: object) -> None:
+        raise ModelCallError("content safety rejected this validation request")
 
 
 if __name__ == "__main__":
