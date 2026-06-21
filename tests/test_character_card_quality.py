@@ -129,6 +129,137 @@ class CharacterCardQualityTests(unittest.TestCase):
         self.assertIn(compiler.REVIEW_REASON_KNOWLEDGE_WARNINGS, reasons)
         self.assertIn(compiler.REVIEW_REASON_CONFLICT_REVIEW, reasons)
 
+    def test_evidence_layers_preserve_multi_media_source_metadata(self) -> None:
+        payloads = [
+            (
+                "season_001",
+                "episode_001",
+                {
+                    "source_kind": "mixed",
+                    "media_types": ["video", "text"],
+                    "source_counts": {
+                        "full_chunks": 2,
+                        "source_trace_units": 2,
+                        "source_trace_materials": 2,
+                    },
+                    "source_trace": {
+                        "media_types": ["video", "text"],
+                        "material_refs": [
+                            {
+                                "material_id": "material_video_001",
+                                "relative_path": "episode01.mp4",
+                                "source_media_type": "video",
+                                "content_form": "anime",
+                                "origin": "material",
+                            },
+                            {
+                                "material_id": "material_text_001",
+                                "relative_path": "episode01.srt",
+                                "source_media_type": "text",
+                                "content_form": "script",
+                                "origin": "material",
+                            },
+                        ],
+                        "unit_refs": ["unit_video_001", "unit_text_001"],
+                        "derived_artifact_refs": ["transcript_season_001_episode_001"],
+                        "evidence_refs": [
+                            {
+                                "evidence_id": "evidence_text_001",
+                                "unit_ref": "unit_text_001",
+                                "locator": {
+                                    "relative_path": "episode01.srt",
+                                    "time_range": {"start_seconds": 1.0, "end_seconds": 3.0},
+                                },
+                                "metadata": {"media_type": "text", "unit_kind": "subtitle_text"},
+                            }
+                        ],
+                        "source_breakdown": {
+                            "materials": 2,
+                            "units": 2,
+                            "derived_artifacts": 1,
+                            "media_types": {"video": 1, "text": 1},
+                        },
+                    },
+                    "facts": ["Lala protects Rito while the subtitle confirms her line."],
+                    "evidence_refs": [
+                        "episode01.mp4#native_media",
+                        "episode01.srt#time=1.000-3.000",
+                    ],
+                },
+            )
+        ]
+
+        layers = self._build_layers(["Lala"], payloads)
+
+        direct = layers["direct_evidence_episodes"]
+        self.assertEqual(len(direct), 1)
+        source_metadata = direct[0]["source_metadata"]
+        self.assertEqual(source_metadata["source_kind"], "mixed")
+        self.assertEqual(source_metadata["media_types"], ["video", "text"])
+        self.assertEqual(source_metadata["content_forms"], ["anime", "script"])
+        self.assertEqual(source_metadata["source_counts"]["full_chunks"], 2)
+        self.assertEqual(
+            source_metadata["source_trace"]["unit_refs"],
+            ["unit_video_001", "unit_text_001"],
+        )
+        self.assertEqual(
+            source_metadata["source_trace"]["derived_artifact_refs"],
+            ["transcript_season_001_episode_001"],
+        )
+        self.assertEqual(
+            source_metadata["source_trace"]["evidence_refs"][0]["locator"]["time_range"],
+            {"start_seconds": 1.0, "end_seconds": 3.0},
+        )
+
+    def test_source_metadata_keeps_legacy_source_kind_out_of_media_types(self) -> None:
+        metadata = compiler._payload_source_metadata(
+            {
+                "source_kind": "audio_transcript",
+                "facts": ["Lala speaks in the transcript."],
+            }
+        )
+
+        self.assertEqual(metadata["source_kind"], "audio_transcript")
+        self.assertEqual(metadata["media_types"], [])
+
+    def test_quality_checks_record_evidence_source_profile(self) -> None:
+        card = CharacterCard(project_id="project-test", card_id="card-test")
+        evidence_layers = {
+            "direct_evidence_episodes": [
+                {
+                    "season_id": "season_001",
+                    "episode_id": "episode_001",
+                    "warnings": [],
+                    "source_metadata": {
+                        "source_kind": "mixed",
+                        "media_types": ["video", "text"],
+                        "content_forms": ["anime", "script"],
+                        "evidence_refs": ["episode01.srt#time=1.000-3.000"],
+                        "source_trace": {"unit_refs": ["unit_video_001", "unit_text_001"]},
+                    },
+                }
+            ],
+            "mention_evidence_episodes": [],
+            "causal_context_episodes": [],
+            "season_context": [],
+        }
+
+        compiler._apply_quality_checks(
+            card,
+            evidence_layers,
+            [],
+            ["Lala"],
+            compiler.AliasResolutionResult(source="local"),
+            [],
+        )
+
+        profile = card.extensions["charapicker"]["quality_checks"]["evidence_source_profile"]
+        self.assertEqual(profile["media_types"], {"text": 1, "video": 1})
+        self.assertEqual(profile["content_forms"], {"anime": 1, "script": 1})
+        self.assertEqual(profile["source_kinds"], {"mixed": 1})
+        self.assertEqual(profile["entries_with_source_trace"], 1)
+        self.assertEqual(profile["entries_with_evidence_refs"], 1)
+
     def _build_layers(
         self,
         match_terms: list[str],
