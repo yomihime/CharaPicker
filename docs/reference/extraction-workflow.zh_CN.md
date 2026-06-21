@@ -233,7 +233,7 @@ knowledge_base/
 -> 没有 direct 证据则失败
 -> 构建本地角色状态 timeline
 -> 把角色状态、timeline、知识库摘要和 evidence_layers 交给 AI 复核并生成角色卡字段
--> 写入 alias_resolution、needs_review_reasons、conflict_groups 和 parse_diagnostics
+-> 写入 alias_resolution、needs_review_reasons、conflict_groups、evidence_source_profile 和 parse_diagnostics
 -> 保存 CharaPicker JSON 母本
 -> 可选导出 Markdown、HTML、Character Card V2 JSON 或 AstrBot 手动复制清单
 ```
@@ -266,6 +266,17 @@ flowchart TD
 
 角色卡编译需要至少找到直接证据。没有任何直接证据时，角色卡编译会失败并提示 `character was not found in the formal knowledge base`，避免把没有出现或没有证据的角色硬编出来。
 
+在混合媒体项目中，角色卡证据不能只保留“命中了哪一集”。每条 direct、mention、causal 或 season_context 证据 entry 都会带一份紧凑 `source_metadata`，用于描述该证据来自什么素材和什么中间成果：
+
+- `source_kind`：旧兼容摘要字段，混合来源会记录为 `mixed`。
+- `media_types`：正式顶层媒体类型，只允许 `video`、`image`、`audio`、`text`。
+- `content_forms`：内容形态或语义标签，例如 `anime`、`script`、`subtitle`、`manga`。
+- `source_counts`：聚合时统计到的素材、unit、chunk 或派生成果数量。
+- `source_trace`：压缩后的素材引用、unit 引用、派生成果引用和证据定位信息。
+- `evidence_refs`：从 episode 内容继承的可读证据引用。
+
+角色卡质量评估会额外写入 `quality_checks.evidence_source_profile`，汇总本次编译实际使用了哪些媒体类型、内容形态和来源摘要，以及多少证据带有 `source_trace` 或 `evidence_refs`。这些字段服务于证据可信度、跨媒体覆盖和后续 UI 展示，不代表系统会重新打开原素材；角色卡编译仍只消费正式知识库产物。
+
 理想的长期角色成长路线仍然是：
 
 ```text
@@ -285,7 +296,7 @@ flowchart TD
 
 如果前后信息出现矛盾，系统应记录为角色的动态变化，例如伪装、误解、黑化、成长或关系转折，而不是简单覆盖旧信息。
 
-当前基础实现：角色卡 AI 复核输入已经接入 `direct_evidence_episodes`、`mention_evidence_episodes`、`causal_context_episodes` 和 `season_context`。direct 证据由 episode 内容字段中的角色名或已验证别名命中形成；`targets` 只作为别名候选和辅助信息，不单独算 direct。mention、causal 和 season_context 用于补充动机、关系链和连续性，不能覆盖 direct 证据。分层证据和质量评估写入 `card.extensions["charapicker"]`，其中包含 `compile_evidence_layers`、`alias_resolution`、`needs_review_reasons`、`conflict_groups` 和 `parse_diagnostics`；普通 `quality.warnings` 只保留用户可读 warning，不直接暴露内部 reason key。
+当前基础实现：角色卡 AI 复核输入已经接入 `direct_evidence_episodes`、`mention_evidence_episodes`、`causal_context_episodes` 和 `season_context`。direct 证据由 episode 内容字段中的角色名或已验证别名命中形成；`targets` 只作为别名候选和辅助信息，不单独算 direct。mention、causal 和 season_context 用于补充动机、关系链和连续性，不能覆盖 direct 证据。分层证据和质量评估写入 `card.extensions["charapicker"]`，其中包含 `compile_evidence_layers`、每条证据的 `source_metadata`、`alias_resolution`、`needs_review_reasons`、`conflict_groups`、`evidence_source_profile` 和 `parse_diagnostics`；普通 `quality.warnings` 只保留用户可读 warning，不直接暴露内部 reason key。
 
 ## 8. 当前限制
 
@@ -298,7 +309,7 @@ flowchart TD
 当前仍需后续完善：
 
 - 角色卡编译上下文分层已接入基础实现，但仍需继续用真实素材验收和调优 direct、mention、causal 与 season_context 的分类边界。
-- 普通文本、字幕、音频 transcript 和静态图片已进入基础预览/正式知识库路径；漫画页组语义、混合媒体统一调度与跨媒体证据合并仍未完成。
+- 普通文本、字幕、音频 transcript、静态图片和原生视听补充线索已进入基础预览/正式知识库路径；角色卡证据层已能保留跨媒体来源 metadata，但漫画页组语义、混合媒体统一调度、证据可信度权重和 UI 展示仍需继续完善。
 - 自动化回归仍不足，正式提取主线目前主要依赖静态检查、手动试跑和日志复核。
 - 模型 DEBUG 日志需要继续脱敏和降噪，避免完整请求/响应正文或临时素材 URL 展开。
 - 供应商拒绝视频片段时可以跳过并继续，但被跳过片段的信息不会进入知识库，需要用户复核缺失 warnings。

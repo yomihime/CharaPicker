@@ -33,7 +33,7 @@
 - `video_unit_handler.py`：封装正式视频 unit 的时长探测、按时长缩放输出 token 和 `ModelCallRequest` 构造；模型调用仍由 `utils.ai_model_middleware` 执行。
 - `compiler.py`：定义 `build_character_compile_request()`、`compile_character_state()`、`compile_character_state_by_season_episode()`、`write_character_stage_states()` 和 `final_polish_character_state()`，负责从知识库聚合角色阶段状态。
 - `character_card_store.py`：管理 `knowledge_base/character_cards/` 与 `preview_character_cards/` 下角色卡的创建、读取、保存、列表、删除和封面路径登记。
-- `character_card_compiler.py`：从正式或预览知识库生成 CharaPicker 角色卡 JSON；正式编译会构建 direct、mention、causal 和 season_context 分层证据包，处理 AI 别名校验、AI 复核、冲突分组、`needs_review_reasons` 和 JSON parse diagnostics；不读取原始素材，也不读取 `ProjectConfig.target_characters`。
+- `character_card_compiler.py`：从正式或预览知识库生成 CharaPicker 角色卡 JSON；正式编译会构建 direct、mention、causal 和 season_context 分层证据包，并在每个 evidence entry 中保留紧凑 `source_metadata`（`source_kind`、`media_types`、`content_forms`、`source_counts`、`source_trace` 和 `evidence_refs`）；处理 AI 别名校验、AI 复核、冲突分组、`needs_review_reasons`、`evidence_source_profile` 和 JSON parse diagnostics；不读取原始素材，也不读取 `ProjectConfig.target_characters`。
 - `character_card_renderers.py`：从 CharaPicker JSON 生成 Markdown、HTML 和人类友好 JSON 分组；HTML 渲染负责转义用户文本且不依赖外部资源。
 - `character_card_formats.py`：把 CharaPicker JSON 映射到 Character Card V2 JSON 和 AstrBot 手动复制内容，无法映射的信息返回 warnings 或进入扩展字段。
 - `character_card_exporter.py`：把角色卡派生产物写入 `projects/{project_id}/output/character_cards/`。
@@ -51,7 +51,7 @@
 - 被 `utils.state_manager` 引用，用于项目配置的序列化和反序列化。
 - 被 `utils.paths` 引用，用于描述包含 `raw/`、`materials/`、`cache/`、`knowledge_base/` 和 `output/` 的项目路径。
 - 向 `projects/{project_id}/knowledge_base/` 写入 `extraction_runs/{run_id}/plan.json`、调试/旧观察索引用 `source_manifest.json`、`seasons/*/episodes/*/chunks/*.json`、`episode_content.json`、`episode_summary.json`、`episode_transcript.json`、`season_content.json`、阶段性角色状态和 `character_cards/{card_id}/card.json`；正式提取产物带 `extraction_run_id`，聚合时只消费当前 run 的合格产物。
-- 正式角色卡的 CharaPicker 扩展字段使用 `extensions["charapicker"]` 保存编译证据和质量评估，包括 `compile_evidence_layers`、`alias_resolution`、`needs_review_reasons`、`conflict_groups` 和 `parse_diagnostics`；这些字段属于 core 生成的结构化诊断，不应由 GUI 拼装。
+- 正式角色卡的 CharaPicker 扩展字段使用 `extensions["charapicker"]` 保存编译证据和质量评估，包括 `compile_evidence_layers`、每条证据的 `source_metadata`、`alias_resolution`、`needs_review_reasons`、`conflict_groups`、`evidence_source_profile` 和 `parse_diagnostics`；这些字段属于 core 生成的结构化诊断，不应由 GUI 拼装。
 - 向 `projects/{project_id}/output/character_cards/` 写入 Markdown、HTML、CharaPicker JSON、Character Card V2 JSON 和 AstrBot 手动复制清单。
 
 ## 维护注意事项
@@ -71,7 +71,7 @@
 - PNG/JPEG/WEBP 静态图片通过 `image` handler 进入预览与正式提取；漫画/图集目录会按文件夹生成独立 image episode，不跨文件夹自动合并，并在 metadata 中记录章节、页序、页数和 `manga` 候选语义。图片证据至少保留项目内相对路径，并按可用信息附带页码、像素尺寸和 region。BMP/GIF 当前只允许导入和扫描，必须保留 unsupported warning。
 - 图片输出预算当前使用 handler 内部“每张”默认值并记录 `output_budget_basis=per_image`；在独立用户设置接线前，不得复用视频 `max_output_tokens` 的每分钟语义。
 - `source_kind` 是旧兼容摘要字段；聚合产物必须优先根据 `source_trace` 中的 `media_types` 推导单一来源或 `mixed`，不得把文本、图片或音频产物硬编码为 `video`。
-- `compiler` 只做角色状态迭代、长文本阅读和冲突处理；角色卡证据分层和质量规则由 `character_card_compiler` 负责。
+- `compiler` 只做角色状态迭代、长文本阅读和冲突处理；角色卡证据分层、来源 metadata 保真和质量规则由 `character_card_compiler` 负责。
 - 角色卡编译、存储、渲染、导入和导出分别放在 `character_card_*` 模块；页面层不直接拼接知识库路径或导出字段。
 - 角色卡固定协议值优先放在 `character_card_constants.py`，避免在 store、compiler、renderer 和 GUI 层重复硬编码。
 - `generator` 只保留旧输出兼容，不新增角色卡业务逻辑。
