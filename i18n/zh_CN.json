@@ -742,6 +742,7 @@
   "extractor.full.chunk.videoRejectedByProviderStopped": "正式视频 chunk {current}/{total} 未通过模型服务的数据检查，已按当前设置停止：{name}。这不是程序崩溃；如要继续处理后续 chunk，请启用跳过选项后重试。",
   "extractor.full.unitUnsupported": "素材 {name} 无法正式提取：{reason}",
   "extractor.full.reason.handlerNotAvailable": "没有可用的正式提取处理器",
+  "extractor.fast.serialFallback": "FAST 模式当前只对视频 chunk 启用并发；{handlers} 将按正式串行路径处理。",
   "extractor.full.chunkMissing": "视频 chunk 源文件不存在，已跳过：{path}",
   "extractor.full.summary": "正式提取完成：chunk 成功 {succeeded}、跳过 {skipped}、失败 {failed}；集整理成功 {episode_succeeded}、跳过 {episode_skipped}、失败 {episode_failed}；季整理成功 {season_succeeded}、跳过 {season_skipped}、失败 {season_failed}；已标记 {stale} 张正式角色卡需要重编译。",
   "extractor.clean.title": "洁净提取清理",

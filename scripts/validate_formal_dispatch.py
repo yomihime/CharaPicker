@@ -22,6 +22,7 @@ from core.models import (  # noqa: E402
     ChunkExtractionResult,
     EpisodeTranscript,
     ExtractionArtifactStage,
+    ExtractionMode,
     ProjectConfig,
     ProjectPaths,
     TranscriptMetadata,
@@ -216,6 +217,34 @@ def _assert_unsupported_units_do_not_block_supported_text() -> None:
         assert kb.list_full_chunk_result_paths(project_id, include_legacy_top_level=False)
 
 
+def _assert_fast_non_video_dispatch_warns_serial_fallback() -> None:
+    project_id = "validation-formal-dispatch-fast-serial"
+    with _isolated_project(project_id) as paths:
+        paths.materials.joinpath("notes.txt").write_text("Character notes", encoding="utf-8")
+        extractor = Extractor()
+        fake_model = _FakeTextModel()
+        extractor._text_unit_handler = lambda _preset_value: TextUnitHandler(
+            TextUnitHandlerConfig(max_input_chars=500, max_output_tokens=256),
+            model_call=fake_model,
+        )
+        events: list[dict] = []
+        chunks = extractor.run_full_extraction_streaming(
+            ProjectConfig(project_id=project_id, extraction_mode=ExtractionMode.FAST),
+            cloud_preset=_preset(),
+            emit_event=events.append,
+        )
+
+        assert len(chunks) == 1
+        assert fake_model.requests
+        serial_fallback_events = [
+            event
+            for event in events
+            if event.get("meta", {}).get("serial_handlers") == ["text"]
+        ]
+        assert serial_fallback_events
+        assert serial_fallback_events[0].get("status") == "warning"
+
+
 def _assert_video_still_uses_legacy_video_path() -> None:
     project_id = "validation-formal-dispatch-video"
     with _isolated_project(project_id) as paths:
@@ -284,6 +313,7 @@ def _assert_video_still_uses_legacy_video_path() -> None:
 def main() -> None:
     _assert_dispatch_plan_covers_current_handlers()
     _assert_unsupported_units_do_not_block_supported_text()
+    _assert_fast_non_video_dispatch_warns_serial_fallback()
     _assert_video_still_uses_legacy_video_path()
     print("formal dispatch validation passed")
 

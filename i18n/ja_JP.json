@@ -742,6 +742,7 @@
   "extractor.full.chunk.videoRejectedByProviderStopped": "正式動画 chunk {current}/{total} はモデル提供元のデータ検査を通過しなかったため、現在の設定に従って停止しました：{name}。アプリはクラッシュしていません。後続 chunk を続行するにはスキップ設定を有効にしてください。",
   "extractor.full.unitUnsupported": "素材 {name} は正式抽出できません：{reason}",
   "extractor.full.reason.handlerNotAvailable": "利用可能な正式抽出処理がありません",
+  "extractor.fast.serialFallback": "FAST モードで並列化されるのは現在 video chunk のみです。{handlers} は正式な直列パスで処理します。",
   "extractor.full.chunkMissing": "動画 chunk の元ファイルが見つからないためスキップしました：{path}",
   "extractor.full.summary": "正式抽出が完了しました：chunk 成功 {succeeded}、スキップ {skipped}、失敗 {failed}。エピソード整理 成功 {episode_succeeded}、スキップ {episode_skipped}、失敗 {episode_failed}。シーズン整理 成功 {season_succeeded}、スキップ {season_skipped}、失敗 {season_failed}。{stale} 件の正式キャラクターカードを再コンパイル待ちにしました。",
   "extractor.clean.title": "クリーン抽出の整理",

@@ -59,6 +59,7 @@
 - 素材处理配置只描述用户选择和项目状态；文件复制、链接、清理等副作用放在 `utils/source_importer.py`。
 - `extractor` 只做素材解析、事实提取和洞察产出。
 - 完整提取和洁净提取保持线性上下文流程；快速提取允许 chunk 并发且不带上下文，随后用 AI 并发重整理集和季。
+- 快速提取当前只对视频 chunk 启用并发；文本、图片和 audio transcript 仍通过正式串行 handler 写入 chunk，并按 `source_trace` 重建 episode/season，运行时会发出 warning 说明回退。
 - 文本 unit 使用独立输入字符预算和固定内部输出 token 上限，不复用视频“每分钟输出 token”语义；文本 chunk 必须保留原文 offset、素材引用和结构化 evidence。
 - `.srt` / `.ass` 通过普通 `text` handler 进入预览与正式提取；`.vtt` / `.lrc` 当前只允许导入和扫描，必须保留 unsupported warning，不能静默当普通文档处理。
 - 音频素材通过 `audio -> DerivedArtifactKind.TRANSCRIPT -> transcript_text` 进入文本提取；转写失败只标记对应 artifact 并发出 warning，不得阻断同次运行中不依赖 transcript 的文本、图片或视频流程。

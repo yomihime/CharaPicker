@@ -107,7 +107,7 @@ flowchart TD
 
 - `完整提取`：执行高质量线性流程，按 season -> episode -> chunk 顺序串行提取。每个 chunk 会带入结构化历史上下文；每集、每季结束后用 AI 生成集级和季级产物。
 - `洁净提取`：先清理可重新生成的提取中间产物，再执行与完整提取相同的高质量线性流程。清理不会删除用户素材、导出结果或角色卡母本；成功写入新正式 run 后，已编译的正式角色卡会标记为需要重编译。
-- `快速提取`：chunk 阶段按用户确认的并发数并行请求，不带上下文；全部 chunk 完成后，再用 AI 并发重整理 episode，最后重整理 season。这个模式速度优先，偏差会明显更大。
+- `快速提取`：视频 chunk 阶段按用户确认的并发数并行请求，不带上下文；全部视频 chunk 完成后，再用 AI 并发重整理 episode，最后重整理 season。当前文本、图片和 audio transcript handler 仍按正式串行路径处理，并在运行时发出 warning 说明回退。这个模式速度优先，偏差会明显更大。
 
 正式提取会生成新的 `extraction_run_id` 和 `FormalExtractionRunPlan`。完整、洁净和快速模式只聚合同一 run 中 schema 合格的 full artifact，避免失败重跑时混入旧结果。
 
@@ -150,7 +150,7 @@ PREVIOUS_SEASON_BACKGROUND
 
 也就是说，前一季信息是背景，不是当前证据。
 
-快速提取的 chunk 阶段不带同集、跨集或跨季上下文。它只在 chunk 完成后再用 AI 重整理集和季，因此适合速度优先的试跑，不适合替代高质量正式流程。
+快速提取的视频 chunk 阶段不带同集、跨集或跨季上下文。它只在视频 chunk 完成后再用 AI 重整理集和季，因此适合速度优先的试跑，不适合替代高质量正式流程。文本、图片和 audio transcript 暂不走快速并发聚合，而是复用正式串行 handler 和 `source_trace` 聚合规则，以避免在混合媒体阶段提前改变语义。
 
 ## 6. 知识库结构
 
@@ -166,7 +166,7 @@ PREVIOUS_SEASON_BACKGROUND
 - `token_usage`：模型返回的输入、输出和总 token 统计；如果供应商没有返回，相关字段可能为空。
 - `requested_output_tokens`：本次文本合并或摘要请求使用的输出 token 上限。
 - `aggregation_warnings`：跳过片段、缺失 chunk、部分成功或预算降级等提示。
-- `source_trace` / `media_types`：记录产物来自哪些素材单元和媒体类型，避免把视频、音频、图片、文本或其派生成果混为同一种来源。
+- `source_trace` / `media_types`：记录产物来自哪些素材单元和媒体类型，避免把视频、音频、图片、文本或其派生成果混为同一种来源。`source_kind` 只是旧兼容摘要字段，聚合产物会从 `source_trace.media_types` 推导单一来源或 `mixed`。
 - `derived_artifacts`：记录 transcript 等由原始素材派生出的中间产物。transcript 以 `text` 型成果进入知识库，不作为新的顶层媒体类型。
 
 推荐结构：

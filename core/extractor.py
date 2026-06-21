@@ -2178,14 +2178,15 @@ class Extractor(QObject):
         )
         payload = result.payload
         source_trace = self._source_trace_from_chunks(episode_chunks)
+        media_types = self._media_types_from_source_trace(source_trace)
         episode_content = {
             "season_id": season_id,
             "episode_id": episode_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
             "extraction_run_id": extraction_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
-            "source_kind": "video",
-            "media_types": self._media_types_from_source_trace(source_trace),
+            "source_kind": self._source_kind_from_media_types(media_types),
+            "media_types": media_types,
             "schema_version": 1,
             "source_trace": source_trace,
             "source_counts": {
@@ -2291,6 +2292,7 @@ class Extractor(QObject):
         )
         payload = result.payload
         source_trace = self._source_trace_for_episode_summary(episode_content)
+        media_types = self._media_types_from_source_trace(source_trace)
         source_counts = episode_content.get("source_counts", {})
         if not isinstance(source_counts, dict):
             source_counts = {}
@@ -2300,8 +2302,8 @@ class Extractor(QObject):
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
             "extraction_run_id": extraction_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
-            "source_kind": "video",
-            "media_types": self._media_types_from_source_trace(source_trace),
+            "source_kind": self._source_kind_from_media_types(media_types),
+            "media_types": media_types,
             "schema_version": 1,
             "source_trace": source_trace,
             "source_counts": {
@@ -2509,13 +2511,14 @@ class Extractor(QObject):
             episode_summaries=episode_summaries,
             previous_season_backgrounds=previous_season_backgrounds,
         )
+        media_types = self._media_types_from_source_trace(source_trace)
         season_content = {
             "season_id": season_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
             "extraction_run_id": extraction_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
-            "source_kind": "video",
-            "media_types": self._media_types_from_source_trace(source_trace),
+            "source_kind": self._source_kind_from_media_types(media_types),
+            "media_types": media_types,
             "schema_version": 1,
             "source_trace": source_trace,
             "source_counts": {
@@ -2655,13 +2658,14 @@ class Extractor(QObject):
             episode_summaries=episode_summaries,
             previous_season_backgrounds=previous_series_background,
         )
+        media_types = self._media_types_from_source_trace(source_trace)
         summary = {
             "season_id": season_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
             "extraction_run_id": extraction_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
-            "source_kind": "video",
-            "media_types": self._media_types_from_source_trace(source_trace),
+            "source_kind": self._source_kind_from_media_types(media_types),
+            "media_types": media_types,
             "schema_version": 1,
             "source_trace": source_trace,
             "source_counts": {
@@ -4935,6 +4939,29 @@ class Extractor(QObject):
         audio_transcript_count = dispatch_plan.handler_unit_count(
             FormalDispatchKind.AUDIO_TRANSCRIPT
         )
+        fast_serial_handlers = [
+            handler.value
+            for handler, unit_count in (
+                (FormalDispatchKind.TEXT, text_unit_count),
+                (FormalDispatchKind.IMAGE, image_unit_count),
+                (FormalDispatchKind.AUDIO_TRANSCRIPT, audio_transcript_count),
+            )
+            if unit_count
+        ]
+        if is_fast_mode and fast_serial_handlers:
+            self._emit_full_event(
+                emit_event,
+                title=t("extractor.full.chunk.title"),
+                description=t(
+                    "extractor.fast.serialFallback",
+                    handlers="/".join(fast_serial_handlers),
+                ),
+                status=InsightStatus.WARNING,
+                meta={
+                    **self._formal_dispatch_meta(dispatch_plan),
+                    "serial_handlers": fast_serial_handlers,
+                },
+            )
         if audio_transcript_count:
             self.ensure_episode_transcripts_from_run_plan(
                 config.project_id,
@@ -5057,6 +5084,8 @@ class Extractor(QObject):
                 run_stats[key] = run_stats.get(key, 0) + value
 
         run_stats.update(self._formal_dispatch_meta(dispatch_plan))
+        if fast_serial_handlers:
+            run_stats["fast_serial_handlers"] = fast_serial_handlers
         non_video_handler_count = sum((bool(text_unit_count), bool(image_unit_count)))
         non_video_progress_base = 80 if chunk_inputs else 5
         non_video_progress_span = 15 if chunk_inputs else 90

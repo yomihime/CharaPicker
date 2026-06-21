@@ -20,6 +20,7 @@ from core.character_card_store import (  # noqa: E402
 )
 from core.extraction_ai import (  # noqa: E402
     FormalExtractionJsonError,
+    FormalExtractionJsonResult,
     FormalExtractionOutputTruncatedError,
     call_formal_json_model,
 )
@@ -494,6 +495,207 @@ def _assert_episode_merge_source_trace() -> None:
         assert season_summary_trace["source_breakdown"]["episode_summaries"] == 1
 
 
+def _assert_ai_aggregation_source_trace_from_mixed_media() -> None:
+    project_id = "validation-ai-mixed-source-trace"
+    with _isolated_project_tree(project_id):
+        chunks = [
+            ChunkExtractionResult(
+                season_id="season_001",
+                episode_id="episode_001",
+                chunk_id="chunk_text_0001",
+                extraction_stage=ExtractionArtifactStage.FULL,
+                extraction_run_id="run-current",
+                run_type="formal_extraction",
+                source_kind="text",
+                source_path="novel.txt",
+                source_trace={
+                    "material_refs": [
+                        {
+                            "material_id": "material_text_001",
+                            "relative_path": "novel.txt",
+                            "source_media_type": "text",
+                        }
+                    ],
+                    "unit_refs": ["unit_text_001"],
+                    "derived_artifact_refs": [],
+                },
+                facts=["text fact"],
+            ),
+            ChunkExtractionResult(
+                season_id="season_001",
+                episode_id="episode_001",
+                chunk_id="chunk_image_0001",
+                extraction_stage=ExtractionArtifactStage.FULL,
+                extraction_run_id="run-current",
+                run_type="formal_extraction",
+                source_kind="image",
+                source_path="cover.png",
+                source_trace={
+                    "material_refs": [
+                        {
+                            "material_id": "material_image_001",
+                            "relative_path": "cover.png",
+                            "source_media_type": "image",
+                        }
+                    ],
+                    "unit_refs": ["unit_image_001"],
+                    "derived_artifact_refs": [],
+                },
+                facts=["image fact"],
+            ),
+        ]
+        manifest = {
+            "extraction_run_id": "run-current",
+            "seasons": [
+                {
+                    "season_id": "season_001",
+                    "episodes": [
+                        {
+                            "episode_id": "episode_001",
+                            "chunks": [
+                                {
+                                    "chunk_id": "chunk_text_0001",
+                                    "source_path": "novel.txt",
+                                },
+                                {
+                                    "chunk_id": "chunk_image_0001",
+                                    "source_path": "cover.png",
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        chunk_inputs = manifest["seasons"][0]["episodes"][0]["chunks"]
+
+        original_call = extractor_module.call_formal_text_json_model
+
+        def fake_call(
+            request: ModelCallRequest,
+            *,
+            estimated_context_tokens: int | None = None,
+        ) -> FormalExtractionJsonResult:
+            metadata = request.metadata or {}
+            stage = str(metadata.get("stage", ""))
+            payload = {
+                "episode_outline": "mixed episode",
+                "characters": ["Alice"],
+                "facts": ["merged fact"],
+                "important_characters": ["Alice"],
+                "relationship_edges": [],
+                "major_events": ["mixed event"],
+                "open_threads": [],
+                "continuity_hooks": [],
+                "insight_summary": "mixed summary",
+                "context_long": "long mixed context",
+                "context_brief": "brief mixed context",
+                "season_outline": "mixed season",
+                "major_characters": ["Alice"],
+                "character_arcs": ["arc"],
+                "major_conflicts": [],
+                "unresolved_threads": [],
+                "final_character_states": ["state"],
+                "aggregation_warnings": [],
+            }
+            return FormalExtractionJsonResult(
+                payload=payload,
+                content="{}",
+                token_usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                requested_output_tokens=request.max_tokens,
+                finish_reason="stop",
+                estimated_context_tokens=estimated_context_tokens,
+                model_metadata={"validation_stage": stage},
+            )
+
+        extractor_module.call_formal_text_json_model = fake_call
+        try:
+            extractor = Extractor()
+            extractor._merge_episode_content_with_ai(
+                project_id,
+                manifest,
+                "season_001",
+                "episode_001",
+                chunk_inputs=chunk_inputs,
+                episode_chunks=chunks,
+                previous_episode_id="",
+                extraction_run_id="run-current",
+                backend="openai_compatible",
+                model_name="validation-model",
+                base_url="",
+                api_key="",
+                context_window_tokens=None,
+            )
+            episode_content = kb.load_episode_content(
+                project_id,
+                "season_001",
+                "episode_001",
+            )
+            assert episode_content["source_kind"] == "mixed"
+            assert episode_content["media_types"] == ["text", "image"]
+            assert episode_content["source_trace"]["media_types"] == ["text", "image"]
+
+            extractor._generate_episode_summary_with_ai(
+                project_id,
+                "season_001",
+                "episode_001",
+                extraction_run_id="run-current",
+                backend="openai_compatible",
+                model_name="validation-model",
+                base_url="",
+                api_key="",
+                context_window_tokens=None,
+            )
+            episode_summary = kb.load_episode_summary(
+                project_id,
+                "season_001",
+                "episode_001",
+            )
+            assert episode_summary["source_kind"] == "mixed"
+            assert episode_summary["media_types"] == ["text", "image"]
+            assert episode_summary["source_trace"]["unit_refs"] == [
+                "unit_text_001",
+                "unit_image_001",
+            ]
+
+            extractor._merge_season_content_with_ai(
+                project_id,
+                manifest,
+                "season_001",
+                extraction_run_id="run-current",
+                backend="openai_compatible",
+                model_name="validation-model",
+                base_url="",
+                api_key="",
+                context_window_tokens=None,
+            )
+            season_content = kb.load_season_content(project_id, "season_001")
+            assert season_content["source_kind"] == "mixed"
+            assert season_content["media_types"] == ["text", "image"]
+            assert season_content["source_trace"]["media_types"] == ["text", "image"]
+
+            extractor._generate_season_summary_with_ai(
+                project_id,
+                manifest,
+                "season_001",
+                extraction_run_id="run-current",
+                backend="openai_compatible",
+                model_name="validation-model",
+                base_url="",
+                api_key="",
+                context_window_tokens=None,
+            )
+            season_summary = kb.load_season_summary(project_id, "season_001")
+            assert season_summary["source_kind"] == "mixed"
+            assert season_summary["media_types"] == ["text", "image"]
+            assert season_summary["source_trace"]["unit_refs"] == [
+                "unit_text_001",
+                "unit_image_001",
+            ]
+        finally:
+            extractor_module.call_formal_text_json_model = original_call
+
+
 def _assert_clean_regenerable_artifacts_scope() -> None:
     project_id = "validation-clean-scope"
     with _isolated_project_tree(project_id) as paths:
@@ -595,6 +797,7 @@ def main() -> None:
     _assert_run_artifact_filtering()
     _assert_chunk_result_source_trace_serialization()
     _assert_episode_merge_source_trace()
+    _assert_ai_aggregation_source_trace_from_mixed_media()
     _assert_clean_regenerable_artifacts_scope()
     _assert_stale_marking_only_updates_compiled_official_cards()
     print("formal extraction workflow validation passed")
