@@ -65,6 +65,7 @@ from core.models import (
     ProjectConfig,
 )
 from core.native_media_insight_handler import (
+    NATIVE_MEDIA_INSIGHT_PROMPT,
     NATIVE_AUDIO_UNSUPPORTED_REASON,
     NATIVE_VIDEO_BACKEND_UNSUPPORTED_REASON,
     NATIVE_VIDEO_UNSUPPORTED_REASON,
@@ -78,6 +79,7 @@ from core.preview_sampling import (
     collect_preview_candidates,
     run_plan_for_preview_unit,
 )
+from core.refusal_samples import ExtractionFailureSampleRequest, record_extraction_failure_sample
 from core.transcript_provider import TranscriptArtifactRequest, TranscriptProvider
 from core.text_unit_handler import TextUnitHandler, TextUnitHandlerConfig
 from core.video_unit_handler import VideoUnitHandler, VideoUnitHandlerConfig
@@ -112,7 +114,8 @@ from utils.audio_transcription import (
 from utils.ffmpeg_tool import FfmpegProcessError, probe_video_duration_seconds
 from utils.i18n import t
 from utils.model_preferences import last_cloud_preset_name
-from utils.paths import ensure_project_tree
+from utils.paths import ensure_project_tree, project_paths
+from utils.prompt_preferences import prompt_override
 
 
 LOGGER = logging.getLogger(__name__)
@@ -121,6 +124,8 @@ PREVIEW_MAX_CANDIDATE_ATTEMPTS = PREVIEW_MAX_CHUNKS * 2
 PREVIEW_CHUNK_MIN_OUTPUT_TOKENS = 1024
 PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE = 512
 FULL_EXTRACTION_RUN_TYPE = "formal_extraction"
+FORMAL_VIDEO_CHUNK_PROMPT = "formal_contextual_video_chunk_extraction"
+PREVIEW_VIDEO_CHUNK_PROMPT = "preview_video_chunk_extraction"
 FULL_EXTRACTION_MIN_OUTPUT_TOKENS_PER_MINUTE = PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE
 TEXT_UNIT_DEFAULT_INPUT_CHARS = 12_000
 TEXT_UNIT_MAX_OUTPUT_TOKENS = 2_048
@@ -1348,6 +1353,184 @@ class Extractor(QObject):
             return text
         return f"{text[: max_length - 3]}..."
 
+    def _failure_kind_for_exception(self, exc: Exception) -> str:
+        if self._provider_rejected_video(exc):
+            return "provider_data_inspection_failed"
+        if isinstance(exc, FormalExtractionOutputTruncatedError):
+            return "formal_output_truncated"
+        if isinstance(exc, FormalExtractionJsonError):
+            return "formal_json_parse_failed"
+        if isinstance(exc, AudioTranscriptionError):
+            return "audio_transcription_failed"
+        if isinstance(exc, ModelCallError):
+            return "model_call_failed"
+        return "extraction_failed"
+
+    def _prompt_override_present(self, prompt_purpose: str) -> bool:
+        if not prompt_purpose:
+            return False
+        override = prompt_override(prompt_purpose)
+        return bool(override.system.strip() or override.user_template.strip())
+
+    def _record_extraction_failure_sample(
+        self,
+        project_id: str,
+        *,
+        project_name: str = "",
+        prompt_purpose: str,
+        provider: str = "",
+        backend: str = "",
+        model_name: str = "",
+        media_type: str = "",
+        content_form: str = "",
+        unit_id: str = "",
+        unit_kind: str = "",
+        material_id: str = "",
+        source_path: str = "",
+        source_paths: list[str] | None = None,
+        extraction_stage: str = "",
+        extraction_run_id: str = "",
+        season_id: str = "",
+        episode_id: str = "",
+        chunk_id: str = "",
+        failure_kind: str = "",
+        exc: Exception,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        try:
+            result = record_extraction_failure_sample(
+                ExtractionFailureSampleRequest(
+                    project_id=project_id,
+                    project_name=project_name,
+                    prompt_purpose=prompt_purpose,
+                    provider=provider,
+                    backend=backend,
+                    model_name=model_name,
+                    media_type=media_type,
+                    content_form=content_form,
+                    unit_id=unit_id,
+                    unit_kind=unit_kind,
+                    material_id=material_id,
+                    source_path=source_path,
+                    source_paths=source_paths or [],
+                    extraction_stage=extraction_stage,
+                    extraction_run_id=extraction_run_id,
+                    season_id=season_id,
+                    episode_id=episode_id,
+                    chunk_id=chunk_id,
+                    failure_kind=failure_kind or self._failure_kind_for_exception(exc),
+                    error_type=exc.__class__.__name__,
+                    error_summary=self._compact_exception_message(exc),
+                    user_prompt_override_present=self._prompt_override_present(prompt_purpose),
+                    metadata=metadata or {},
+                )
+            )
+        except Exception:  # noqa: BLE001
+            LOGGER.warning(
+                "Extraction failure sample could not be recorded; project_id=%s purpose=%s "
+                "unit_id=%s source_path=%s",
+                project_id,
+                prompt_purpose,
+                unit_id,
+                source_path,
+                exc_info=True,
+            )
+            return
+        LOGGER.info(
+            "Extraction failure sample recorded; project_id=%s sample_id=%s purpose=%s "
+            "unit_id=%s source_path=%s",
+            project_id,
+            result.sample_id,
+            prompt_purpose,
+            unit_id,
+            source_path,
+        )
+
+    def _record_unit_failure_sample(
+        self,
+        project_id: str,
+        run_plan: FormalExtractionRunPlan,
+        unit: ExtractionUnit,
+        *,
+        project_name: str = "",
+        prompt_purpose: str,
+        provider: str,
+        backend: str,
+        model_name: str,
+        extraction_stage: ExtractionArtifactStage,
+        season_id: str,
+        chunk_id: str = "",
+        exc: Exception,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        self._record_extraction_failure_sample(
+            project_id,
+            project_name=project_name,
+            prompt_purpose=prompt_purpose,
+            provider=provider,
+            backend=backend,
+            model_name=model_name,
+            media_type=unit.media_type.value,
+            content_form=unit.content_form.value,
+            unit_id=unit.unit_id,
+            unit_kind=unit.unit_kind,
+            material_id=unit.material_ref.material_id,
+            source_path=unit.material_ref.relative_path,
+            extraction_stage=extraction_stage.value,
+            extraction_run_id=run_plan.run_id if extraction_stage == ExtractionArtifactStage.FULL else "",
+            season_id=season_id,
+            episode_id=unit.episode_id,
+            chunk_id=chunk_id,
+            exc=exc,
+            metadata=metadata,
+        )
+
+    def _record_video_chunk_failure_sample(
+        self,
+        config: ProjectConfig,
+        chunk_input: dict[str, Any],
+        *,
+        prompt_purpose: str,
+        provider: str,
+        backend: str,
+        model_name: str,
+        extraction_stage: ExtractionArtifactStage,
+        exc: Exception,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        material_ref = chunk_input.get("material_ref")
+        if not isinstance(material_ref, dict):
+            material_ref = {}
+        self._record_extraction_failure_sample(
+            config.project_id,
+            project_name=config.name,
+            prompt_purpose=prompt_purpose,
+            provider=provider,
+            backend=backend,
+            model_name=model_name,
+            media_type=str(material_ref.get("source_media_type") or "video"),
+            content_form=str(material_ref.get("content_form") or "unknown"),
+            unit_id=str(chunk_input.get("unit_ref") or chunk_input.get("chunk_id") or ""),
+            unit_kind="video_chunk",
+            material_id=str(material_ref.get("material_id") or ""),
+            source_path=str(chunk_input.get("source_path") or ""),
+            extraction_stage=extraction_stage.value,
+            extraction_run_id=str(chunk_input.get("extraction_run_id") or ""),
+            season_id=str(chunk_input.get("season_id") or ""),
+            episode_id=str(chunk_input.get("episode_id") or ""),
+            chunk_id=str(chunk_input.get("chunk_id") or ""),
+            exc=exc,
+            metadata=metadata,
+        )
+
+    def _project_relative_source_path(self, project_id: str, source_path: Path) -> str:
+        project_root = project_paths(project_id).root.resolve()
+        resolved = source_path.resolve(strict=False)
+        try:
+            return resolved.relative_to(project_root).as_posix()
+        except ValueError:
+            return str(source_path)
+
     def _preview_video_chunk_failed_description(
         self,
         *,
@@ -1650,6 +1833,12 @@ class Extractor(QObject):
             return 0, usage_total, [], stats
 
         text_handler = handler or self._text_unit_handler(preset)
+        text_backend = cloud_model_provider(preset.provider).backend_for("text")
+        text_prompt_purpose = (
+            "preview_text_unit_extraction"
+            if extraction_stage == ExtractionArtifactStage.PREVIEW
+            else "formal_text_unit_extraction"
+        )
         project_paths = ensure_project_tree(project_id)
         extracted_chunks: list[ChunkExtractionResult] = []
         remaining_chunks = chunk_limit
@@ -1677,13 +1866,13 @@ class Extractor(QObject):
                         if extraction_stage == ExtractionArtifactStage.FULL
                         else "preview_trial"
                     ),
-                    backend=cloud_model_provider(preset.provider).backend_for("text"),
+                    backend=text_backend,
                     model_name=preset.model_name,
                     base_url=preset.base_url,
                     api_key=preset.api_key,
                     chunk_limit=remaining_chunks,
                 )
-            except (ModelCallError, OSError, ValueError):
+            except (ModelCallError, OSError, ValueError) as exc:
                 stats["failed_chunks"] += 1
                 LOGGER.warning(
                     "Text extraction unit failed; project_id=%s unit_id=%s source_path=%s",
@@ -1691,6 +1880,18 @@ class Extractor(QObject):
                     unit.unit_id,
                     unit.material_ref.relative_path,
                     exc_info=True,
+                )
+                self._record_unit_failure_sample(
+                    project_id,
+                    run_plan,
+                    unit,
+                    prompt_purpose=text_prompt_purpose,
+                    provider=preset.provider,
+                    backend=text_backend,
+                    model_name=preset.model_name,
+                    extraction_stage=extraction_stage,
+                    season_id=season_id,
+                    exc=exc,
                 )
                 continue
 
@@ -1802,6 +2003,19 @@ class Extractor(QObject):
                     reason="native_media_request_failed",
                     error=self._compact_exception_message(exc),
                 )
+                self._record_unit_failure_sample(
+                    project_id,
+                    run_plan,
+                    unit,
+                    prompt_purpose=NATIVE_MEDIA_INSIGHT_PROMPT,
+                    provider=preset.provider,
+                    backend=support.backend or "",
+                    model_name=preset.model_name,
+                    extraction_stage=extraction_stage,
+                    season_id=season_id,
+                    exc=exc,
+                    metadata={"native_media_insight": True},
+                )
                 if emit_progress is not None and progress_span > 0:
                     emit_progress(progress_base + int(index * progress_span / total_units))
                 continue
@@ -1870,6 +2084,12 @@ class Extractor(QObject):
             return 0, usage_total, [], stats
 
         image_handler = handler or self._image_unit_handler(preset)
+        image_backend = cloud_model_provider(preset.provider).backend_for("image")
+        image_prompt_purpose = (
+            "preview_image_unit_extraction"
+            if extraction_stage == ExtractionArtifactStage.PREVIEW
+            else "formal_image_unit_extraction"
+        )
         materials_root = ensure_project_tree(project_id).materials
         extracted_chunks: list[ChunkExtractionResult] = []
         remaining_chunks = chunk_limit
@@ -1893,12 +2113,12 @@ class Extractor(QObject):
                         if extraction_stage == ExtractionArtifactStage.FULL
                         else "preview_trial"
                     ),
-                    backend=cloud_model_provider(preset.provider).backend_for("image"),
+                    backend=image_backend,
                     model_name=preset.model_name,
                     base_url=preset.base_url,
                     api_key=preset.api_key,
                 )
-            except (ModelCallError, OSError, ValueError):
+            except (ModelCallError, OSError, ValueError) as exc:
                 stats["failed_chunks"] += 1
                 LOGGER.warning(
                     "Image extraction unit failed; project_id=%s unit_id=%s source_path=%s",
@@ -1906,6 +2126,18 @@ class Extractor(QObject):
                     unit.unit_id,
                     unit.material_ref.relative_path,
                     exc_info=True,
+                )
+                self._record_unit_failure_sample(
+                    project_id,
+                    run_plan,
+                    unit,
+                    prompt_purpose=image_prompt_purpose,
+                    provider=preset.provider,
+                    backend=image_backend,
+                    model_name=preset.model_name,
+                    extraction_stage=extraction_stage,
+                    season_id=season_id,
+                    exc=exc,
                 )
                 continue
 
@@ -3043,6 +3275,28 @@ class Extractor(QObject):
                     episode_id,
                     self._compact_exception_message(exc),
                 )
+                self._record_extraction_failure_sample(
+                    project_id,
+                    prompt_purpose="audio_transcription",
+                    provider="local_transcription",
+                    backend="local",
+                    media_type="audio",
+                    content_form="unknown",
+                    source_path=(
+                        self._project_relative_source_path(project_id, Path(material_paths[0]))
+                        if material_paths
+                        else ""
+                    ),
+                    source_paths=[
+                        self._project_relative_source_path(project_id, Path(path))
+                        for path in material_paths
+                    ],
+                    extraction_stage="full",
+                    season_id=season_id,
+                    episode_id=episode_id,
+                    failure_kind="audio_transcription_failed",
+                    exc=exc,
+                )
                 if emit_event is not None:
                     emit_event(
                         InsightEvent(
@@ -3135,6 +3389,30 @@ class Extractor(QObject):
                     request.season_id,
                     request.episode_id,
                     warning,
+                )
+                self._record_extraction_failure_sample(
+                    project_id,
+                    prompt_purpose="audio_transcription",
+                    provider="local_transcription",
+                    backend="local",
+                    media_type="audio",
+                    content_form="unknown",
+                    source_path=(
+                        self._project_relative_source_path(project_id, request.material_paths[0])
+                        if request.material_paths
+                        else ""
+                    ),
+                    source_paths=[
+                        self._project_relative_source_path(project_id, path)
+                        for path in request.material_paths
+                    ],
+                    extraction_stage="full",
+                    extraction_run_id=run_plan.run_id,
+                    season_id=request.season_id,
+                    episode_id=request.episode_id,
+                    failure_kind="audio_transcription_failed",
+                    exc=exc,
+                    metadata={"artifact_id": request.artifact_id},
                 )
                 if emit_event is not None:
                     emit_event(
@@ -3606,6 +3884,17 @@ class Extractor(QObject):
                     ),
                     status=InsightStatus.WARNING,
                 )
+                self._record_video_chunk_failure_sample(
+                    config,
+                    chunk_input,
+                    prompt_purpose=FORMAL_VIDEO_CHUNK_PROMPT,
+                    provider=provider,
+                    backend=backend,
+                    model_name=model_name,
+                    extraction_stage=ExtractionArtifactStage.FULL,
+                    exc=exc,
+                    metadata={"mode": "fast", "attempts": exc.attempts},
+                )
                 return {"index": index, "status": "failed"}
             except ModelCallError as exc:
                 error_kind = (
@@ -3641,6 +3930,17 @@ class Extractor(QObject):
                         video_name=video_path.name,
                     ),
                     status=InsightStatus.WARNING,
+                )
+                self._record_video_chunk_failure_sample(
+                    config,
+                    chunk_input,
+                    prompt_purpose=FORMAL_VIDEO_CHUNK_PROMPT,
+                    provider=provider,
+                    backend=backend,
+                    model_name=model_name,
+                    extraction_stage=ExtractionArtifactStage.FULL,
+                    exc=exc,
+                    metadata={"mode": "fast", "status": status, "error_kind": error_kind},
                 )
                 return {"index": index, "status": status}
             except Exception as exc:  # noqa: BLE001
@@ -4405,6 +4705,17 @@ class Extractor(QObject):
                                 status=InsightStatus.WARNING,
                             ).model_dump(mode="json")
                         )
+                    self._record_video_chunk_failure_sample(
+                        config,
+                        chunk_input,
+                        prompt_purpose=FORMAL_VIDEO_CHUNK_PROMPT,
+                        provider=provider,
+                        backend=backend,
+                        model_name=model_name,
+                        extraction_stage=ExtractionArtifactStage.FULL,
+                        exc=exc,
+                        metadata={"mode": "full", "attempts": exc.attempts},
+                    )
                     stats["failed_chunks"] += 1
                     continue
                 except ModelCallError as exc:
@@ -4432,6 +4743,21 @@ class Extractor(QObject):
                             self._compact_exception_message(exc),
                         )
                         self._emit_full_warning(emit_event, description)
+                        self._record_video_chunk_failure_sample(
+                            config,
+                            chunk_input,
+                            prompt_purpose=FORMAL_VIDEO_CHUNK_PROMPT,
+                            provider=provider,
+                            backend=backend,
+                            model_name=model_name,
+                            extraction_stage=ExtractionArtifactStage.FULL,
+                            exc=exc,
+                            metadata={
+                                "mode": "full",
+                                "status": "stopped",
+                                "error_kind": error_kind,
+                            },
+                        )
                         raise ExtractionStoppedError(description) from exc
                     if self._provider_rejected_video(exc):
                         stats["skipped_chunks"] += 1
@@ -4462,6 +4788,17 @@ class Extractor(QObject):
                                 status=InsightStatus.WARNING,
                             ).model_dump(mode="json")
                         )
+                    self._record_video_chunk_failure_sample(
+                        config,
+                        chunk_input,
+                        prompt_purpose=FORMAL_VIDEO_CHUNK_PROMPT,
+                        provider=provider,
+                        backend=backend,
+                        model_name=model_name,
+                        extraction_stage=ExtractionArtifactStage.FULL,
+                        exc=exc,
+                        metadata={"mode": "full", "error_kind": error_kind},
+                    )
                     continue
                 except Exception as exc:  # noqa: BLE001
                     stats["failed_chunks"] += 1
@@ -4818,6 +5155,23 @@ class Extractor(QObject):
                     video_path.name,
                     error_kind,
                     self._compact_exception_message(exc),
+                )
+                self._record_extraction_failure_sample(
+                    config.project_id,
+                    project_name=config.name,
+                    prompt_purpose=PREVIEW_VIDEO_CHUNK_PROMPT,
+                    provider=provider,
+                    backend=backend,
+                    model_name=model_name,
+                    media_type="video",
+                    content_form="unknown",
+                    unit_kind="preview_video_chunk",
+                    source_path=self._project_relative_source_path(config.project_id, video_path),
+                    extraction_stage=ExtractionArtifactStage.PREVIEW.value,
+                    chunk_id=video_path.stem,
+                    failure_kind=error_kind,
+                    exc=exc,
+                    metadata={"stage": "preview"},
                 )
                 if emit_event is not None:
                     emit_event(
