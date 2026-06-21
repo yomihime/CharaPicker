@@ -58,6 +58,13 @@ from core.models import (
     InsightStatus,
     ProjectConfig,
 )
+from core.preview_sampling import (
+    PreviewCandidate,
+    PreviewCandidateKind,
+    PreviewSkippedUnit,
+    collect_preview_candidates,
+    run_plan_for_preview_unit,
+)
 from core.transcript_provider import TranscriptArtifactRequest, TranscriptProvider
 from core.text_unit_handler import TextUnitHandler, TextUnitHandlerConfig
 from core.video_unit_handler import VideoUnitHandler, VideoUnitHandlerConfig
@@ -97,12 +104,36 @@ from utils.paths import ensure_project_tree
 
 LOGGER = logging.getLogger(__name__)
 PREVIEW_MAX_CHUNKS = 2
+PREVIEW_MAX_CANDIDATE_ATTEMPTS = PREVIEW_MAX_CHUNKS * 2
 PREVIEW_CHUNK_MIN_OUTPUT_TOKENS = 1024
 PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE = 512
 FULL_EXTRACTION_RUN_TYPE = "formal_extraction"
 FULL_EXTRACTION_MIN_OUTPUT_TOKENS_PER_MINUTE = PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE
 TEXT_UNIT_DEFAULT_INPUT_CHARS = 12_000
 TEXT_UNIT_MAX_OUTPUT_TOKENS = 2_048
+PREVIEW_TEXT_CANDIDATE_KINDS = frozenset(
+    {
+        PreviewCandidateKind.TIMED_TEXT,
+        PreviewCandidateKind.TRANSCRIPT,
+        PreviewCandidateKind.TEXT,
+    }
+)
+PREVIEW_KIND_TRANSLATION_KEYS = {
+    PreviewCandidateKind.TIMED_TEXT: "extractor.preview.kind.timedText",
+    PreviewCandidateKind.TRANSCRIPT: "extractor.preview.kind.transcript",
+    PreviewCandidateKind.TEXT: "extractor.preview.kind.text",
+    PreviewCandidateKind.IMAGE: "extractor.preview.kind.image",
+    PreviewCandidateKind.AUDIO_TRANSCRIPT: "extractor.preview.kind.audioTranscript",
+    PreviewCandidateKind.VIDEO: "extractor.preview.kind.video",
+}
+PREVIEW_REASON_TRANSLATION_KEYS = {
+    "animated_image_not_supported": "extractor.preview.reason.animatedImageNotSupported",
+    "bmp_image_not_supported": "extractor.preview.reason.bmpImageNotSupported",
+    "vtt_timed_text_not_supported": "extractor.preview.reason.vttNotSupported",
+    "lrc_timed_text_not_supported": "extractor.preview.reason.lrcNotSupported",
+    "model_image_input_not_supported": "extractor.preview.reason.modelImageNotSupported",
+    "preview_handler_not_available": "extractor.preview.reason.handlerNotAvailable",
+}
 
 
 class ExtractionStoppedError(RuntimeError):
@@ -2843,6 +2874,7 @@ class Extractor(QObject):
         include_video: bool = True,
         include_audio: bool = True,
         provider: TranscriptProvider | None = None,
+        persist_run_plan: bool = True,
     ) -> list[EpisodeTranscript]:
         provider = provider or self._transcript_provider()
         provider.prepare_run_plan(
@@ -2851,7 +2883,8 @@ class Extractor(QObject):
             include_video=include_video,
             include_audio=include_audio,
         )
-        kb.save_extraction_run_plan(project_id, run_plan)
+        if persist_run_plan:
+            kb.save_extraction_run_plan(project_id, run_plan)
         requests = provider.collect_requests(
             project_id,
             run_plan,
@@ -2917,7 +2950,8 @@ class Extractor(QObject):
                 InsightStatus.DONE,
                 segment_count=len(transcript.segments),
             )
-        kb.save_extraction_run_plan(project_id, run_plan)
+        if persist_run_plan:
+            kb.save_extraction_run_plan(project_id, run_plan)
         return transcripts
 
     def _emit_transcript_event(
@@ -4396,8 +4430,13 @@ class Extractor(QObject):
         emit_token_usage: Callable[[dict[str, int]], None] | None = None,
         emit_event: Callable[[dict], None] | None = None,
         emit_progress: Callable[[int], None] | None = None,
+        video_paths: list[Path] | None = None,
     ) -> tuple[int, dict[str, int], list[ChunkExtractionResult]]:
-        videos = self._collect_preview_video_chunks(config.project_id)
+        videos = (
+            list(video_paths)
+            if video_paths is not None
+            else self._collect_preview_video_chunks(config.project_id)
+        )
         if not videos:
             return (0, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, [])
         created = 0
@@ -5048,6 +5087,187 @@ class Extractor(QObject):
         )
         return extracted_chunks
 
+    def _preview_candidate_meta(
+        self,
+        candidate: PreviewCandidate | PreviewSkippedUnit,
+    ) -> dict[str, str]:
+        unit = candidate.unit
+        return {
+            "media_type": unit.media_type.value,
+            "content_form": unit.content_form.value,
+            "unit_id": unit.unit_id,
+            "material_id": unit.material_ref.material_id,
+            "relative_path": unit.material_ref.relative_path,
+            "stage": "preview",
+        }
+
+    def _preview_candidate_label(self, candidate: PreviewCandidate) -> str:
+        return t(PREVIEW_KIND_TRANSLATION_KEYS[candidate.kind])
+
+    def _preview_warning_reason(self, reason: str) -> str:
+        translation_key = PREVIEW_REASON_TRANSLATION_KEYS.get(reason)
+        if translation_key is not None:
+            return t(translation_key)
+        return t("extractor.preview.reason.unknown", reason=reason)
+
+    def _emit_preview_skipped_unit(
+        self,
+        emit_event: Callable[[dict], None],
+        skipped: PreviewSkippedUnit,
+    ) -> None:
+        source_name = Path(skipped.unit.material_ref.relative_path).name
+        emit_event(
+            InsightEvent(
+                title=t("extractor.chunk.title"),
+                description=t(
+                    "extractor.preview.unitUnsupported",
+                    name=source_name,
+                    reason=self._preview_warning_reason(skipped.reason),
+                ),
+                status=InsightStatus.WARNING,
+                meta={**self._preview_candidate_meta(skipped), "reason": skipped.reason},
+            ).model_dump(mode="json")
+        )
+
+    def _emit_preview_candidate_running(
+        self,
+        emit_event: Callable[[dict], None],
+        candidate: PreviewCandidate,
+        *,
+        current: int,
+        total: int,
+    ) -> None:
+        source_name = Path(candidate.unit.material_ref.relative_path).name
+        emit_event(
+            InsightEvent(
+                title=t("extractor.chunk.title"),
+                description=t(
+                    "extractor.preview.unitRunning",
+                    kind=self._preview_candidate_label(candidate),
+                    name=source_name,
+                    current=current,
+                    total=total,
+                ),
+                status=InsightStatus.RUNNING,
+                meta={
+                    **self._preview_candidate_meta(candidate),
+                    "execution_kind": candidate.kind.value,
+                },
+            ).model_dump(mode="json")
+        )
+
+    def _emit_preview_candidate_no_result(
+        self,
+        emit_event: Callable[[dict], None],
+        candidate: PreviewCandidate,
+    ) -> None:
+        source_name = Path(candidate.unit.material_ref.relative_path).name
+        emit_event(
+            InsightEvent(
+                title=t("extractor.chunk.title"),
+                description=t(
+                    "extractor.preview.unitNoResult",
+                    kind=self._preview_candidate_label(candidate),
+                    name=source_name,
+                ),
+                status=InsightStatus.WARNING,
+                meta={
+                    **self._preview_candidate_meta(candidate),
+                    "execution_kind": candidate.kind.value,
+                },
+            ).model_dump(mode="json")
+        )
+
+    def _execute_preview_candidate(
+        self,
+        config: ProjectConfig,
+        run_plan: FormalExtractionRunPlan,
+        candidate: PreviewCandidate,
+        *,
+        preset: CloudModelPreset,
+        emit_event: Callable[[dict], None],
+    ) -> tuple[int, dict[str, int], list[ChunkExtractionResult]]:
+        candidate_plan = run_plan_for_preview_unit(run_plan, candidate.unit.unit_id)
+        if candidate.kind in PREVIEW_TEXT_CANDIDATE_KINDS:
+            created, usage, chunks, _ = self._extract_text_units(
+                config.project_id,
+                candidate_plan,
+                preset=preset,
+                extraction_stage=ExtractionArtifactStage.PREVIEW,
+                chunk_limit=1,
+            )
+            return created, usage, chunks
+
+        if candidate.kind == PreviewCandidateKind.IMAGE:
+            created, usage, chunks, _ = self._extract_image_units(
+                config.project_id,
+                candidate_plan,
+                preset=preset,
+                extraction_stage=ExtractionArtifactStage.PREVIEW,
+                chunk_limit=1,
+            )
+            return created, usage, chunks
+
+        if candidate.kind == PreviewCandidateKind.AUDIO_TRANSCRIPT:
+            self.ensure_episode_transcripts_from_run_plan(
+                config.project_id,
+                candidate_plan,
+                emit_event=emit_event,
+                include_video=False,
+                include_audio=True,
+                persist_run_plan=False,
+            )
+            transcript_unit = next(
+                (
+                    unit
+                    for episode in candidate_plan.episodes
+                    for unit in episode.units
+                    if unit.unit_kind == "transcript_text"
+                ),
+                None,
+            )
+            if transcript_unit is None:
+                return 0, total_token_usage([]), []
+            transcript_plan = run_plan_for_preview_unit(candidate_plan, transcript_unit.unit_id)
+            created, usage, chunks, _ = self._extract_text_units(
+                config.project_id,
+                transcript_plan,
+                preset=preset,
+                extraction_stage=ExtractionArtifactStage.PREVIEW,
+                chunk_limit=1,
+            )
+            return created, usage, chunks
+
+        video_path = self._formal_material_video_path(
+            config.project_id,
+            candidate.unit.material_ref.relative_path,
+        )
+
+        def emit_video_event(event: dict) -> None:
+            if event.get("status") == InsightStatus.RUNNING.value:
+                return
+            payload = dict(event)
+            meta = payload.get("meta")
+            payload["meta"] = {
+                **(meta if isinstance(meta, dict) else {}),
+                **self._preview_candidate_meta(candidate),
+                "execution_kind": candidate.kind.value,
+            }
+            emit_event(payload)
+
+        return self._extract_preview_chunk_json_from_materials(
+            config,
+            backend=cloud_model_provider(preset.provider).backend_for("video"),
+            provider=preset.provider,
+            model_name=preset.model_name,
+            base_url=preset.base_url,
+            api_key=preset.api_key,
+            video_fps=preset.video_fps,
+            max_output_tokens=preset.max_output_tokens,
+            emit_event=emit_video_event,
+            video_paths=[video_path],
+        )
+
     def run_preview(self, config: ProjectConfig) -> None:
         self.run_preview_streaming(config)
 
@@ -5099,129 +5319,63 @@ class Extractor(QObject):
 
         preview_chunks: list[ChunkExtractionResult] = []
         overall_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-        try:
-            created_count, extraction_usage, extracted_chunks = self._extract_preview_chunk_json_from_materials(
-                config,
-                backend=cloud_model_provider(preset.provider).backend_for("video"),
-                provider=preset.provider,
-                model_name=preset.model_name,
-                base_url=preset.base_url,
-                api_key=preset.api_key,
-                video_fps=preset.video_fps,
-                max_output_tokens=preset.max_output_tokens,
-                emit_token_usage=emit_token_usage,
-                emit_event=emit_event,
-                emit_progress=emit_progress,
+        run_plan = self.prepare_formal_extraction_run_plan(config.project_id)
+        candidates, skipped_units = collect_preview_candidates(
+            run_plan,
+            image_input_supported=provider_supports_capability(preset.provider, "image"),
+        )
+        for skipped in skipped_units:
+            self._emit_preview_skipped_unit(emit_event, skipped)
+
+        extracted_chunks: list[ChunkExtractionResult] = []
+        attempted_candidates = candidates[:PREVIEW_MAX_CANDIDATE_ATTEMPTS]
+        total_candidates = len(attempted_candidates)
+        for index, candidate in enumerate(attempted_candidates, start=1):
+            if len(extracted_chunks) >= PREVIEW_MAX_CHUNKS:
+                break
+            self._emit_preview_candidate_running(
+                emit_event,
+                candidate,
+                current=index,
+                total=total_candidates,
             )
-        except ExtractionStoppedError:
-            raise
-        except Exception:  # noqa: BLE001
-            LOGGER.error("Preview chunk extraction from video failed; project_id=%s", config.project_id, exc_info=True)
-            created_count = 0
-            extraction_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-            extracted_chunks = []
-        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-            overall_usage[key] += extraction_usage.get(key, 0)
-        if created_count <= 0:
-            run_plan = self.prepare_formal_extraction_run_plan(config.project_id)
             try:
-                created_count, extraction_usage, extracted_chunks, _ = self._extract_text_units(
-                    config.project_id,
+                _, extraction_usage, candidate_chunks = self._execute_preview_candidate(
+                    config,
                     run_plan,
+                    candidate,
                     preset=preset,
-                    extraction_stage=ExtractionArtifactStage.PREVIEW,
-                    chunk_limit=PREVIEW_MAX_CHUNKS,
-                    emit_progress=emit_progress,
-                    progress_base=30,
-                    progress_span=55,
-                )
-            except ExtractionStoppedError:
-                raise
-            except Exception:  # noqa: BLE001
-                LOGGER.error(
-                    "Preview chunk extraction from text failed; project_id=%s",
-                    config.project_id,
-                    exc_info=True,
-                )
-                created_count = 0
-                extraction_usage = {
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": 0,
-                }
-                extracted_chunks = []
-            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-                overall_usage[key] += extraction_usage.get(key, 0)
-        if created_count <= 0:
-            run_plan = self.prepare_formal_extraction_run_plan(config.project_id)
-            if self._collect_audio_transcript_units_from_run_plan(run_plan):
-                self.ensure_episode_transcripts_from_run_plan(
-                    config.project_id,
-                    run_plan,
                     emit_event=emit_event,
-                    include_video=False,
-                    include_audio=True,
-                )
-                try:
-                    created_count, extraction_usage, extracted_chunks, _ = (
-                        self._extract_text_units(
-                            config.project_id,
-                            run_plan,
-                            preset=preset,
-                            extraction_stage=ExtractionArtifactStage.PREVIEW,
-                            chunk_limit=PREVIEW_MAX_CHUNKS,
-                            emit_progress=emit_progress,
-                            progress_base=30,
-                            progress_span=55,
-                        )
-                    )
-                except ExtractionStoppedError:
-                    raise
-                except Exception:  # noqa: BLE001
-                    LOGGER.error(
-                        "Preview chunk extraction from transcript failed; project_id=%s",
-                        config.project_id,
-                        exc_info=True,
-                    )
-                    created_count = 0
-                    extraction_usage = {
-                        "prompt_tokens": 0,
-                        "completion_tokens": 0,
-                        "total_tokens": 0,
-                    }
-                    extracted_chunks = []
-                for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-                    overall_usage[key] += extraction_usage.get(key, 0)
-        if created_count <= 0:
-            run_plan = self.prepare_formal_extraction_run_plan(config.project_id)
-            try:
-                created_count, extraction_usage, extracted_chunks, _ = self._extract_image_units(
-                    config.project_id,
-                    run_plan,
-                    preset=preset,
-                    extraction_stage=ExtractionArtifactStage.PREVIEW,
-                    chunk_limit=PREVIEW_MAX_CHUNKS,
-                    emit_progress=emit_progress,
-                    progress_base=30,
-                    progress_span=55,
                 )
             except ExtractionStoppedError:
                 raise
             except Exception:  # noqa: BLE001
                 LOGGER.error(
-                    "Preview chunk extraction from image failed; project_id=%s",
+                    "Preview candidate extraction failed; project_id=%s unit_id=%s kind=%s",
                     config.project_id,
+                    candidate.unit.unit_id,
+                    candidate.kind.value,
                     exc_info=True,
                 )
-                created_count = 0
                 extraction_usage = {
                     "prompt_tokens": 0,
                     "completion_tokens": 0,
                     "total_tokens": 0,
                 }
-                extracted_chunks = []
-            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                candidate_chunks = []
+
+            for key in overall_usage:
                 overall_usage[key] += extraction_usage.get(key, 0)
+            remaining = PREVIEW_MAX_CHUNKS - len(extracted_chunks)
+            extracted_chunks.extend(candidate_chunks[:remaining])
+            if emit_token_usage is not None and any(overall_usage.values()):
+                emit_token_usage(overall_usage)
+            if not candidate_chunks:
+                self._emit_preview_candidate_no_result(emit_event, candidate)
+            if total_candidates:
+                emit_progress(20 + int(index * 65 / total_candidates))
+
+        created_count = len(extracted_chunks)
         if created_count > 0:
             self._merge_preview_episode_contents(config.project_id, extracted_chunks)
             preview_chunks = extracted_chunks[:PREVIEW_MAX_CHUNKS]
@@ -5246,14 +5400,15 @@ class Extractor(QObject):
                 "Preview extraction aborted because no readable chunk JSON was found; project_id=%s",
                 config.project_id,
             )
+            emit_progress(100)
+            if emit_token_usage is not None and not any(overall_usage.values()):
+                emit_token_usage({})
             return ""
-        if created_count <= 0:
-            emit_progress(30)
 
         final_outputs: list[str] = []
         total_chunks = max(1, len(preview_chunks))
-        progress_base = 90 if created_count > 0 else 30
-        progress_span = 5 if created_count > 0 else 65
+        progress_base = 90
+        progress_span = 5
         for index, chunk in enumerate(preview_chunks, start=1):
             preview_chunk_text = self._format_preview_chunk_input(chunk)
             if not preview_chunk_text:
