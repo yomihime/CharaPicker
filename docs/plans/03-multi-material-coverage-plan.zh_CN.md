@@ -762,6 +762,20 @@ conda run -n CharaPicker python scripts/validate_multi_material_regression.py
 - 角色卡编译能消费正式知识库。
 - 失败场景能解释原因。
 
+真实模型运行前可先执行只读预检：
+
+```powershell
+conda run -n CharaPicker python scripts/preflight_real_multi_material_acceptance.py `
+  --project-id <project_id> `
+  --require-media-type text `
+  --require-content-form novel `
+  --require-handler text
+```
+
+图片项目需要在已确认当前模型支持图片输入时增加 `--image-input-supported`。同一个项目可重复传入 `--require-media-type`、`--require-content-form` 和 `--require-handler`，用于声明本次验收必须覆盖的形态。预检只输出 episode、material、unit、媒体类型、内容形态、handler 和 unsupported reason 的计数；不打印素材路径，不写知识库，也不调用模型。
+
+预检通过不等于 M18 验收完成。真正执行预览、完整提取、知识库检查和角色卡编译前，必须由用户明确指定允许读取的本地项目、使用的模型预设，并确认可能产生的模型费用；不得自动扫描其它 `projects/` 项目或替用户选择私有素材。
+
 ### M19：文档、架构和收尾
 
 目标：把新事实沉淀到普通项目文档。
