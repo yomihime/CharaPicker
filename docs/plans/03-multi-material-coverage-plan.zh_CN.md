@@ -734,6 +734,14 @@ Prompt 必须强调：
 - M02-M16 阶段新增的离线验证已纳入统一回归入口或清晰记录运行方式。
 - 若后续确需新增固定测试素材，必须先同步 `docs/reference/asset-material-declaration.zh_CN.md`。
 
+统一离线回归入口：
+
+```powershell
+conda run -n CharaPicker python scripts/validate_multi_material_regression.py
+```
+
+该入口自动运行除自身外的全部 `scripts/validate_*.py`，随后执行 `tests/` 下的 unittest discovery；不调用真实模型，也不读取用户私有项目作为固定测试输入。Ruff、compileall 和 JSON 格式检查仍作为提交前独立静态检查运行。
+
 ### M18：真实模型和手动验收
 
 目标：用真实素材确认多内容形态链路可用。
