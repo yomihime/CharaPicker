@@ -28,7 +28,7 @@
 - `env_manager.py`：提供 conda 命令前缀、llama.cpp/whisper.cpp 二进制发现和可用性检测。
 - `ffmpeg_tool.py`：封装 ffmpeg 工具可用性校验与素材转码/分段执行。
 - `ffmpeg_detection.py`：封装 FFmpeg 设备/CPU 探测相关 helper，供 `ffmpeg_tool.py` 复用。
-- `cloud_model_presets.py`：保存和读取云端模型配置预设，维护云端服务类型到模型调用后端的映射，并提供视频输出 Token / 分钟到单次请求上限的换算工具。
+- `cloud_model_presets.py`：保存和读取云端模型配置预设，维护云端服务类型到模型调用后端的映射，提供视频输出 Token / 分钟到单次请求上限的换算工具，以及 GUI/core 共用的具体模型音频理解能力判断。
 - `cloud_models.py`：按云端服务类型路由并拉取模型列表，当前底层复用 OpenAI-compatible 模型列表接口。
 - `network_middleware.py`：统一应用内 HTTP(S) 请求、代理读取、连通性测试、URL/错误脱敏和 DashScope 临时代理环境。
 - `llamacpp_downloader.py`：下载并安装 llama.cpp 运行时到 `bin/`。

@@ -331,6 +331,7 @@ flowchart TD
 
 - 角色卡编译上下文分层已接入基础实现，但仍需继续用真实素材验收和调优 direct、mention、causal 与 season_context 的分类边界。
 - 普通文本、字幕、音频 transcript、静态图片、漫画页组和原生视听补充线索已进入统一扫描、预览/正式分派与知识库路径；角色卡证据层已能保留跨媒体来源 metadata 和 extraction run。更复杂的跨内容形态关联、证据可信度权重和对应 UI 仍需继续完善。
-- 多内容形态主线已有 `scripts/validate_multi_material_regression.py` 统一离线回归入口，会运行全部轻量验证脚本和 `tests/` 单测发现。真实视频项目已完成预览、正式提取、拒绝降级和角色卡重编译验收；小说/设定文本、字幕/台本、独立音频、图片/插画、漫画和视频 + 字幕仍需在获得授权的真实素材上补齐供应商验收。
+- 多内容形态主线已有 `scripts/validate_multi_material_regression.py` 统一离线回归入口，会运行全部轻量验证脚本和 `tests/` 单测发现。真实验收已覆盖视频、小说文本、字幕、独立音频 transcript、独立图片、漫画目录、视频 + 字幕和非视频角色卡编译。EPUB 与漫画 ZIP/RAR/7z 容器当前仍不直接导入或解包；验收使用安全抽取后的 TXT/JPG，不代表容器支持已经落地。
+- 原生音频/视频能力必须同时满足 provider、API schema 和具体模型。阿里云普通文本/视觉模型不会因为 provider 声明 `audio_understanding` 就自动获得原生音频能力；当前模型名需包含 `audio` 或 `omni` 才会进入 native audio handler，否则保留 transcript 路径并发出 `model_audio_understanding_not_supported` warning。
 - 模型 DEBUG 日志需要继续脱敏和降噪，避免完整请求/响应正文或临时素材 URL 展开。
 - 供应商拒绝视频片段时可以跳过并继续，但被跳过片段的信息不会进入知识库，需要用户复核缺失 warnings。

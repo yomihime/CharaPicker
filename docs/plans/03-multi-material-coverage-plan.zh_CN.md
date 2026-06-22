@@ -787,7 +787,20 @@ conda run -n CharaPicker python scripts/preflight_real_multi_material_acceptance
 - 选择一张 stale 角色卡完成真实重编译，结果恢复为 `compiled`，证据数由 14 增至 85，并明确记录 `knowledge_base_ref=seasons` 和当前模型预设。验收同时发现角色卡未保存 extraction run 身份，已补充证据元数据与 `source_context.source_runs` 写入，并由真实知识库 dry-run 和单元测试验证。
 - 供应商拒绝原因可解释，且未阻断其他单元、episode/season 聚合和角色卡消费；视频子集验收通过。
 
-本轮获准项目仅包含视频素材，因此小说/设定文本、字幕/台本、独立音频转写、图片/插画、漫画目录和视频 + 字幕/台本仍缺真实素材验收。M18 当前状态为“视频子集通过，多内容形态矩阵待补”；在这些类型获得明确授权的真实项目之前，不得宣称 M18 或路线 03 已完成全部真实模型验收。
+本轮获准项目仅包含视频素材，因此当时小说/设定文本、字幕/台本、独立音频转写、图片/插画、漫画目录和视频 + 字幕/台本仍缺真实素材验收。该结论已由 2026-06-23 的补充验收更新，最终状态见下节。
+
+#### M18 补充执行记录（2026-06-23）
+
+用户在仓库根目录明确提供一份 EPUB 小说和一卷漫画 ZIP，并允许用于真实测试；字幕由已授权视频片段通过本地 whisper.cpp 生成。原始文件、抽样文件、测试项目、模型正文和知识库产物均未提交。
+
+- `.epub` 当前返回 `unknown_source_suffix`，漫画 `.zip` 当前返回 `comic_archive_not_supported`；二者容器不在路线 03 的直接导入范围。本轮使用标准库安全读取容器，从小说正文抽取 36,000 字符的 UTF-8 TXT、从漫画抽取 6 页 JPG，并额外抽取一张 EPUB 插图。验收结论只覆盖支持格式的内容链路，不把容器预处理冒充为应用现有能力。
+- 本地 whisper.cpp 从一个视频片段生成 49 个 transcript segment 和 49 段 SRT；独立音频项目保留 `episode_transcript.json`，字幕项目使用生成的 SRT，视频 + 字幕项目使用同名视频/SRT 建立 episode 关联。
+- 小说、独立图片、漫画目录、独立字幕、独立音频和视频 + 字幕六个项目的只读预检、真实预览和正式提取均完成。正式结果分别为 4 个 text chunk、1 个 image chunk、6 个 manga image chunk、1 个 timed text chunk、1 个 transcript text chunk，以及 2 个 video + 1 个 text chunk；所有 episode/season 聚合均属于当前 extraction run。
+- 来源核查确认：小说保留 text range，普通图片与漫画保留 page range，字幕和 transcript 保留 time/text range，视频 + 字幕 episode 的 `media_types` 为 `video` + `text`，并保留 timed text association。预览实际覆盖 text、image、audio transcript、timed text 和 video 候选。
+- 小说正式知识库完成一张真实角色卡编译，状态为 `compiled`，包含 88 条证据、4 个 text chunk、`text/novel` 来源画像，并引用当前 `source_context.source_runs`。
+- 首次独立音频正式提取发现 `Qwen3.6-plus` 不接受原生 audio 输入，而核心分派只检查 provider 能力。已把模型页已有的阿里云 `audio` / `omni` 模型名规则下沉为共享能力判断，正式分派与 `--preset-name` 预检复用同一规则。修复后重跑得到 1 个 transcript text 成功、0 个 failed chunk，并以 `model_audio_understanding_not_supported` warning 跳过 native audio，没有再次发送无效请求。
+
+M18 最终状态为“通过”：路线 03 约定的支持格式与六类内容形态已经完成真实预览、正式提取、知识库来源检查和非视频角色卡消费。EPUB 与漫画压缩包直接导入、当前模型不支持的原生音频理解，以及更大规模内容质量评估属于明确的后续边界，不影响本里程碑完成。
 
 ### M19：文档、架构和收尾
 
@@ -808,10 +821,10 @@ conda run -n CharaPicker python scripts/preflight_real_multi_material_acceptance
 #### M19 执行记录（2026-06-22）
 
 - 已更新根目录、`core/`、`projects/` 和 `scripts/` 的 `ARCHITECTURE.md`，写明四媒体类型分派、通用扫描/handler、失败预检、统一回归，以及角色卡 `extraction_run_id` / `source_context.source_runs` 追踪。
-- 已更新 `docs/reference/extraction-workflow.zh_CN.md`，把漫画页组与统一调度从“待实现”改为当前基础实现，并明确真实视频子集已通过、其余多内容形态仍待授权素材验收。
-- 已更新 `docs/plans/TODO.zh_CN.md`：路线 01、路线 02 和路线 03 的离线实现进入完成区，P0 只保留非视频真实模型验收矩阵。
+- 已更新 `docs/reference/extraction-workflow.zh_CN.md`，把漫画页组与统一调度从“待实现”改为当前基础实现；2026-06-23 补充更新了完整真实验收矩阵、模型级原生音频能力和容器支持边界。
+- 已更新 `docs/plans/TODO.zh_CN.md`：路线 01、路线 02、路线 03 的实现与真实验收进入完成区，P0 改为跟踪 EPUB/漫画压缩包的受控导入预处理。
 - 已运行统一多素材回归、全仓 Ruff、compileall 和资源 JSON 解析，全部通过。统一回归包含 15 个验证脚本和 15 个 unittest；预期失败日志来自转写运行时缺失、模拟模型拒绝和解析降级用例。
-- M19 文档与架构收尾完成；M18 仍维持“视频子集通过，多内容形态矩阵待补”。
+- M19 文档与架构收尾完成；M18 已在 2026-06-23 补齐多内容形态真实验收并通过。
 
 本轮没有修改 `AGENTS.md`。当前多内容形态实现、真实验收边界和统一回归入口已属于长期高价值事实，后续可在用户明确允许后同步到 `AGENTS.md`；在此之前，以本计划、普通架构文档和提取工作流说明作为路线 03 的当前依据。
 
