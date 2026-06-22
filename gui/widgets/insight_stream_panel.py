@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 from qfluentwidgets import BodyLabel, CaptionLabel, CardWidget, ScrollArea, StrongBodyLabel, isDarkTheme
@@ -24,6 +26,59 @@ STATUS_TEXT = {
     InsightStatus.WARNING.value: "insight.status.warning",
 }
 AUTO_SCROLL_BOTTOM_THRESHOLD = 24
+MEDIA_TYPE_LABEL_KEYS = {
+    "video": "insight.mediaType.video",
+    "image": "insight.mediaType.image",
+    "audio": "insight.mediaType.audio",
+    "text": "insight.mediaType.text",
+}
+CONTENT_FORM_LABEL_KEYS = {
+    "unknown": "insight.contentForm.unknown",
+    "anime": "insight.contentForm.anime",
+    "manga": "insight.contentForm.manga",
+    "novel": "insight.contentForm.novel",
+    "script": "insight.contentForm.script",
+    "setting_book": "insight.contentForm.settingBook",
+    "audio_drama": "insight.contentForm.audioDrama",
+    "video_program": "insight.contentForm.videoProgram",
+    "image_set": "insight.contentForm.imageSet",
+    "mixed": "insight.contentForm.mixed",
+}
+
+
+def _localized_meta_value(value: object, mapping: dict[str, str]) -> str:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return ""
+    label_key = mapping.get(normalized)
+    return t(label_key) if label_key else normalized
+
+
+def _insight_meta_text(event: dict) -> str:
+    meta = event.get("meta")
+    if not isinstance(meta, dict):
+        return ""
+    parts: list[str] = []
+    media_type = _localized_meta_value(meta.get("media_type"), MEDIA_TYPE_LABEL_KEYS)
+    if media_type:
+        parts.append(t("insight.meta.mediaType", value=media_type))
+    content_form = _localized_meta_value(meta.get("content_form"), CONTENT_FORM_LABEL_KEYS)
+    if content_form and content_form != t("insight.contentForm.unknown"):
+        parts.append(t("insight.meta.contentForm", value=content_form))
+    unit_id = str(meta.get("unit_id") or "").strip()
+    if unit_id:
+        parts.append(t("insight.meta.unit", value=unit_id))
+    material_name = _material_display_name(meta)
+    if material_name:
+        parts.append(t("insight.meta.material", value=material_name))
+    return t("insight.meta.separator").join(parts)
+
+
+def _material_display_name(meta: dict) -> str:
+    value = str(meta.get("relative_path") or meta.get("source_path") or "").strip()
+    if not value:
+        return ""
+    return Path(value).name or value
 
 class TimelineMarker(QLabel):
     def __init__(self, color: str, parent: QWidget | None = None) -> None:
@@ -84,8 +139,15 @@ class InsightCard(CardWidget):
         )
         self.description_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
+        self.meta_label = CaptionLabel(_insight_meta_text(event), self)
+        self.meta_label.setWordWrap(True)
+        self.meta_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.meta_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.meta_label.setVisible(bool(self.meta_label.text()))
+
         content.addLayout(header)
         content.addWidget(self.description_label)
+        content.addWidget(self.meta_label)
         layout.addLayout(content, 1)
         self._line = line
         self._status = status
@@ -99,6 +161,9 @@ class InsightCard(CardWidget):
         self._status = status
         self.title_label.setText(event.get("title", t("insight.untitled")))
         self.description_label.setText(event.get("description", ""))
+        meta_text = _insight_meta_text(event)
+        self.meta_label.setText(meta_text)
+        self.meta_label.setVisible(bool(meta_text))
         self.status_label.setText(t(STATUS_TEXT.get(status, "insight.status.queued")))
         self.status_label.setStyleSheet(f"color: {color};")
         self._line.setStyleSheet(f"background: {color}; border: none;")
