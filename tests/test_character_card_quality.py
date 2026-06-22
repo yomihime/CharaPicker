@@ -135,6 +135,7 @@ class CharacterCardQualityTests(unittest.TestCase):
                 "season_001",
                 "episode_001",
                 {
+                    "extraction_run_id": "run-multi-media",
                     "source_kind": "mixed",
                     "media_types": ["video", "text"],
                     "source_counts": {
@@ -194,6 +195,7 @@ class CharacterCardQualityTests(unittest.TestCase):
         direct = layers["direct_evidence_episodes"]
         self.assertEqual(len(direct), 1)
         source_metadata = direct[0]["source_metadata"]
+        self.assertEqual(source_metadata["extraction_run_id"], "run-multi-media")
         self.assertEqual(source_metadata["source_kind"], "mixed")
         self.assertEqual(source_metadata["media_types"], ["video", "text"])
         self.assertEqual(source_metadata["content_forms"], ["anime", "script"])
@@ -259,6 +261,39 @@ class CharacterCardQualityTests(unittest.TestCase):
         self.assertEqual(profile["source_kinds"], {"mixed": 1})
         self.assertEqual(profile["entries_with_source_trace"], 1)
         self.assertEqual(profile["entries_with_evidence_refs"], 1)
+
+    def test_compiled_state_records_source_run_ids(self) -> None:
+        card = CharacterCard(project_id="project-test", card_id="card-test")
+        card.identity.character_name = "Lala"
+        payloads = [
+            (
+                "season_001",
+                "episode_001",
+                {
+                    "extraction_run_id": "run-current",
+                    "facts": ["Lala protects Rito."],
+                    "chunk_results": [{"chunk_id": "chunk_0001"}],
+                },
+            ),
+            (
+                "season_001",
+                "episode_002",
+                {
+                    "extraction_run_id": "run-current",
+                    "facts": ["Lala explains her plan."],
+                    "chunk_results": [{"chunk_id": "chunk_0002"}],
+                },
+            ),
+        ]
+
+        compiler._apply_compiled_state(
+            card,
+            {"character": "Lala", "summary": "Princess from Deviluke."},
+            [{"season_id": "season_001", "episode_id": "episode_001"}],
+            payloads,
+        )
+
+        self.assertEqual(card.source_context.source_runs, ["run-current"])
 
     def _build_layers(
         self,

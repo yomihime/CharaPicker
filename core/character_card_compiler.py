@@ -806,6 +806,9 @@ def _payload_source_metadata(payload: dict[str, Any]) -> dict[str, Any]:
         "source_counts": _compact_source_counts(payload.get("source_counts")),
         "evidence_refs": _payload_refs(payload),
     }
+    extraction_run_id = str(payload.get("extraction_run_id", "")).strip()
+    if extraction_run_id:
+        metadata["extraction_run_id"] = extraction_run_id
     if source_trace:
         metadata["source_trace"] = _compact_source_trace(source_trace)
     return metadata
@@ -1279,9 +1282,13 @@ def _apply_compiled_state(
     included_seasons: list[str] = []
     included_episodes: list[str] = []
     included_chunks: list[str] = []
+    source_runs: list[str] = []
     for season_id, episode_id, payload in episode_payloads:
         included_seasons.append(season_id)
         included_episodes.append(f"{season_id}/{episode_id}")
+        extraction_run_id = str(payload.get("extraction_run_id", "")).strip()
+        if extraction_run_id:
+            source_runs.append(extraction_run_id)
         refs.extend(str(item) for item in payload.get("evidence_refs", []) if str(item).strip())
         behavior.extend(_related_items(payload.get("behavior_traits", []), match_terms))
         speech.extend(_related_items(payload.get("dialogue_style", []), match_terms))
@@ -1312,6 +1319,7 @@ def _apply_compiled_state(
     card.source_context.included_seasons = _unique(included_seasons)
     card.source_context.included_episodes = _unique(included_episodes)
     card.source_context.included_chunks = _unique(included_chunks)
+    card.source_context.source_runs = _unique(source_runs)
     card.revision += 1
 
 
