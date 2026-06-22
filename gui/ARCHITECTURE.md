@@ -26,7 +26,7 @@
 - `pages/settings_page.py`：语言、主题和日志等级等应用设置页。
 - `pages/about_page.py`：项目信息和注意事项页面。
 - `pages/insights_page.py`：独立洞察页组件，当前未接入主窗口导航。
-- `widgets/insight_stream_panel.py`：洞察流组件，使用 Card + Timeline 展示结构化事件。
+- `widgets/insight_stream_panel.py`：洞察流组件，使用 Card + Timeline 展示结构化事件，并把事件 `meta` 中的 `media_type`、`content_form`、unit 和素材名转换为本地化摘要；不自行判断提取能力或业务状态。
 - `widgets/dialog_middleware.py`：应用自有 Fluent 弹窗外壳。
 - `widgets/streaming_text_session.py`：把流式文本 delta 安全追加到 `QTextCursor`。
 - `widgets/character_card_gallery.py`：角色卡海报墙/列表组件，只消费轻量 summary，不读取文件。
@@ -53,7 +53,7 @@
 - 新增页面时放入 `gui/pages/`，复用控件放入 `gui/widgets/`。
 - 用户可见文案必须新增到 `i18n/*.json`。
 - 新增颜色先维护 `res/colors.py`，再在界面中引用。
-- `InsightStreamPanel` 只展示关键洞察，不展示普通调试日志。
+- `InsightStreamPanel` 只展示关键洞察和可解释 metadata，不展示普通调试日志；媒体类型、内容形态等可见标签必须走 i18n。
 - Qt Signal 传输的数据尽量保持为可序列化 `dict`。
 - 角色卡页面不直接拼接 `knowledge_base/character_cards/...` 路径，不直接做导出字段映射，也不自行判断 direct/mention/causal 证据；这些规则属于 core。
 - 长耗时素材处理应放在线程 worker 中执行，页面只负责进度弹窗、取消信号和完成反馈。
