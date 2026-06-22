@@ -1750,6 +1750,7 @@ class Extractor(QObject):
         return NativeMediaInsightHandler(
             NativeMediaInsightHandlerConfig(
                 provider=preset.provider,
+                model_name=preset.model_name,
                 video_fps=preset.video_fps,
                 max_output_tokens=min(
                     max(TEXT_UNIT_MAX_OUTPUT_TOKENS, preset.max_output_tokens),
@@ -5472,6 +5473,7 @@ class Extractor(QObject):
         dispatch_plan = build_formal_dispatch_plan(
             run_plan,
             image_input_supported=provider_supports_capability(preset.provider, "image"),
+            native_media_handler=self._native_media_insight_handler(preset),
         )
         self._emit_formal_unsupported_units(emit_event, dispatch_plan.unsupported_units)
         chunk_inputs = (
@@ -5525,6 +5527,7 @@ class Extractor(QObject):
             dispatch_plan = build_formal_dispatch_plan(
                 run_plan,
                 image_input_supported=provider_supports_capability(preset.provider, "image"),
+                native_media_handler=self._native_media_insight_handler(preset),
             )
             text_unit_count = dispatch_plan.handler_unit_count(FormalDispatchKind.TEXT)
             image_unit_count = dispatch_plan.handler_unit_count(FormalDispatchKind.IMAGE)

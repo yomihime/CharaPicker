@@ -459,6 +459,14 @@ def provider_supports_capability(provider: str, capability: CloudCapability) -> 
     return cloud_model_provider(provider).has_capability(capability)
 
 
+def model_supports_audio_understanding(provider: str, model_name: str) -> bool:
+    provider_id = normalize_cloud_provider(provider)
+    normalized_model = model_name.strip().lower().replace("_", "-")
+    if provider_id == CLOUD_PROVIDER_ALIYUN_BAILIAN:
+        return "omni" in normalized_model or "audio" in normalized_model
+    return True
+
+
 def provider_requires_aliyun_extra_body(provider: str) -> bool:
     return cloud_model_provider(provider).requires_aliyun_extra_body
 

@@ -17,6 +17,7 @@ from utils.ai_model_middleware import ModelBackend, ModelCallRequest, ModelMessa
 from utils.cloud_model_presets import (
     CloudCapability,
     cloud_model_provider,
+    model_supports_audio_understanding,
     provider_requires_aliyun_extra_body,
     provider_supports_capability,
 )
@@ -35,6 +36,7 @@ ModelJsonCall = Callable[[ModelCallRequest], FormalExtractionJsonResult]
 @dataclass(frozen=True, slots=True)
 class NativeMediaInsightHandlerConfig:
     provider: str
+    model_name: str = ""
     video_fps: float = 1.0
     max_output_tokens: int = DEFAULT_NATIVE_MEDIA_OUTPUT_TOKENS
 
@@ -85,6 +87,15 @@ class NativeMediaInsightHandler:
         if unit.media_type == MediaType.AUDIO:
             backend = provider.backend_for("audio")
             if not provider_supports_capability(self.config.provider, "audio_understanding"):
+                return NativeMediaInsightSupport(
+                    False,
+                    reason=NATIVE_AUDIO_UNSUPPORTED_REASON,
+                    backend=backend,
+                )
+            if self.config.model_name and not model_supports_audio_understanding(
+                self.config.provider,
+                self.config.model_name,
+            ):
                 return NativeMediaInsightSupport(
                     False,
                     reason=NATIVE_AUDIO_UNSUPPORTED_REASON,

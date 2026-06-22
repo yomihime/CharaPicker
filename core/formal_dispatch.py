@@ -58,6 +58,7 @@ def build_formal_dispatch_plan(
     run_plan: FormalExtractionRunPlan,
     *,
     image_input_supported: bool,
+    native_media_handler: NativeMediaInsightHandler | None = None,
 ) -> FormalDispatchPlan:
     text_handler = TextUnitHandler()
     image_handler = ImageUnitHandler()
@@ -74,8 +75,13 @@ def build_formal_dispatch_plan(
         for unit in episode.units:
             if unit.media_type == MediaType.VIDEO:
                 grouped_units[FormalDispatchKind.VIDEO].append(unit.unit_id)
-                if NativeMediaInsightHandler.can_consider(unit):
-                    grouped_units[FormalDispatchKind.NATIVE_MEDIA].append(unit.unit_id)
+                _append_native_media_dispatch(
+                    episode.season_id,
+                    unit,
+                    grouped_units[FormalDispatchKind.NATIVE_MEDIA],
+                    unsupported_units,
+                    native_media_handler,
+                )
                 continue
 
             if unit.media_type == MediaType.TEXT:
@@ -104,7 +110,13 @@ def build_formal_dispatch_plan(
                 if unit.handler_options.get("transcript_candidate") is True:
                     grouped_units[FormalDispatchKind.AUDIO_TRANSCRIPT].append(unit.unit_id)
                 if NativeMediaInsightHandler.can_consider(unit):
-                    grouped_units[FormalDispatchKind.NATIVE_MEDIA].append(unit.unit_id)
+                    _append_native_media_dispatch(
+                        episode.season_id,
+                        unit,
+                        grouped_units[FormalDispatchKind.NATIVE_MEDIA],
+                        unsupported_units,
+                        native_media_handler,
+                    )
                     continue
                 if unit.handler_options.get("transcript_candidate") is not True:
                     unsupported_units.append(_unsupported_unit(episode.season_id, unit))
@@ -121,6 +133,22 @@ def build_formal_dispatch_plan(
         handlers=handlers,
         unsupported_units=tuple(sorted(unsupported_units, key=_unsupported_sort_key)),
     )
+
+
+def _append_native_media_dispatch(
+    season_id: str,
+    unit: ExtractionUnit,
+    unit_refs: list[str],
+    unsupported_units: list[FormalUnsupportedUnit],
+    handler: NativeMediaInsightHandler | None,
+) -> None:
+    if not NativeMediaInsightHandler.can_consider(unit):
+        return
+    support = handler.support_status(unit) if handler is not None else None
+    if support is None or support.supported:
+        unit_refs.append(unit.unit_id)
+        return
+    unsupported_units.append(FormalUnsupportedUnit(season_id, unit, support.reason))
 
 
 def _unsupported_unit(season_id: str, unit: ExtractionUnit) -> FormalUnsupportedUnit:

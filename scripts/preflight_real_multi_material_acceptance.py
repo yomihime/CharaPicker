@@ -14,6 +14,14 @@ if str(ROOT) not in sys.path:
 from core import source_scanner  # noqa: E402
 from core.extraction_plan import FormalExtractionRunPlan  # noqa: E402
 from core.formal_dispatch import build_formal_dispatch_plan  # noqa: E402
+from core.native_media_insight_handler import (  # noqa: E402
+    NativeMediaInsightHandler,
+    NativeMediaInsightHandlerConfig,
+)
+from utils.cloud_model_presets import (  # noqa: E402
+    load_cloud_model_presets,
+    provider_supports_capability,
+)
 from utils.paths import project_paths  # noqa: E402
 
 
@@ -25,6 +33,7 @@ def _parser() -> argparse.ArgumentParser:
         )
     )
     parser.add_argument('--project-id', required=True)
+    parser.add_argument('--preset-name', default='')
     parser.add_argument('--image-input-supported', action='store_true')
     parser.add_argument('--require-media-type', action='append', default=[])
     parser.add_argument('--require-content-form', action='append', default=[])
@@ -54,9 +63,32 @@ def main() -> None:
         raise SystemExit('no extraction units were discovered in materials')
 
     run_plan = FormalExtractionRunPlan(project_id=args.project_id, episodes=episodes)
+    preset = None
+    if args.preset_name:
+        preset = next(
+            (item for item in load_cloud_model_presets() if item.name == args.preset_name),
+            None,
+        )
+        if preset is None:
+            raise SystemExit(f'cloud preset does not exist: {args.preset_name}')
+    image_input_supported = args.image_input_supported or bool(
+        preset is not None and provider_supports_capability(preset.provider, 'image')
+    )
+    native_media_handler = (
+        NativeMediaInsightHandler(
+            NativeMediaInsightHandlerConfig(
+                provider=preset.provider,
+                model_name=preset.model_name,
+                video_fps=preset.video_fps,
+            )
+        )
+        if preset is not None
+        else None
+    )
     dispatch = build_formal_dispatch_plan(
         run_plan,
-        image_input_supported=args.image_input_supported,
+        image_input_supported=image_input_supported,
+        native_media_handler=native_media_handler,
     )
     media_types = [unit.media_type.value for unit in units]
     content_forms = [unit.content_form.value for unit in units]
@@ -84,7 +116,9 @@ def main() -> None:
             handler.kind.value: handler.unit_count for handler in dispatch.handlers
         },
         'unsupported_reasons': _counter(unsupported_reasons),
-        'image_input_supported_assumption': args.image_input_supported,
+        'preset_name': preset.name if preset is not None else '',
+        'model_specific_capability_check': preset is not None,
+        'image_input_supported_assumption': image_input_supported,
         'missing_requirements': missing_requirements,
         'ready': not any(missing_requirements.values()),
     }

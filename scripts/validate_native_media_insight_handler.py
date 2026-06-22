@@ -17,6 +17,10 @@ from core import source_scanner  # noqa: E402
 from core.extraction_ai import FormalExtractionJsonResult  # noqa: E402
 from core.extraction_plan import MediaType  # noqa: E402
 from core.extractor import Extractor  # noqa: E402
+from core.formal_dispatch import (  # noqa: E402
+    FormalDispatchKind,
+    build_formal_dispatch_plan,
+)
 from core.native_media_insight_handler import (  # noqa: E402
     NATIVE_AUDIO_UNSUPPORTED_REASON,
     NATIVE_VIDEO_UNSUPPORTED_REASON,
@@ -193,6 +197,46 @@ def _assert_supported_audio_and_video_requests() -> None:
         assert video_result.chunks[0].source_kind == "video"
 
 
+def _assert_model_specific_audio_support() -> None:
+    project_id = "validation-native-media-model-capability"
+    with _isolated_project(project_id):
+        _paths, audio_unit, video_unit = _audio_video_units(project_id)
+        text_video_handler = NativeMediaInsightHandler(
+            NativeMediaInsightHandlerConfig(
+                provider="aliyunBailian",
+                model_name="qwen3.6-plus",
+            )
+        )
+        assert text_video_handler.support_status(audio_unit).supported is False
+        assert (
+            text_video_handler.support_status(audio_unit).reason
+            == NATIVE_AUDIO_UNSUPPORTED_REASON
+        )
+        assert text_video_handler.support_status(video_unit).supported is True
+
+        omni_handler = NativeMediaInsightHandler(
+            NativeMediaInsightHandlerConfig(
+                provider="aliyunBailian",
+                model_name="qwen2.5-omni-7b",
+            )
+        )
+        assert omni_handler.support_status(audio_unit).supported is True
+
+        run_plan = Extractor().prepare_formal_extraction_run_plan(project_id)
+        dispatch = build_formal_dispatch_plan(
+            run_plan,
+            image_input_supported=True,
+            native_media_handler=text_video_handler,
+        )
+        assert dispatch.handler_unit_count(FormalDispatchKind.AUDIO_TRANSCRIPT) == 1
+        assert dispatch.handler_unit_count(FormalDispatchKind.NATIVE_MEDIA) == 1
+        assert any(
+            item.unit.unit_id == audio_unit.unit_id
+            and item.reason == NATIVE_AUDIO_UNSUPPORTED_REASON
+            for item in dispatch.unsupported_units
+        )
+
+
 def _assert_unsupported_provider_status() -> None:
     project_id = "validation-native-media-unsupported"
     with _isolated_project(project_id) as paths:
@@ -283,6 +327,7 @@ def _assert_request_failure_does_not_block_video_result() -> None:
 
 def main() -> None:
     _assert_supported_audio_and_video_requests()
+    _assert_model_specific_audio_support()
     _assert_unsupported_provider_status()
     _assert_request_failure_does_not_block_video_result()
     print("native media insight handler validation passed")
