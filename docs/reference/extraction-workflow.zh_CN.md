@@ -288,6 +288,7 @@ flowchart TD
 
 在混合媒体项目中，角色卡证据不能只保留“命中了哪一集”。每条 direct、mention、causal 或 season_context 证据 entry 都会带一份紧凑 `source_metadata`，用于描述该证据来自什么素材和什么中间成果：
 
+- `extraction_run_id`：该 episode 正式产物所属的提取 run；角色卡还会把实际消费的 run 去重写入 `source_context.source_runs`。
 - `source_kind`：旧兼容摘要字段，混合来源会记录为 `mixed`。
 - `media_types`：正式顶层媒体类型，只允许 `video`、`image`、`audio`、`text`。
 - `content_forms`：内容形态或语义标签，例如 `anime`、`script`、`subtitle`、`manga`。
@@ -329,7 +330,7 @@ flowchart TD
 当前仍需后续完善：
 
 - 角色卡编译上下文分层已接入基础实现，但仍需继续用真实素材验收和调优 direct、mention、causal 与 season_context 的分类边界。
-- 普通文本、字幕、音频 transcript、静态图片和原生视听补充线索已进入基础预览/正式知识库路径；角色卡证据层已能保留跨媒体来源 metadata，但漫画页组语义、混合媒体统一调度、证据可信度权重和 UI 展示仍需继续完善。
-- 多内容形态主线已有 `scripts/validate_multi_material_regression.py` 统一离线回归入口，会运行全部轻量验证脚本和 `tests/` 单测发现；真实模型效果、桌面 UI 交互和供应商差异仍需手动试跑与日志复核。
+- 普通文本、字幕、音频 transcript、静态图片、漫画页组和原生视听补充线索已进入统一扫描、预览/正式分派与知识库路径；角色卡证据层已能保留跨媒体来源 metadata 和 extraction run。更复杂的跨内容形态关联、证据可信度权重和对应 UI 仍需继续完善。
+- 多内容形态主线已有 `scripts/validate_multi_material_regression.py` 统一离线回归入口，会运行全部轻量验证脚本和 `tests/` 单测发现。真实视频项目已完成预览、正式提取、拒绝降级和角色卡重编译验收；小说/设定文本、字幕/台本、独立音频、图片/插画、漫画和视频 + 字幕仍需在获得授权的真实素材上补齐供应商验收。
 - 模型 DEBUG 日志需要继续脱敏和降噪，避免完整请求/响应正文或临时素材 URL 展开。
 - 供应商拒绝视频片段时可以跳过并继续，但被跳过片段的信息不会进入知识库，需要用户复核缺失 warnings。
