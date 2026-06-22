@@ -805,6 +805,16 @@ conda run -n CharaPicker python scripts/preflight_real_multi_material_acceptance
 - 后续 agent 不依赖 `.codex/` 即可理解多内容形态链路和四媒体类型边界。
 - 03 偏差、未完成项和后续扩展清楚。
 
+#### M19 执行记录（2026-06-22）
+
+- 已更新根目录、`core/`、`projects/` 和 `scripts/` 的 `ARCHITECTURE.md`，写明四媒体类型分派、通用扫描/handler、失败预检、统一回归，以及角色卡 `extraction_run_id` / `source_context.source_runs` 追踪。
+- 已更新 `docs/reference/extraction-workflow.zh_CN.md`，把漫画页组与统一调度从“待实现”改为当前基础实现，并明确真实视频子集已通过、其余多内容形态仍待授权素材验收。
+- 已更新 `docs/plans/TODO.zh_CN.md`：路线 01、路线 02 和路线 03 的离线实现进入完成区，P0 只保留非视频真实模型验收矩阵。
+- 已运行统一多素材回归、全仓 Ruff、compileall 和资源 JSON 解析，全部通过。统一回归包含 15 个验证脚本和 15 个 unittest；预期失败日志来自转写运行时缺失、模拟模型拒绝和解析降级用例。
+- M19 文档与架构收尾完成；M18 仍维持“视频子集通过，多内容形态矩阵待补”。
+
+本轮没有修改 `AGENTS.md`。当前多内容形态实现、真实验收边界和统一回归入口已属于长期高价值事实，后续可在用户明确允许后同步到 `AGENTS.md`；在此之前，以本计划、普通架构文档和提取工作流说明作为路线 03 的当前依据。
+
 ## 12. 推荐提交分组
 
 - `docs: finalize multi-material coverage plan`
