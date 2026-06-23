@@ -1,5 +1,7 @@
 # 第一阶段：提取质量与可观测性执行计划（zh_CN）
 
+归档状态：路线 01 已完成并移出当前执行队列，本文仅保留历史计划、验收记录和后续路线闸门背景。当前剩余任务以 `docs/plans/TODO.zh_CN.md` 为准；当前实现事实以代码、`ARCHITECTURE.md` 和 `docs/reference/extraction-workflow.zh_CN.md` 为准。
+
 > 本文档是第一阶段执行计划，不代表当前实现状态。
 > 执行前仍需按本文复核当前代码、脚本、日志规范和真实试跑结果；若代码事实与本文冲突，以当前代码事实为准并先更新本计划。
 
@@ -606,7 +608,7 @@ docs: finalize extraction quality observability plan
 
 提交前检查：
 
-- 链接指向 `01-extraction-quality-observability-plan.zh_CN.md`。
+- 链接指向 `01-extraction-quality-observability-plan.completed.zh_CN.md`。
 - 文档没有把未实现内容写成已实现事实。
 
 ### G02：回归脚本与离线验证
@@ -797,7 +799,7 @@ docs: record extraction observability completion
 - 删除临时测试项目、调试开关和一次性日志。
 - 移除重复 helper 或保留说明不足的桥接代码。
 - 在 `docs/plans/TODO.zh_CN.md` 整理阶段完成记录并更新 P1 状态。
-- 准备进入 `02-multi-material-refactor-plan.zh_CN.md`。
+- 准备进入 `02-multi-material-refactor-plan.completed.zh_CN.md` 的历史路线。
 
 若收尾时发现行为 bug，应回到对应里程碑修复，不把 bug 修复塞进收尾项。
 
