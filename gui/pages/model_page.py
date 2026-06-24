@@ -63,6 +63,7 @@ from utils.cloud_model_presets import (
     coerce_cloud_max_output_tokens,
     delete_cloud_model_preset,
     load_cloud_model_presets,
+    model_supports_audio_understanding,
     normalize_cloud_api_schema,
     normalize_cloud_endpoint_id,
     normalize_cloud_provider,
@@ -178,14 +179,6 @@ def _video_mode_support_status(provider: str, video_input_mode: str) -> tuple[st
     return ("api_unsupported", t("model.cloud.test.unsupported.video"))
 
 
-def _model_supports_audio_understanding(provider: str, model_name: str) -> bool:
-    provider_id = normalize_cloud_provider(provider)
-    normalized_model = model_name.strip().lower().replace("_", "-")
-    if provider_id == CLOUD_PROVIDER_ALIYUN_BAILIAN:
-        return "omni" in normalized_model or "audio" in normalized_model
-    return True
-
-
 def _audio_backend_for_request(provider: str, api_schema: str) -> str:
     provider_id = normalize_cloud_provider(provider)
     normalized_schema = normalize_cloud_api_schema(api_schema, provider_id)
@@ -201,7 +194,7 @@ def _audio_input_support_status(
 ) -> tuple[str, str] | None:
     if not provider_supports_capability(provider, "audio_understanding"):
         return ("model_unsupported", t("model.cloud.test.unsupported.audio"))
-    if model_name and not _model_supports_audio_understanding(provider, model_name):
+    if model_name and not model_supports_audio_understanding(provider, model_name):
         return ("model_unsupported", t("model.cloud.test.unsupported.audioModel"))
     normalized_schema = normalize_cloud_api_schema(api_schema, provider)
     backend = _audio_backend_for_request(provider, normalized_schema)

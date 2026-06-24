@@ -48,11 +48,11 @@
 5. `utils/material_processing_middleware.py` 调度素材导入、工具校验和 ffmpeg 处理；`utils/source_importer.py` 维护 `raw/` 与 `materials/`。
 6. `utils/state_manager.py` 将项目配置保存到 `projects/{project_id}/config.json`。
 7. `gui/main_window.py` 使用 `PreviewWorker` 在线程中调用 `core/extractor.py` 的流式预览。
-8. `core/extractor.py` 在正式提取前通过 `core/source_scanner.py` 与 `core/extraction_plan.py` 生成 `FormalExtractionRunPlan`，写入 `knowledge_base/extraction_runs/{run_id}/plan.json`；随后通过 `utils/ai_model_middleware.py` 调用模型，写入知识库分层 JSON，并产出结构化洞察事件与 token 用量。
+8. `core/extractor.py` 在正式提取前通过 `core/source_scanner.py`、`core/material_unit_scanner.py` 与 `core/extraction_plan.py` 生成 `FormalExtractionRunPlan`，写入 `knowledge_base/extraction_runs/{run_id}/plan.json`；随后按 `video`、`image`、`audio`、`text` 四种顶层媒体类型分派到对应 handler，并统一通过 `utils/ai_model_middleware.py` 调用模型，写入知识库分层 JSON、来源追踪、结构化洞察事件与 token 用量。
 9. 洞察事件以 `dict` 形式通过 Qt Signal 推送到 `InsightStreamPanel`。
 10. `core/compiler.py` 可按季/集聚合知识库，生成阶段性角色状态。
-11. `core/character_card_compiler.py` 从正式知识库构建角色卡分层证据包：`direct_evidence_episodes`、`mention_evidence_episodes`、`causal_context_episodes` 和 `season_context`；必要时用 AI 从 `episode_content.targets` 校验别名，再把 `evidence_layers` 交给角色卡 AI 复核。
-12. 角色卡质量结果写入 `card.extensions["charapicker"]`，包括 `compile_evidence_layers`、`alias_resolution`、`needs_review_reasons`、`conflict_groups` 和 `parse_diagnostics`；GUI 只展示用户可读的复核原因和 warnings。
+11. `core/character_card_compiler.py` 从正式知识库构建角色卡分层证据包：`direct_evidence_episodes`、`mention_evidence_episodes`、`causal_context_episodes` 和 `season_context`；证据 metadata 保留媒体类型、内容形态、`source_trace`、evidence 与 `extraction_run_id`，必要时用 AI 从 `episode_content.targets` 校验别名，再把 `evidence_layers` 交给角色卡 AI 复核。
+12. 角色卡来源 run 写入 `source_context.source_runs`；质量结果写入 `card.extensions["charapicker"]`，包括 `compile_evidence_layers`、`alias_resolution`、`needs_review_reasons`、`conflict_groups`、`evidence_source_profile` 和 `parse_diagnostics`；GUI 只展示用户可读的复核原因和 warnings。
 13. `gui/pages/character_card_page.py` 通过 `core.character_card_*` 模块管理 CharaPicker 角色卡母本、预览草稿、编译、导入和导出。
 14. 角色卡派生产物从 CharaPicker JSON 生成，并写入 `projects/{project_id}/output/character_cards/`。
 

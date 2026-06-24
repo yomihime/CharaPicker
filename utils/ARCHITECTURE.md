@@ -17,23 +17,23 @@
 
 - `i18n.py`：管理语言偏好、系统语言归一化、文案加载和 `t()` 翻译函数。
 - `app_metadata.py`：集中保存应用名、组织名、当前运行时版本/阶段和 HTTP User-Agent。
-- `media_types.py`：集中保存视频、图片、文本和可导入素材的后缀集合。
+- `media_types.py`：集中保存视频、图片、音频、文本后缀，以及导入、预览、正式提取支持状态和集合内容形态提示；当前 PNG/JPEG/WEBP 与 `.srt` / `.ass` 可提取，BMP/GIF、`.vtt` / `.lrc` 可导入但暂不提取。
 - `material_processing_events.py`：集中保存素材处理取消消息和 FFmpeg 进度事件前缀等跨层协议常量。
 - `paths.py`：定义应用根目录、项目根目录和单个项目的标准目录结构。
 - `global_store.py`：提供全局用户数据和配置选项的读写中间件，默认使用根目录 `config.yaml`。
 - `proxy_preferences.py`：封装内置代理设置的默认值、归一化、读写和代理 URL 构造。
 - `state_manager.py`：保存、读取和列出项目配置，项目配置写入 `projects/{project_id}/config.json`。
 - `theme.py`：管理主题偏好，并调用 qfluentwidgets 应用亮色、暗色或系统主题。
-- `chunker.py`：预留文本或素材分块工具。
+- `chunker.py`：提供兼容旧调用的固定长度分块，以及保留起止 offset、段落边界、重叠范围、最大 chunk 数和截断 warning 的文本预算分块。
 - `env_manager.py`：提供 conda 命令前缀、llama.cpp/whisper.cpp 二进制发现和可用性检测。
 - `ffmpeg_tool.py`：封装 ffmpeg 工具可用性校验与素材转码/分段执行。
 - `ffmpeg_detection.py`：封装 FFmpeg 设备/CPU 探测相关 helper，供 `ffmpeg_tool.py` 复用。
-- `cloud_model_presets.py`：保存和读取云端模型配置预设，维护云端服务类型到模型调用后端的映射，并提供视频输出 Token / 分钟到单次请求上限的换算工具。
+- `cloud_model_presets.py`：保存和读取云端模型配置预设，维护云端服务类型到模型调用后端的映射，提供视频输出 Token / 分钟到单次请求上限的换算工具，以及 GUI/core 共用的具体模型音频理解能力判断。
 - `cloud_models.py`：按云端服务类型路由并拉取模型列表，当前底层复用 OpenAI-compatible 模型列表接口。
 - `network_middleware.py`：统一应用内 HTTP(S) 请求、代理读取、连通性测试、URL/错误脱敏和 DashScope 临时代理环境。
 - `llamacpp_downloader.py`：下载并安装 llama.cpp 运行时到 `bin/`。
 - `whispercpp_downloader.py`：下载并安装 whisper.cpp 运行时到 `bin/whisper.cpp/`，下载 Whisper 模型到 `models/whisper/`。
-- `audio_transcription.py`：封装本地 whisper.cpp episode 转写、缓存命中判断、音轨准备和 `episode_transcript.json` 写入。
+- `audio_transcription.py`：封装本地 whisper.cpp episode 转写、音频/视频输入准备、缓存命中判断和 `episode_transcript.json` 写入；缓存键覆盖素材指纹、运行时、模型和语言，日志不记录完整转写文本。
 - `ffmpeg_downloader.py`：下载并安装 ffmpeg 运行时到 `bin/`。
 - `source_importer.py`：把外部原始素材按项目目录规则复制到 `projects/{project_id}/raw`，计算外部路径对应的 raw 目标，准备 `materials`，并支持 raw 清理和素材移除。
 - `source_status.py`：计算项目页需要的素材显示名、raw/materials 映射、项目内素材列表和素材状态。

@@ -81,6 +81,7 @@ REVIEW_REASON_ALIAS_LOW_CONFIDENCE = "alias_resolution_low_confidence"
 REVIEW_REASON_KNOWLEDGE_WARNINGS = "knowledge_base_has_warnings"
 REVIEW_REASON_CONFLICT_REVIEW = "conflict_requires_review"
 REVIEW_REASON_JSON_REPAIRED = "ai_json_repaired"
+CANONICAL_MEDIA_TYPES = {"video", "image", "audio", "text"}
 
 
 @dataclass
@@ -643,6 +644,7 @@ def _build_compile_evidence_layers(
                     reason="matched character name or verified alias in episode evidence fields",
                     refs=_payload_refs(payload),
                     warnings=_payload_warnings(payload),
+                    payload=payload,
                 )
             )
             continue
@@ -664,6 +666,7 @@ def _build_compile_evidence_layers(
                         reason="matched contextual fields with causal or conflict language",
                         refs=_payload_refs(payload),
                         warnings=_payload_warnings(payload),
+                        payload=payload,
                     )
                 )
             else:
@@ -677,6 +680,7 @@ def _build_compile_evidence_layers(
                         reason="matched mention or target candidate without direct evidence",
                         refs=_payload_refs(payload),
                         warnings=_payload_warnings(payload),
+                        payload=payload,
                     )
                 )
 
@@ -732,6 +736,7 @@ def _evidence_entry(
     reason: str,
     refs: list[str],
     warnings: list[str],
+    payload: dict[str, Any],
 ) -> dict[str, Any]:
     source_fields = list(items_by_field.keys())
     evidence_items = [item for values in items_by_field.values() for item in values]
@@ -745,6 +750,7 @@ def _evidence_entry(
         "evidence_summary": _clip_text("; ".join(_compact_items(evidence_items, 6)), 900),
         "refs": refs,
         "warnings": warnings,
+        "source_metadata": _payload_source_metadata(payload),
     }
 
 
@@ -787,6 +793,179 @@ def _looks_causal_context(items_by_field: dict[str, list[str]]) -> bool:
 
 def _payload_refs(payload: dict) -> list[str]:
     return _compact_items([str(item) for item in payload.get("evidence_refs", [])], 20)
+
+
+def _payload_source_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    source_trace = _payload_source_trace(payload)
+    media_types = _payload_media_types(payload, source_trace)
+    content_forms = _payload_content_forms(payload, source_trace)
+    metadata: dict[str, Any] = {
+        "source_kind": str(payload.get("source_kind", "")).strip(),
+        "media_types": media_types,
+        "content_forms": content_forms,
+        "source_counts": _compact_source_counts(payload.get("source_counts")),
+        "evidence_refs": _payload_refs(payload),
+    }
+    extraction_run_id = str(payload.get("extraction_run_id", "")).strip()
+    if extraction_run_id:
+        metadata["extraction_run_id"] = extraction_run_id
+    if source_trace:
+        metadata["source_trace"] = _compact_source_trace(source_trace)
+    return metadata
+
+
+def _payload_source_trace(payload: dict[str, Any]) -> dict[str, Any]:
+    source_trace = payload.get("source_trace")
+    return source_trace if isinstance(source_trace, dict) else {}
+
+
+def _payload_media_types(payload: dict[str, Any], source_trace: dict[str, Any]) -> list[str]:
+    media_types = _canonical_media_types(_string_list_payload(payload.get("media_types")))
+    if media_types:
+        return media_types
+    trace_media_types = _canonical_media_types(_string_list_payload(source_trace.get("media_types")))
+    if trace_media_types:
+        return trace_media_types
+    source_breakdown = source_trace.get("source_breakdown")
+    if isinstance(source_breakdown, dict) and isinstance(source_breakdown.get("media_types"), dict):
+        return _canonical_media_types(
+            [
+                str(key).strip()
+                for key, value in source_breakdown["media_types"].items()
+                if str(key).strip() and isinstance(value, int) and value > 0
+            ]
+        )
+    source_kind = str(payload.get("source_kind", "")).strip()
+    return [source_kind] if source_kind in CANONICAL_MEDIA_TYPES else []
+
+
+def _payload_content_forms(payload: dict[str, Any], source_trace: dict[str, Any]) -> list[str]:
+    content_forms = _string_list_payload(payload.get("content_forms"))
+    for material_ref in _dict_list_payload(source_trace.get("material_refs")):
+        content_form = str(material_ref.get("content_form", "")).strip()
+        if content_form:
+            content_forms.append(content_form)
+    for chunk_result in _dict_list_payload(payload.get("chunk_results")):
+        chunk_trace = _payload_source_trace(chunk_result)
+        for material_ref in _dict_list_payload(chunk_trace.get("material_refs")):
+            content_form = str(material_ref.get("content_form", "")).strip()
+            if content_form:
+                content_forms.append(content_form)
+    return _unique(content_forms)
+
+
+def _compact_source_counts(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key): item
+        for key, item in value.items()
+        if isinstance(key, str) and isinstance(item, (int, float, str, bool, dict, list))
+    }
+
+
+def _compact_source_trace(source_trace: dict[str, Any]) -> dict[str, Any]:
+    output: dict[str, Any] = {}
+    media_types = _canonical_media_types(_string_list_payload(source_trace.get("media_types")))
+    if media_types:
+        output["media_types"] = media_types
+    material_refs = [
+        _compact_material_ref(item) for item in _dict_list_payload(source_trace.get("material_refs"))
+    ]
+    if material_refs:
+        output["material_refs"] = material_refs[:24]
+    unit_refs = _string_list_payload(source_trace.get("unit_refs"))
+    if unit_refs:
+        output["unit_refs"] = _unique(unit_refs)[:48]
+    derived_refs = _string_list_payload(source_trace.get("derived_artifact_refs"))
+    if derived_refs:
+        output["derived_artifact_refs"] = _unique(derived_refs)[:48]
+    evidence_refs = [
+        _compact_evidence_ref(item) for item in _dict_list_payload(source_trace.get("evidence_refs"))
+    ]
+    if evidence_refs:
+        output["evidence_refs"] = evidence_refs[:48]
+    for field_name in (
+        "episode_content_refs",
+        "episode_summary_refs",
+        "season_content_refs",
+        "previous_season_summary_refs",
+    ):
+        refs = _dict_list_payload(source_trace.get(field_name))
+        if refs:
+            output[field_name] = [_compact_artifact_ref(item) for item in refs[:24]]
+    source_breakdown = source_trace.get("source_breakdown")
+    if isinstance(source_breakdown, dict):
+        output["source_breakdown"] = source_breakdown
+    return output
+
+
+def _compact_material_ref(ref: dict[str, Any]) -> dict[str, Any]:
+    output = {
+        key: ref[key]
+        for key in (
+            "material_id",
+            "relative_path",
+            "source_media_type",
+            "media_type",
+            "content_form",
+            "origin",
+        )
+        if key in ref and str(ref.get(key, "")).strip()
+    }
+    for key in ("time_range", "page_range", "text_range", "region"):
+        value = ref.get(key)
+        if isinstance(value, dict) and value:
+            output[key] = value
+    return output
+
+
+def _compact_evidence_ref(ref: dict[str, Any]) -> dict[str, Any]:
+    output = {
+        key: ref[key]
+        for key in (
+            "evidence_id",
+            "unit_ref",
+            "derived_artifact_ref",
+            "aggregation_ref",
+            "quote_policy",
+        )
+        if key in ref and str(ref.get(key, "")).strip()
+    }
+    locator = ref.get("locator")
+    if isinstance(locator, dict) and locator:
+        output["locator"] = locator
+    metadata = ref.get("metadata")
+    if isinstance(metadata, dict) and metadata:
+        output["metadata"] = metadata
+    material_ref = ref.get("material_ref")
+    if isinstance(material_ref, dict):
+        output["material_ref"] = _compact_material_ref(material_ref)
+    return output
+
+
+def _compact_artifact_ref(ref: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: ref[key]
+        for key in ("artifact_type", "season_id", "episode_id", "path", "extraction_run_id")
+        if key in ref and str(ref.get(key, "")).strip()
+    }
+
+
+def _string_list_payload(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _canonical_media_types(values: list[str]) -> list[str]:
+    return _unique([value for value in values if value in CANONICAL_MEDIA_TYPES])
+
+
+def _dict_list_payload(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
 
 
 def _payload_warnings(payload: dict) -> list[str]:
@@ -921,6 +1100,7 @@ def _apply_quality_checks(
         "conflict_groups": conflict_groups,
         "alias_resolution": alias_resolution.to_payload(),
         "parse_diagnostics": parse_diagnostics,
+        "evidence_source_profile": _evidence_source_profile(evidence_layers),
     }
     _write_quality_checks(card, quality_checks)
 
@@ -963,6 +1143,46 @@ def _build_needs_review_reasons(
     if parse_diagnostics:
         reasons.append(_review_reason(REVIEW_REASON_JSON_REPAIRED))
     return _unique_reason_payloads(reasons)
+
+
+def _evidence_source_profile(
+    evidence_layers: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    media_types: dict[str, int] = {}
+    content_forms: dict[str, int] = {}
+    source_kinds: dict[str, int] = {}
+    entry_count = 0
+    entries_with_source_trace = 0
+    entries_with_evidence_refs = 0
+    for entries in evidence_layers.values():
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            source_metadata = entry.get("source_metadata")
+            if not isinstance(source_metadata, dict):
+                continue
+            entry_count += 1
+            for media_type in _string_list_payload(source_metadata.get("media_types")):
+                media_types[media_type] = media_types.get(media_type, 0) + 1
+            for content_form in _string_list_payload(source_metadata.get("content_forms")):
+                content_forms[content_form] = content_forms.get(content_form, 0) + 1
+            source_kind = str(source_metadata.get("source_kind", "")).strip()
+            if source_kind:
+                source_kinds[source_kind] = source_kinds.get(source_kind, 0) + 1
+            if isinstance(source_metadata.get("source_trace"), dict):
+                entries_with_source_trace += 1
+            if source_metadata.get("evidence_refs"):
+                entries_with_evidence_refs += 1
+    return {
+        "evidence_entries": entry_count,
+        "media_types": dict(sorted(media_types.items())),
+        "content_forms": dict(sorted(content_forms.items())),
+        "source_kinds": dict(sorted(source_kinds.items())),
+        "entries_with_source_trace": entries_with_source_trace,
+        "entries_with_evidence_refs": entries_with_evidence_refs,
+    }
 
 
 def _review_reason(reason: str, *, detail: str = "") -> dict[str, Any]:
@@ -1062,9 +1282,13 @@ def _apply_compiled_state(
     included_seasons: list[str] = []
     included_episodes: list[str] = []
     included_chunks: list[str] = []
+    source_runs: list[str] = []
     for season_id, episode_id, payload in episode_payloads:
         included_seasons.append(season_id)
         included_episodes.append(f"{season_id}/{episode_id}")
+        extraction_run_id = str(payload.get("extraction_run_id", "")).strip()
+        if extraction_run_id:
+            source_runs.append(extraction_run_id)
         refs.extend(str(item) for item in payload.get("evidence_refs", []) if str(item).strip())
         behavior.extend(_related_items(payload.get("behavior_traits", []), match_terms))
         speech.extend(_related_items(payload.get("dialogue_style", []), match_terms))
@@ -1095,6 +1319,7 @@ def _apply_compiled_state(
     card.source_context.included_seasons = _unique(included_seasons)
     card.source_context.included_episodes = _unique(included_episodes)
     card.source_context.included_chunks = _unique(included_chunks)
+    card.source_context.source_runs = _unique(source_runs)
     card.revision += 1
 
 
@@ -1209,6 +1434,7 @@ def _build_ai_knowledge_summary(
                     [str(item) for item in payload.get("evidence_refs", []) if str(item).strip()],
                     20,
                 ),
+                "source_metadata": _payload_source_metadata(payload),
             }
         )
     return {

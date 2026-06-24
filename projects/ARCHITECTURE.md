@@ -25,14 +25,14 @@
 - `{project_id}/knowledge_base/extraction_runs/{run_id}/plan.json`：正式提取 run plan，记录本次运行的素材引用、unit、媒体类型和派生成果索引入口。
 - `{project_id}/knowledge_base/source_manifest.json`：旧结构兼容/调试用的素材根目录、季、集与稳定内部 ID 映射；正式提取初始化以 run plan 为主。
 - `{project_id}/knowledge_base/seasons/{season_id}/episodes/{episode_id}/chunks/{chunk_id}.json`：当前分层知识库中的 chunk 结构化结果。
-- `{project_id}/knowledge_base/seasons/{season_id}/episodes/{episode_id}/episode_transcript.json`：单集音频转写结果，保存可追溯对白/旁白文本、时间段、来源素材指纹和转写后端信息。
+- `{project_id}/knowledge_base/seasons/{season_id}/episodes/{episode_id}/episode_transcript.json`：单集音频转写结果，保存可追溯对白/旁白文本、时间段、来源素材指纹和转写后端信息；run plan 以 text 型 `DerivedArtifact` 和 `transcript_text` 派生 unit 引用它，原始 audio/video 仍保留为 source refs。
 - `{project_id}/knowledge_base/seasons/{season_id}/episodes/{episode_id}/episode_content.json`：单集完整结构化内容合并结果。
 - `{project_id}/knowledge_base/seasons/{season_id}/episodes/{episode_id}/episode_summary.json`：单集压缩摘要。
 - `{project_id}/knowledge_base/seasons/{season_id}/season_content.json`：单季完整结构化内容合并结果。
 - `{project_id}/knowledge_base/seasons/{season_id}/season_summary.json`：单季压缩摘要。
 - `{project_id}/knowledge_base/seasons/{season_id}/character_stage_states.json`：季内角色阶段状态。
 - `{project_id}/knowledge_base/character_cards/{card_id}/card.json`：正式 CharaPicker 角色卡母本。
-- `{project_id}/knowledge_base/character_cards/{card_id}/card.json` 中的 `extensions["charapicker"]`：正式角色卡编译诊断扩展，保存 `compile_evidence_layers`、`alias_resolution`、`needs_review_reasons`、`conflict_groups` 和 `parse_diagnostics`。这些字段用于解释证据分层、别名校验、冲突复核和 AI JSON 修复情况，不替代顶层角色卡事实字段。
+- `{project_id}/knowledge_base/character_cards/{card_id}/card.json` 中的 `source_context.source_runs` 与 `extensions["charapicker"]`：前者记录角色卡实际消费的 extraction run；后者保存 `compile_evidence_layers`、每条证据的来源 metadata、`alias_resolution`、`needs_review_reasons`、`conflict_groups`、`evidence_source_profile` 和 `parse_diagnostics`。这些字段用于解释证据来源、分层、别名校验、冲突复核和 AI JSON 修复情况，不替代顶层角色卡事实字段。
 - `{project_id}/knowledge_base/character_cards/{card_id}/cover.png`：角色卡裁剪后的 9:16 封面。
 - `{project_id}/knowledge_base/preview_character_cards/preview_card/card.json`：隔离的角色卡预览草稿，不进入正式海报墙扫描。
 - `{project_id}/output/character_cards/`：角色卡派生导出结果，包括 Markdown、HTML、CharaPicker JSON、Character Card V2 JSON 和 AstrBot 手动复制清单。

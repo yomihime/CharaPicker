@@ -23,13 +23,10 @@
 - `reference/release-packaging.zh_CN.md`：PyInstaller、版本阶段、发布包结构和 CI 发布规范。
 - `reference/documentation-maintenance.zh_CN.md`：README、多语言文档、ARCHITECTURE.md 和计划类文档维护规则。
 - `plans/`：仍在执行或持续跟踪的任务队列、长期路线和专项计划。
+- `plans/TODO.zh_CN.md`：当前剩余任务总表；路线 01、路线 02、路线 03 和真实预览后续覆盖已经移入归档。
 - `plans/extraction-development-roadmap.zh_CN.md`：面向开发者的 Extract Once、知识库和角色成长编译长期路线；不是当前剩余任务清单。
-- `plans/01-extraction-quality-observability-plan.zh_CN.md`：提取质量与可观测性的第一阶段执行计划。
-- `plans/02-multi-material-refactor-plan.zh_CN.md`：多媒体平级接入前架构体检与解耦的第二阶段执行计划，作为进入多内容形态覆盖前的重构边界依据。
-- `plans/03-multi-material-coverage-plan.zh_CN.md`：番剧、漫画、广播剧、小说等内容形态支持的第三阶段执行计划，依赖路线 02 的多媒体接入准备矩阵。
-- `plans/preview-real-result-ingestion-plan.zh_CN.md`：面向开发者的真实预览结果后续计划，当前聚焦小说/设定文本、字幕/台本、广播剧/音频、图片/漫画和视频+字幕混合资料接入预览与统一知识库消费路径。
 - `readme/`：README 的多语言补充版本，例如 `README.en_US.md`、`README.ja_JP.md`、`README.zh_TW.md`。
-- `archive/`：已执行完成、已被替代或仅保留历史查阅价值的计划类文档，包括已完成的正式视频提取、角色卡最终编译、角色卡质量分层、多供应商和 proxy 计划。
+- `archive/`：已执行完成、已被替代或仅保留历史查阅价值的计划类文档，包括已完成的路线 01-03、真实预览后续覆盖、正式视频提取、角色卡最终编译、角色卡质量分层、多供应商和 proxy 计划。
 - 后续多语言文档应在文件名中标明语种，例如 `usage.zh_CN.md`。
 
 ## 与其他目录的关系

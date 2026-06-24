@@ -13,7 +13,10 @@ from utils.ai_model_middleware import (
     ModelCallRequest,
     ModelCallResult,
     build_model_call_request,
+    call_audio_model,
+    call_image_model,
     call_text_model,
+    call_video_model,
 )
 
 
@@ -106,6 +109,48 @@ def call_formal_text_json_model(
     return call_formal_json_model(
         request,
         call_model=call_text_model,
+        max_attempts=max_attempts,
+        estimated_context_tokens=estimated_context_tokens,
+    )
+
+
+def call_formal_image_json_model(
+    request: ModelCallRequest,
+    *,
+    max_attempts: int = FORMAL_JSON_PARSE_MAX_ATTEMPTS,
+    estimated_context_tokens: int | None = None,
+) -> FormalExtractionJsonResult:
+    return call_formal_json_model(
+        request,
+        call_model=call_image_model,
+        max_attempts=max_attempts,
+        estimated_context_tokens=estimated_context_tokens,
+    )
+
+
+def call_formal_audio_json_model(
+    request: ModelCallRequest,
+    *,
+    max_attempts: int = FORMAL_JSON_PARSE_MAX_ATTEMPTS,
+    estimated_context_tokens: int | None = None,
+) -> FormalExtractionJsonResult:
+    return call_formal_json_model(
+        request,
+        call_model=call_audio_model,
+        max_attempts=max_attempts,
+        estimated_context_tokens=estimated_context_tokens,
+    )
+
+
+def call_formal_video_json_model(
+    request: ModelCallRequest,
+    *,
+    max_attempts: int = FORMAL_JSON_PARSE_MAX_ATTEMPTS,
+    estimated_context_tokens: int | None = None,
+) -> FormalExtractionJsonResult:
+    return call_formal_json_model(
+        request,
+        call_model=call_video_model,
         max_attempts=max_attempts,
         estimated_context_tokens=estimated_context_tokens,
     )

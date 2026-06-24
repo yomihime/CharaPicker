@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayou
 from qfluentwidgets import BodyLabel, CaptionLabel, CardWidget, ScrollArea, StrongBodyLabel, isDarkTheme
 
 from core.models import InsightStatus
+from gui.insight_metadata import insight_meta_text
 from res.colors import (
     INSIGHT_PANEL_DARK_BACKGROUND,
     INSIGHT_PANEL_DARK_BORDER,
@@ -24,6 +25,7 @@ STATUS_TEXT = {
     InsightStatus.WARNING.value: "insight.status.warning",
 }
 AUTO_SCROLL_BOTTOM_THRESHOLD = 24
+
 
 class TimelineMarker(QLabel):
     def __init__(self, color: str, parent: QWidget | None = None) -> None:
@@ -84,8 +86,15 @@ class InsightCard(CardWidget):
         )
         self.description_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
+        self.meta_label = CaptionLabel(insight_meta_text(event, t), self)
+        self.meta_label.setWordWrap(True)
+        self.meta_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.meta_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.meta_label.setVisible(bool(self.meta_label.text()))
+
         content.addLayout(header)
         content.addWidget(self.description_label)
+        content.addWidget(self.meta_label)
         layout.addLayout(content, 1)
         self._line = line
         self._status = status
@@ -99,6 +108,9 @@ class InsightCard(CardWidget):
         self._status = status
         self.title_label.setText(event.get("title", t("insight.untitled")))
         self.description_label.setText(event.get("description", ""))
+        meta_text = insight_meta_text(event, t)
+        self.meta_label.setText(meta_text)
+        self.meta_label.setVisible(bool(meta_text))
         self.status_label.setText(t(STATUS_TEXT.get(status, "insight.status.queued")))
         self.status_label.setStyleSheet(f"color: {color};")
         self._line.setStyleSheet(f"background: {color}; border: none;")

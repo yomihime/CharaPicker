@@ -48,6 +48,13 @@ from core.extraction_plan import (
     MediaType,
     SourceTrace,
 )
+from core.formal_dispatch import (
+    FormalDispatchKind,
+    FormalDispatchPlan,
+    FormalUnsupportedUnit,
+    build_formal_dispatch_plan,
+)
+from core.image_unit_handler import ImageUnitHandler, ImageUnitHandlerConfig
 from core.models import (
     ChunkExtractionResult,
     EpisodeTranscript,
@@ -57,7 +64,24 @@ from core.models import (
     InsightStatus,
     ProjectConfig,
 )
+from core.native_media_insight_handler import (
+    NATIVE_MEDIA_INSIGHT_PROMPT,
+    NATIVE_AUDIO_UNSUPPORTED_REASON,
+    NATIVE_VIDEO_BACKEND_UNSUPPORTED_REASON,
+    NATIVE_VIDEO_UNSUPPORTED_REASON,
+    NativeMediaInsightHandler,
+    NativeMediaInsightHandlerConfig,
+)
+from core.preview_sampling import (
+    PreviewCandidate,
+    PreviewCandidateKind,
+    PreviewSkippedUnit,
+    collect_preview_candidates,
+    run_plan_for_preview_unit,
+)
+from core.refusal_samples import ExtractionFailureSampleRequest, record_extraction_failure_sample
 from core.transcript_provider import TranscriptArtifactRequest, TranscriptProvider
+from core.text_unit_handler import TextUnitHandler, TextUnitHandlerConfig
 from core.video_unit_handler import VideoUnitHandler, VideoUnitHandlerConfig
 from utils.ai_model_middleware import (
     ModelBackend,
@@ -78,6 +102,7 @@ from utils.cloud_model_presets import (
     load_cloud_model_presets,
     normalize_video_input_mode,
     provider_requires_aliyun_extra_body,
+    provider_supports_capability,
     scale_cloud_max_output_tokens_for_video_duration,
 )
 from utils.audio_transcription import (
@@ -89,15 +114,54 @@ from utils.audio_transcription import (
 from utils.ffmpeg_tool import FfmpegProcessError, probe_video_duration_seconds
 from utils.i18n import t
 from utils.model_preferences import last_cloud_preset_name
-from utils.paths import ensure_project_tree
+from utils.paths import ensure_project_tree, project_paths
+from utils.prompt_preferences import prompt_override
 
 
 LOGGER = logging.getLogger(__name__)
 PREVIEW_MAX_CHUNKS = 2
+PREVIEW_MAX_CANDIDATE_ATTEMPTS = PREVIEW_MAX_CHUNKS * 2
 PREVIEW_CHUNK_MIN_OUTPUT_TOKENS = 1024
 PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE = 512
 FULL_EXTRACTION_RUN_TYPE = "formal_extraction"
+FORMAL_VIDEO_CHUNK_PROMPT = "formal_contextual_video_chunk_extraction"
+PREVIEW_VIDEO_CHUNK_PROMPT = "preview_video_chunk_extraction"
 FULL_EXTRACTION_MIN_OUTPUT_TOKENS_PER_MINUTE = PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE
+TEXT_UNIT_DEFAULT_INPUT_CHARS = 12_000
+TEXT_UNIT_MAX_OUTPUT_TOKENS = 2_048
+PREVIEW_TEXT_CANDIDATE_KINDS = frozenset(
+    {
+        PreviewCandidateKind.TIMED_TEXT,
+        PreviewCandidateKind.TRANSCRIPT,
+        PreviewCandidateKind.TEXT,
+    }
+)
+PREVIEW_KIND_TRANSLATION_KEYS = {
+    PreviewCandidateKind.TIMED_TEXT: "extractor.preview.kind.timedText",
+    PreviewCandidateKind.TRANSCRIPT: "extractor.preview.kind.transcript",
+    PreviewCandidateKind.TEXT: "extractor.preview.kind.text",
+    PreviewCandidateKind.IMAGE: "extractor.preview.kind.image",
+    PreviewCandidateKind.AUDIO_TRANSCRIPT: "extractor.preview.kind.audioTranscript",
+    PreviewCandidateKind.VIDEO: "extractor.preview.kind.video",
+}
+PREVIEW_REASON_TRANSLATION_KEYS = {
+    "animated_image_not_supported": "extractor.preview.reason.animatedImageNotSupported",
+    "bmp_image_not_supported": "extractor.preview.reason.bmpImageNotSupported",
+    "vtt_timed_text_not_supported": "extractor.preview.reason.vttNotSupported",
+    "lrc_timed_text_not_supported": "extractor.preview.reason.lrcNotSupported",
+    "model_image_input_not_supported": "extractor.preview.reason.modelImageNotSupported",
+    "preview_handler_not_available": "extractor.preview.reason.handlerNotAvailable",
+}
+FORMAL_REASON_TRANSLATION_KEYS = {
+    **PREVIEW_REASON_TRANSLATION_KEYS,
+    "formal_handler_not_available": "extractor.full.reason.handlerNotAvailable",
+}
+NATIVE_MEDIA_REASON_TRANSLATION_KEYS = {
+    NATIVE_AUDIO_UNSUPPORTED_REASON: "extractor.nativeMedia.reason.audioUnsupported",
+    NATIVE_VIDEO_UNSUPPORTED_REASON: "extractor.nativeMedia.reason.videoUnsupported",
+    NATIVE_VIDEO_BACKEND_UNSUPPORTED_REASON: "extractor.nativeMedia.reason.videoBackendUnsupported",
+    "native_media_handler_not_available": "extractor.nativeMedia.reason.handlerNotAvailable",
+}
 
 
 class ExtractionStoppedError(RuntimeError):
@@ -126,8 +190,24 @@ class Extractor(QObject):
             media_types=self._media_types_from_episode_plans(episodes),
             content_forms=self._content_forms_from_episode_plans(episodes),
             episodes=episodes,
-            metadata={"run_type": FULL_EXTRACTION_RUN_TYPE},
+            warnings=self._scan_warnings_from_episode_plans(episodes),
+            metadata={
+                "run_type": FULL_EXTRACTION_RUN_TYPE,
+                "scan_type": source_scanner.FORMAL_MATERIAL_SCAN_TYPE,
+            },
         )
+
+    def _scan_warnings_from_episode_plans(self, episodes: list[EpisodePlan]) -> list[str]:
+        warnings: list[str] = []
+        for episode in episodes:
+            episode_warnings = episode.metadata.get("warnings")
+            if not isinstance(episode_warnings, list):
+                continue
+            for warning in episode_warnings:
+                normalized = self._manifest_string(warning)
+                if normalized and normalized not in warnings:
+                    warnings.append(normalized)
+        return warnings
 
     def _formal_extraction_mode(self, mode: ExtractionMode) -> FormalExtractionMode:
         if mode == ExtractionMode.CLEAN:
@@ -316,6 +396,7 @@ class Extractor(QObject):
             conflicts.extend(chunk.conflicts)
             character_state_changes.extend(chunk.character_state_changes)
             evidence_refs.extend(chunk.evidence_refs)
+            aggregation_warnings.extend(chunk.aggregation_warnings)
 
         if not chunk_paths:
             warning = f"no_chunk_files:{season_id}/{episode_id}"
@@ -344,7 +425,7 @@ class Extractor(QObject):
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
             "extraction_run_id": extraction_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
-            "source_kind": "video",
+            "source_kind": self._source_kind_from_media_types(media_types),
             "media_types": media_types,
             "schema_version": 1,
             "source_trace": source_trace,
@@ -358,7 +439,7 @@ class Extractor(QObject):
                     source_trace.get("derived_artifact_refs", [])
                 ),
             },
-            "aggregation_warnings": aggregation_warnings,
+            "aggregation_warnings": self._deduplicate_preserve_order(aggregation_warnings),
             "targets": self._deduplicate_preserve_order(targets),
             "chunk_results": chunk_results,
             "facts": self._deduplicate_preserve_order(facts),
@@ -705,6 +786,21 @@ class Extractor(QObject):
             ]
         return []
 
+    def _source_kind_from_media_types(
+        self,
+        media_types: list[str],
+        *,
+        fallback: str = "",
+    ) -> str:
+        normalized = self._deduplicate_preserve_order(
+            [value for value in (self._manifest_string(item) for item in media_types) if value]
+        )
+        if len(normalized) == 1:
+            return normalized[0]
+        if len(normalized) > 1:
+            return "mixed"
+        return fallback
+
     def _load_episode_summaries_for_source_trace(
         self,
         project_id: str,
@@ -746,9 +842,12 @@ class Extractor(QObject):
         conflicts: list[str] = []
         character_state_changes: list[str] = []
         evidence_refs: list[str] = []
+        aggregation_warnings: list[str] = []
+        preview_chunks: list[ChunkExtractionResult] = []
 
         for chunk_path in chunk_paths:
             chunk = kb.load_chunk_result(chunk_path)
+            preview_chunks.append(chunk)
             chunk_results.append(chunk.model_dump(mode="json"))
             targets.extend(chunk.targets)
             facts.extend(chunk.facts)
@@ -758,14 +857,25 @@ class Extractor(QObject):
             conflicts.extend(chunk.conflicts)
             character_state_changes.extend(chunk.character_state_changes)
             evidence_refs.extend(chunk.evidence_refs)
+            aggregation_warnings.extend(chunk.aggregation_warnings)
 
+        source_trace = self._source_trace_from_chunks(preview_chunks)
+        media_types = self._media_types_from_source_trace(source_trace)
         episode_content = {
             "season_id": season_id,
             "episode_id": episode_id,
             "extraction_stage": kb.PREVIEW_EXTRACTION_STAGE,
             "run_type": "preview_trial",
-            "source_kind": "video",
+            "source_kind": self._source_kind_from_media_types(media_types),
+            "media_types": media_types,
             "schema_version": 1,
+            "source_trace": source_trace,
+            "source_counts": {
+                "preview_chunks": len(chunk_results),
+                "source_trace_units": len(source_trace.get("unit_refs", [])),
+                "source_trace_materials": len(source_trace.get("material_refs", [])),
+            },
+            "aggregation_warnings": self._deduplicate_preserve_order(aggregation_warnings),
             "targets": self._deduplicate_preserve_order(targets),
             "chunk_results": chunk_results,
             "facts": self._deduplicate_preserve_order(facts),
@@ -817,14 +927,15 @@ class Extractor(QObject):
         source_counts = episode_content.get("source_counts", {})
         if not isinstance(source_counts, dict):
             source_counts = {}
+        media_types = self._media_types_from_source_trace(source_trace)
         summary = {
             "season_id": season_id,
             "episode_id": episode_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
             "extraction_run_id": artifact_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
-            "source_kind": "video",
-            "media_types": self._media_types_from_source_trace(source_trace),
+            "source_kind": self._source_kind_from_media_types(media_types),
+            "media_types": media_types,
             "schema_version": 1,
             "source_trace": source_trace,
             "source_counts": {
@@ -921,6 +1032,7 @@ class Extractor(QObject):
             conflicts.extend(payload.get("conflicts", []))
             character_state_changes.extend(payload.get("character_state_changes", []))
             evidence_refs.extend(payload.get("evidence_refs", []))
+            aggregation_warnings.extend(payload.get("aggregation_warnings", []))
 
         if not episode_contents:
             warning = f"no_full_episode_contents:{season_id}"
@@ -932,13 +1044,14 @@ class Extractor(QObject):
             )
 
         source_trace = self._source_trace_for_season_content(episode_contents)
+        media_types = self._media_types_from_source_trace(source_trace)
         season_content = {
             "season_id": season_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
             "extraction_run_id": extraction_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
-            "source_kind": "video",
-            "media_types": self._media_types_from_source_trace(source_trace),
+            "source_kind": self._source_kind_from_media_types(media_types),
+            "media_types": media_types,
             "schema_version": 1,
             "source_trace": source_trace,
             "source_counts": {
@@ -954,7 +1067,7 @@ class Extractor(QObject):
                     source_trace.get("derived_artifact_refs", [])
                 ),
             },
-            "aggregation_warnings": aggregation_warnings,
+            "aggregation_warnings": self._deduplicate_preserve_order(aggregation_warnings),
             "episode_contents": episode_contents,
             "targets": self._deduplicate_preserve_order(targets),
             "facts": self._deduplicate_preserve_order(facts),
@@ -1013,13 +1126,14 @@ class Extractor(QObject):
         source_counts = season_content.get("source_counts", {})
         if not isinstance(source_counts, dict):
             source_counts = {}
+        media_types = self._media_types_from_source_trace(source_trace)
         summary = {
             "season_id": season_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
             "extraction_run_id": artifact_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
-            "source_kind": "video",
-            "media_types": self._media_types_from_source_trace(source_trace),
+            "source_kind": self._source_kind_from_media_types(media_types),
+            "media_types": media_types,
             "schema_version": 1,
             "source_trace": source_trace,
             "source_counts": {
@@ -1239,6 +1353,184 @@ class Extractor(QObject):
             return text
         return f"{text[: max_length - 3]}..."
 
+    def _failure_kind_for_exception(self, exc: Exception) -> str:
+        if self._provider_rejected_video(exc):
+            return "provider_data_inspection_failed"
+        if isinstance(exc, FormalExtractionOutputTruncatedError):
+            return "formal_output_truncated"
+        if isinstance(exc, FormalExtractionJsonError):
+            return "formal_json_parse_failed"
+        if isinstance(exc, AudioTranscriptionError):
+            return "audio_transcription_failed"
+        if isinstance(exc, ModelCallError):
+            return "model_call_failed"
+        return "extraction_failed"
+
+    def _prompt_override_present(self, prompt_purpose: str) -> bool:
+        if not prompt_purpose:
+            return False
+        override = prompt_override(prompt_purpose)
+        return bool(override.system.strip() or override.user_template.strip())
+
+    def _record_extraction_failure_sample(
+        self,
+        project_id: str,
+        *,
+        project_name: str = "",
+        prompt_purpose: str,
+        provider: str = "",
+        backend: str = "",
+        model_name: str = "",
+        media_type: str = "",
+        content_form: str = "",
+        unit_id: str = "",
+        unit_kind: str = "",
+        material_id: str = "",
+        source_path: str = "",
+        source_paths: list[str] | None = None,
+        extraction_stage: str = "",
+        extraction_run_id: str = "",
+        season_id: str = "",
+        episode_id: str = "",
+        chunk_id: str = "",
+        failure_kind: str = "",
+        exc: Exception,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        try:
+            result = record_extraction_failure_sample(
+                ExtractionFailureSampleRequest(
+                    project_id=project_id,
+                    project_name=project_name,
+                    prompt_purpose=prompt_purpose,
+                    provider=provider,
+                    backend=backend,
+                    model_name=model_name,
+                    media_type=media_type,
+                    content_form=content_form,
+                    unit_id=unit_id,
+                    unit_kind=unit_kind,
+                    material_id=material_id,
+                    source_path=source_path,
+                    source_paths=source_paths or [],
+                    extraction_stage=extraction_stage,
+                    extraction_run_id=extraction_run_id,
+                    season_id=season_id,
+                    episode_id=episode_id,
+                    chunk_id=chunk_id,
+                    failure_kind=failure_kind or self._failure_kind_for_exception(exc),
+                    error_type=exc.__class__.__name__,
+                    error_summary=self._compact_exception_message(exc),
+                    user_prompt_override_present=self._prompt_override_present(prompt_purpose),
+                    metadata=metadata or {},
+                )
+            )
+        except Exception:  # noqa: BLE001
+            LOGGER.warning(
+                "Extraction failure sample could not be recorded; project_id=%s purpose=%s "
+                "unit_id=%s source_path=%s",
+                project_id,
+                prompt_purpose,
+                unit_id,
+                source_path,
+                exc_info=True,
+            )
+            return
+        LOGGER.info(
+            "Extraction failure sample recorded; project_id=%s sample_id=%s purpose=%s "
+            "unit_id=%s source_path=%s",
+            project_id,
+            result.sample_id,
+            prompt_purpose,
+            unit_id,
+            source_path,
+        )
+
+    def _record_unit_failure_sample(
+        self,
+        project_id: str,
+        run_plan: FormalExtractionRunPlan,
+        unit: ExtractionUnit,
+        *,
+        project_name: str = "",
+        prompt_purpose: str,
+        provider: str,
+        backend: str,
+        model_name: str,
+        extraction_stage: ExtractionArtifactStage,
+        season_id: str,
+        chunk_id: str = "",
+        exc: Exception,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        self._record_extraction_failure_sample(
+            project_id,
+            project_name=project_name,
+            prompt_purpose=prompt_purpose,
+            provider=provider,
+            backend=backend,
+            model_name=model_name,
+            media_type=unit.media_type.value,
+            content_form=unit.content_form.value,
+            unit_id=unit.unit_id,
+            unit_kind=unit.unit_kind,
+            material_id=unit.material_ref.material_id,
+            source_path=unit.material_ref.relative_path,
+            extraction_stage=extraction_stage.value,
+            extraction_run_id=run_plan.run_id if extraction_stage == ExtractionArtifactStage.FULL else "",
+            season_id=season_id,
+            episode_id=unit.episode_id,
+            chunk_id=chunk_id,
+            exc=exc,
+            metadata=metadata,
+        )
+
+    def _record_video_chunk_failure_sample(
+        self,
+        config: ProjectConfig,
+        chunk_input: dict[str, Any],
+        *,
+        prompt_purpose: str,
+        provider: str,
+        backend: str,
+        model_name: str,
+        extraction_stage: ExtractionArtifactStage,
+        exc: Exception,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        material_ref = chunk_input.get("material_ref")
+        if not isinstance(material_ref, dict):
+            material_ref = {}
+        self._record_extraction_failure_sample(
+            config.project_id,
+            project_name=config.name,
+            prompt_purpose=prompt_purpose,
+            provider=provider,
+            backend=backend,
+            model_name=model_name,
+            media_type=str(material_ref.get("source_media_type") or "video"),
+            content_form=str(material_ref.get("content_form") or "unknown"),
+            unit_id=str(chunk_input.get("unit_ref") or chunk_input.get("chunk_id") or ""),
+            unit_kind="video_chunk",
+            material_id=str(material_ref.get("material_id") or ""),
+            source_path=str(chunk_input.get("source_path") or ""),
+            extraction_stage=extraction_stage.value,
+            extraction_run_id=str(chunk_input.get("extraction_run_id") or ""),
+            season_id=str(chunk_input.get("season_id") or ""),
+            episode_id=str(chunk_input.get("episode_id") or ""),
+            chunk_id=str(chunk_input.get("chunk_id") or ""),
+            exc=exc,
+            metadata=metadata,
+        )
+
+    def _project_relative_source_path(self, project_id: str, source_path: Path) -> str:
+        project_root = project_paths(project_id).root.resolve()
+        resolved = source_path.resolve(strict=False)
+        try:
+            return resolved.relative_to(project_root).as_posix()
+        except ValueError:
+            return str(source_path)
+
     def _preview_video_chunk_failed_description(
         self,
         *,
@@ -1386,6 +1678,556 @@ class Extractor(QObject):
                     }
                 )
         return chunk_inputs
+
+    def _collect_text_units_from_run_plan(
+        self,
+        run_plan: FormalExtractionRunPlan,
+    ) -> list[tuple[str, ExtractionUnit]]:
+        handler = TextUnitHandler()
+        return [
+            (episode.season_id, unit)
+            for episode in run_plan.episodes
+            for unit in episode.units
+            if handler.supports(unit)
+        ]
+
+    def _collect_image_units_from_run_plan(
+        self,
+        run_plan: FormalExtractionRunPlan,
+    ) -> list[tuple[str, ExtractionUnit]]:
+        handler = ImageUnitHandler()
+        return [
+            (episode.season_id, unit)
+            for episode in run_plan.episodes
+            for unit in episode.units
+            if handler.supports(unit)
+        ]
+
+    def _collect_native_media_insight_units_from_run_plan(
+        self,
+        run_plan: FormalExtractionRunPlan,
+    ) -> list[tuple[str, ExtractionUnit]]:
+        return [
+            (episode.season_id, unit)
+            for episode in run_plan.episodes
+            for unit in episode.units
+            if NativeMediaInsightHandler.can_consider(unit)
+        ]
+
+    def _collect_audio_transcript_units_from_run_plan(
+        self,
+        run_plan: FormalExtractionRunPlan,
+    ) -> list[tuple[str, ExtractionUnit]]:
+        return [
+            (episode.season_id, unit)
+            for episode in run_plan.episodes
+            for unit in episode.units
+            if unit.media_type == MediaType.AUDIO
+            and unit.handler_options.get("transcript_candidate") is True
+        ]
+
+    def _text_unit_handler(self, preset: CloudModelPreset) -> TextUnitHandler:
+        context_tokens = context_window_budget_tokens(preset)
+        max_input_chars = TEXT_UNIT_DEFAULT_INPUT_CHARS
+        if context_tokens is not None:
+            reserved_tokens = TEXT_UNIT_MAX_OUTPUT_TOKENS + 1_000
+            available_input_tokens = max(1_000, context_tokens - reserved_tokens)
+            max_input_chars = min(TEXT_UNIT_DEFAULT_INPUT_CHARS, available_input_tokens * 3)
+        return TextUnitHandler(
+            TextUnitHandlerConfig(
+                max_input_chars=max_input_chars,
+                max_output_tokens=TEXT_UNIT_MAX_OUTPUT_TOKENS,
+            )
+        )
+
+    def _image_unit_handler(self, preset: CloudModelPreset) -> ImageUnitHandler:
+        return ImageUnitHandler(ImageUnitHandlerConfig(provider=preset.provider))
+
+    def _native_media_insight_handler(
+        self,
+        preset: CloudModelPreset,
+    ) -> NativeMediaInsightHandler:
+        return NativeMediaInsightHandler(
+            NativeMediaInsightHandlerConfig(
+                provider=preset.provider,
+                model_name=preset.model_name,
+                video_fps=preset.video_fps,
+                max_output_tokens=min(
+                    max(TEXT_UNIT_MAX_OUTPUT_TOKENS, preset.max_output_tokens),
+                    CLOUD_MAX_OUTPUT_TOKENS_MAX,
+                ),
+            )
+        )
+
+    def _native_media_warning_reason(self, reason: str) -> str:
+        translation_key = NATIVE_MEDIA_REASON_TRANSLATION_KEYS.get(reason)
+        if translation_key is not None:
+            return t(translation_key)
+        return t("extractor.preview.reason.unknown", reason=reason)
+
+    def _emit_native_media_warning(
+        self,
+        emit_event: Callable[[dict], None] | None,
+        *,
+        unit: ExtractionUnit,
+        reason: str,
+        error: str = "",
+    ) -> None:
+        if emit_event is None:
+            return
+        source_name = Path(unit.material_ref.relative_path).name
+        description = (
+            t("extractor.nativeMedia.failed", name=source_name, error=error)
+            if error
+            else t(
+                "extractor.nativeMedia.unsupported",
+                name=source_name,
+                reason=self._native_media_warning_reason(reason),
+            )
+        )
+        emit_event(
+            InsightEvent(
+                title=t("extractor.nativeMedia.title"),
+                description=description,
+                status=InsightStatus.WARNING,
+                meta={
+                    "media_type": unit.media_type.value,
+                    "content_form": unit.content_form.value,
+                    "unit_id": unit.unit_id,
+                    "material_id": unit.material_ref.material_id,
+                    "relative_path": unit.material_ref.relative_path,
+                    "stage": "full",
+                    "reason": reason,
+                    "native_media_insight": True,
+                    "transcript_policy": "supplement_only",
+                },
+            ).model_dump(mode="json")
+        )
+
+    def _extract_text_units(
+        self,
+        project_id: str,
+        run_plan: FormalExtractionRunPlan,
+        *,
+        preset: CloudModelPreset,
+        extraction_stage: ExtractionArtifactStage,
+        chunk_limit: int | None = None,
+        handler: TextUnitHandler | None = None,
+        emit_progress: Callable[[int], None] | None = None,
+        progress_base: int = 0,
+        progress_span: int = 0,
+    ) -> tuple[int, dict[str, int], list[ChunkExtractionResult], dict[str, int]]:
+        unit_inputs = self._collect_text_units_from_run_plan(run_plan)
+        usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        stats = {
+            "succeeded_chunks": 0,
+            "skipped_chunks": 0,
+            "failed_chunks": 0,
+            "succeeded_episodes": 0,
+            "skipped_episodes": 0,
+            "failed_episodes": 0,
+            "succeeded_seasons": 0,
+            "skipped_seasons": 0,
+            "failed_seasons": 0,
+        }
+        if not unit_inputs:
+            return 0, usage_total, [], stats
+
+        text_handler = handler or self._text_unit_handler(preset)
+        text_backend = cloud_model_provider(preset.provider).backend_for("text")
+        text_prompt_purpose = (
+            "preview_text_unit_extraction"
+            if extraction_stage == ExtractionArtifactStage.PREVIEW
+            else "formal_text_unit_extraction"
+        )
+        project_paths = ensure_project_tree(project_id)
+        extracted_chunks: list[ChunkExtractionResult] = []
+        remaining_chunks = chunk_limit
+        total_units = len(unit_inputs)
+        for index, (season_id, unit) in enumerate(unit_inputs, start=1):
+            if remaining_chunks is not None and remaining_chunks <= 0:
+                break
+            try:
+                result = text_handler.execute(
+                    source_root=(
+                        project_paths.knowledge_base
+                        if unit.handler_options.get("storage_root") == "knowledge_base"
+                        else project_paths.materials
+                    ),
+                    unit=unit,
+                    season_id=season_id,
+                    extraction_stage=extraction_stage,
+                    extraction_run_id=(
+                        run_plan.run_id
+                        if extraction_stage == ExtractionArtifactStage.FULL
+                        else ""
+                    ),
+                    run_type=(
+                        FULL_EXTRACTION_RUN_TYPE
+                        if extraction_stage == ExtractionArtifactStage.FULL
+                        else "preview_trial"
+                    ),
+                    backend=text_backend,
+                    model_name=preset.model_name,
+                    base_url=preset.base_url,
+                    api_key=preset.api_key,
+                    chunk_limit=remaining_chunks,
+                )
+            except (ModelCallError, OSError, ValueError) as exc:
+                stats["failed_chunks"] += 1
+                LOGGER.warning(
+                    "Text extraction unit failed; project_id=%s unit_id=%s source_path=%s",
+                    project_id,
+                    unit.unit_id,
+                    unit.material_ref.relative_path,
+                    exc_info=True,
+                )
+                self._record_unit_failure_sample(
+                    project_id,
+                    run_plan,
+                    unit,
+                    prompt_purpose=text_prompt_purpose,
+                    provider=preset.provider,
+                    backend=text_backend,
+                    model_name=preset.model_name,
+                    extraction_stage=extraction_stage,
+                    season_id=season_id,
+                    exc=exc,
+                )
+                continue
+
+            if not result.chunks:
+                stats["skipped_chunks"] += 1
+                continue
+            for key in usage_total:
+                usage_total[key] += result.token_usage.get(key, 0)
+            for chunk in result.chunks:
+                if extraction_stage == ExtractionArtifactStage.PREVIEW:
+                    self.save_preview_chunk_extraction_result(project_id, chunk)
+                else:
+                    self.save_chunk_extraction_result(project_id, chunk)
+                extracted_chunks.append(chunk)
+            stats["succeeded_chunks"] += len(result.chunks)
+            if remaining_chunks is not None:
+                remaining_chunks -= len(result.chunks)
+            if emit_progress is not None and progress_span > 0:
+                emit_progress(progress_base + int(index * progress_span / total_units))
+
+        if extraction_stage == ExtractionArtifactStage.FULL and extracted_chunks:
+            self._finalize_serial_unit_contexts(
+                project_id,
+                extracted_chunks,
+                extraction_run_id=run_plan.run_id,
+                stats=stats,
+            )
+        return len(extracted_chunks), usage_total, extracted_chunks, stats
+
+    def _extract_native_media_insight_units(
+        self,
+        project_id: str,
+        run_plan: FormalExtractionRunPlan,
+        *,
+        preset: CloudModelPreset,
+        extraction_stage: ExtractionArtifactStage,
+        handler: NativeMediaInsightHandler | None = None,
+        emit_event: Callable[[dict], None] | None = None,
+        emit_progress: Callable[[int], None] | None = None,
+        progress_base: int = 0,
+        progress_span: int = 0,
+    ) -> tuple[int, dict[str, int], list[ChunkExtractionResult], dict[str, int]]:
+        unit_inputs = self._collect_native_media_insight_units_from_run_plan(run_plan)
+        usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        stats = {
+            "succeeded_chunks": 0,
+            "skipped_chunks": 0,
+            "failed_chunks": 0,
+            "succeeded_episodes": 0,
+            "skipped_episodes": 0,
+            "failed_episodes": 0,
+            "succeeded_seasons": 0,
+            "skipped_seasons": 0,
+            "failed_seasons": 0,
+        }
+        if not unit_inputs:
+            return 0, usage_total, [], stats
+
+        native_handler = handler or self._native_media_insight_handler(preset)
+        materials_root = ensure_project_tree(project_id).materials
+        extracted_chunks: list[ChunkExtractionResult] = []
+        total_units = len(unit_inputs)
+        for index, (season_id, unit) in enumerate(unit_inputs, start=1):
+            support = native_handler.support_status(unit)
+            if not support.supported:
+                stats["skipped_chunks"] += 1
+                self._emit_native_media_warning(
+                    emit_event,
+                    unit=unit,
+                    reason=support.reason,
+                )
+                if emit_progress is not None and progress_span > 0:
+                    emit_progress(progress_base + int(index * progress_span / total_units))
+                continue
+
+            try:
+                result = native_handler.execute(
+                    materials_root=materials_root,
+                    unit=unit,
+                    season_id=season_id,
+                    extraction_stage=extraction_stage,
+                    extraction_run_id=(
+                        run_plan.run_id
+                        if extraction_stage == ExtractionArtifactStage.FULL
+                        else ""
+                    ),
+                    run_type=(
+                        FULL_EXTRACTION_RUN_TYPE
+                        if extraction_stage == ExtractionArtifactStage.FULL
+                        else "preview_trial"
+                    ),
+                    backend=support.backend,  # type: ignore[arg-type]
+                    model_name=preset.model_name,
+                    base_url=preset.base_url,
+                    api_key=preset.api_key,
+                )
+            except (ModelCallError, OSError, ValueError) as exc:
+                stats["failed_chunks"] += 1
+                LOGGER.warning(
+                    "Native media insight unit failed; project_id=%s unit_id=%s source_path=%s",
+                    project_id,
+                    unit.unit_id,
+                    unit.material_ref.relative_path,
+                    exc_info=True,
+                )
+                self._emit_native_media_warning(
+                    emit_event,
+                    unit=unit,
+                    reason="native_media_request_failed",
+                    error=self._compact_exception_message(exc),
+                )
+                self._record_unit_failure_sample(
+                    project_id,
+                    run_plan,
+                    unit,
+                    prompt_purpose=NATIVE_MEDIA_INSIGHT_PROMPT,
+                    provider=preset.provider,
+                    backend=support.backend or "",
+                    model_name=preset.model_name,
+                    extraction_stage=extraction_stage,
+                    season_id=season_id,
+                    exc=exc,
+                    metadata={"native_media_insight": True},
+                )
+                if emit_progress is not None and progress_span > 0:
+                    emit_progress(progress_base + int(index * progress_span / total_units))
+                continue
+
+            if not result.chunks:
+                stats["skipped_chunks"] += 1
+                continue
+            for key in usage_total:
+                usage_total[key] += result.token_usage.get(key, 0)
+            for chunk in result.chunks:
+                if extraction_stage == ExtractionArtifactStage.PREVIEW:
+                    self.save_preview_chunk_extraction_result(project_id, chunk)
+                else:
+                    self.save_chunk_extraction_result(project_id, chunk)
+                extracted_chunks.append(chunk)
+            stats["succeeded_chunks"] += len(result.chunks)
+            if emit_progress is not None and progress_span > 0:
+                emit_progress(progress_base + int(index * progress_span / total_units))
+
+        if extraction_stage == ExtractionArtifactStage.FULL and extracted_chunks:
+            self._finalize_serial_unit_contexts(
+                project_id,
+                extracted_chunks,
+                extraction_run_id=run_plan.run_id,
+                stats=stats,
+            )
+        return len(extracted_chunks), usage_total, extracted_chunks, stats
+
+    def _extract_image_units(
+        self,
+        project_id: str,
+        run_plan: FormalExtractionRunPlan,
+        *,
+        preset: CloudModelPreset,
+        extraction_stage: ExtractionArtifactStage,
+        chunk_limit: int | None = None,
+        handler: ImageUnitHandler | None = None,
+        emit_progress: Callable[[int], None] | None = None,
+        progress_base: int = 0,
+        progress_span: int = 0,
+    ) -> tuple[int, dict[str, int], list[ChunkExtractionResult], dict[str, int]]:
+        unit_inputs = self._collect_image_units_from_run_plan(run_plan)
+        usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        stats = {
+            "succeeded_chunks": 0,
+            "skipped_chunks": 0,
+            "failed_chunks": 0,
+            "succeeded_episodes": 0,
+            "skipped_episodes": 0,
+            "failed_episodes": 0,
+            "succeeded_seasons": 0,
+            "skipped_seasons": 0,
+            "failed_seasons": 0,
+        }
+        if not unit_inputs:
+            return 0, usage_total, [], stats
+        if not provider_supports_capability(preset.provider, "image"):
+            stats["skipped_chunks"] = len(unit_inputs)
+            LOGGER.warning(
+                "Image extraction skipped because the provider does not support image input; "
+                "project_id=%s provider=%s units=%s",
+                project_id,
+                preset.provider,
+                len(unit_inputs),
+            )
+            return 0, usage_total, [], stats
+
+        image_handler = handler or self._image_unit_handler(preset)
+        image_backend = cloud_model_provider(preset.provider).backend_for("image")
+        image_prompt_purpose = (
+            "preview_image_unit_extraction"
+            if extraction_stage == ExtractionArtifactStage.PREVIEW
+            else "formal_image_unit_extraction"
+        )
+        materials_root = ensure_project_tree(project_id).materials
+        extracted_chunks: list[ChunkExtractionResult] = []
+        remaining_chunks = chunk_limit
+        total_units = len(unit_inputs)
+        for index, (season_id, unit) in enumerate(unit_inputs, start=1):
+            if remaining_chunks is not None and remaining_chunks <= 0:
+                break
+            try:
+                result = image_handler.execute(
+                    materials_root=materials_root,
+                    unit=unit,
+                    season_id=season_id,
+                    extraction_stage=extraction_stage,
+                    extraction_run_id=(
+                        run_plan.run_id
+                        if extraction_stage == ExtractionArtifactStage.FULL
+                        else ""
+                    ),
+                    run_type=(
+                        FULL_EXTRACTION_RUN_TYPE
+                        if extraction_stage == ExtractionArtifactStage.FULL
+                        else "preview_trial"
+                    ),
+                    backend=image_backend,
+                    model_name=preset.model_name,
+                    base_url=preset.base_url,
+                    api_key=preset.api_key,
+                )
+            except (ModelCallError, OSError, ValueError) as exc:
+                stats["failed_chunks"] += 1
+                LOGGER.warning(
+                    "Image extraction unit failed; project_id=%s unit_id=%s source_path=%s",
+                    project_id,
+                    unit.unit_id,
+                    unit.material_ref.relative_path,
+                    exc_info=True,
+                )
+                self._record_unit_failure_sample(
+                    project_id,
+                    run_plan,
+                    unit,
+                    prompt_purpose=image_prompt_purpose,
+                    provider=preset.provider,
+                    backend=image_backend,
+                    model_name=preset.model_name,
+                    extraction_stage=extraction_stage,
+                    season_id=season_id,
+                    exc=exc,
+                )
+                continue
+
+            if not result.chunks:
+                stats["skipped_chunks"] += 1
+                continue
+            for key in usage_total:
+                usage_total[key] += result.token_usage.get(key, 0)
+            for chunk in result.chunks:
+                if extraction_stage == ExtractionArtifactStage.PREVIEW:
+                    self.save_preview_chunk_extraction_result(project_id, chunk)
+                else:
+                    self.save_chunk_extraction_result(project_id, chunk)
+                extracted_chunks.append(chunk)
+            stats["succeeded_chunks"] += len(result.chunks)
+            if remaining_chunks is not None:
+                remaining_chunks -= len(result.chunks)
+            if emit_progress is not None and progress_span > 0:
+                emit_progress(progress_base + int(index * progress_span / total_units))
+
+        if extraction_stage == ExtractionArtifactStage.FULL and extracted_chunks:
+            self._finalize_serial_unit_contexts(
+                project_id,
+                extracted_chunks,
+                extraction_run_id=run_plan.run_id,
+                stats=stats,
+            )
+        return len(extracted_chunks), usage_total, extracted_chunks, stats
+
+    def _finalize_serial_unit_contexts(
+        self,
+        project_id: str,
+        chunks: list[ChunkExtractionResult],
+        *,
+        extraction_run_id: str,
+        stats: dict[str, int],
+    ) -> None:
+        episode_keys = sorted({(chunk.season_id, chunk.episode_id) for chunk in chunks})
+        successful_seasons: set[str] = set()
+        for season_id, episode_id in episode_keys:
+            try:
+                self.merge_episode_content(
+                    project_id,
+                    season_id,
+                    episode_id,
+                    extraction_run_id=extraction_run_id,
+                )
+                self.generate_episode_summary(
+                    project_id,
+                    season_id,
+                    episode_id,
+                    extraction_run_id=extraction_run_id,
+                )
+            except (OSError, ValueError):
+                stats["failed_episodes"] += 1
+                LOGGER.warning(
+                    "Serial unit episode aggregation failed; "
+                    "project_id=%s season_id=%s episode_id=%s",
+                    project_id,
+                    season_id,
+                    episode_id,
+                    exc_info=True,
+                )
+                continue
+            stats["succeeded_episodes"] += 1
+            successful_seasons.add(season_id)
+
+        for season_id in sorted(successful_seasons):
+            try:
+                self.merge_season_content(
+                    project_id,
+                    season_id,
+                    extraction_run_id=extraction_run_id,
+                )
+                self.generate_season_summary(
+                    project_id,
+                    season_id,
+                    extraction_run_id=extraction_run_id,
+                )
+            except (OSError, ValueError):
+                stats["failed_seasons"] += 1
+                LOGGER.warning(
+                    "Serial unit season aggregation failed; project_id=%s season_id=%s",
+                    project_id,
+                    season_id,
+                    exc_info=True,
+                )
+                continue
+            stats["succeeded_seasons"] += 1
 
     def _source_trace_for_unit(self, unit: ExtractionUnit) -> SourceTrace:
         return SourceTrace(
@@ -1763,14 +2605,15 @@ class Extractor(QObject):
         )
         payload = result.payload
         source_trace = self._source_trace_from_chunks(episode_chunks)
+        media_types = self._media_types_from_source_trace(source_trace)
         episode_content = {
             "season_id": season_id,
             "episode_id": episode_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
             "extraction_run_id": extraction_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
-            "source_kind": "video",
-            "media_types": self._media_types_from_source_trace(source_trace),
+            "source_kind": self._source_kind_from_media_types(media_types),
+            "media_types": media_types,
             "schema_version": 1,
             "source_trace": source_trace,
             "source_counts": {
@@ -1876,6 +2719,7 @@ class Extractor(QObject):
         )
         payload = result.payload
         source_trace = self._source_trace_for_episode_summary(episode_content)
+        media_types = self._media_types_from_source_trace(source_trace)
         source_counts = episode_content.get("source_counts", {})
         if not isinstance(source_counts, dict):
             source_counts = {}
@@ -1885,8 +2729,8 @@ class Extractor(QObject):
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
             "extraction_run_id": extraction_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
-            "source_kind": "video",
-            "media_types": self._media_types_from_source_trace(source_trace),
+            "source_kind": self._source_kind_from_media_types(media_types),
+            "media_types": media_types,
             "schema_version": 1,
             "source_trace": source_trace,
             "source_counts": {
@@ -2094,13 +2938,14 @@ class Extractor(QObject):
             episode_summaries=episode_summaries,
             previous_season_backgrounds=previous_season_backgrounds,
         )
+        media_types = self._media_types_from_source_trace(source_trace)
         season_content = {
             "season_id": season_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
             "extraction_run_id": extraction_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
-            "source_kind": "video",
-            "media_types": self._media_types_from_source_trace(source_trace),
+            "source_kind": self._source_kind_from_media_types(media_types),
+            "media_types": media_types,
             "schema_version": 1,
             "source_trace": source_trace,
             "source_counts": {
@@ -2240,13 +3085,14 @@ class Extractor(QObject):
             episode_summaries=episode_summaries,
             previous_season_backgrounds=previous_series_background,
         )
+        media_types = self._media_types_from_source_trace(source_trace)
         summary = {
             "season_id": season_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
             "extraction_run_id": extraction_run_id,
             "run_type": FULL_EXTRACTION_RUN_TYPE,
-            "source_kind": "video",
-            "media_types": self._media_types_from_source_trace(source_trace),
+            "source_kind": self._source_kind_from_media_types(media_types),
+            "media_types": media_types,
             "schema_version": 1,
             "source_trace": source_trace,
             "source_counts": {
@@ -2379,6 +3225,9 @@ class Extractor(QObject):
             options=TranscriptionOptions(language=language, force_rebuild=force_rebuild),
         )
 
+    def _transcript_provider(self) -> TranscriptProvider:
+        return TranscriptProvider()
+
     def ensure_episode_transcripts_from_manifest(
         self,
         project_id: str,
@@ -2427,6 +3276,28 @@ class Extractor(QObject):
                     episode_id,
                     self._compact_exception_message(exc),
                 )
+                self._record_extraction_failure_sample(
+                    project_id,
+                    prompt_purpose="audio_transcription",
+                    provider="local_transcription",
+                    backend="local",
+                    media_type="audio",
+                    content_form="unknown",
+                    source_path=(
+                        self._project_relative_source_path(project_id, Path(material_paths[0]))
+                        if material_paths
+                        else ""
+                    ),
+                    source_paths=[
+                        self._project_relative_source_path(project_id, Path(path))
+                        for path in material_paths
+                    ],
+                    extraction_stage="full",
+                    season_id=season_id,
+                    episode_id=episode_id,
+                    failure_kind="audio_transcription_failed",
+                    exc=exc,
+                )
                 if emit_event is not None:
                     emit_event(
                         InsightEvent(
@@ -2463,11 +3334,26 @@ class Extractor(QObject):
         language: str = "auto",
         force_rebuild: bool = False,
         emit_event: Callable[[dict], None] | None = None,
+        include_video: bool = True,
+        include_audio: bool = True,
+        provider: TranscriptProvider | None = None,
+        persist_run_plan: bool = True,
     ) -> list[EpisodeTranscript]:
-        provider = TranscriptProvider()
-        provider.prepare_run_plan(project_id, run_plan)
-        kb.save_extraction_run_plan(project_id, run_plan)
-        requests = provider.collect_requests(project_id, run_plan)
+        provider = provider or self._transcript_provider()
+        provider.prepare_run_plan(
+            project_id,
+            run_plan,
+            include_video=include_video,
+            include_audio=include_audio,
+        )
+        if persist_run_plan:
+            kb.save_extraction_run_plan(project_id, run_plan)
+        requests = provider.collect_requests(
+            project_id,
+            run_plan,
+            include_video=include_video,
+            include_audio=include_audio,
+        )
         transcripts: list[EpisodeTranscript] = []
         total = len(requests)
         for index, request in enumerate(requests, start=1):
@@ -2478,6 +3364,7 @@ class Extractor(QObject):
                     DerivedArtifactStatus.MISSING,
                     warning="no_material_paths",
                 )
+                provider.remove_text_unit(run_plan, request.artifact_id)
                 continue
             self._emit_transcript_event(emit_event, request, index, total, InsightStatus.RUNNING)
             try:
@@ -2487,7 +3374,8 @@ class Extractor(QObject):
                     language=language,
                     force_rebuild=force_rebuild,
                 )
-            except AudioTranscriptionError as exc:
+                provider.materialize_text_unit(run_plan, request.artifact_id, transcript)
+            except (AudioTranscriptionError, ValueError) as exc:
                 warning = self._compact_exception_message(exc)
                 provider.mark_status(
                     run_plan,
@@ -2495,12 +3383,37 @@ class Extractor(QObject):
                     DerivedArtifactStatus.FAILED,
                     warning=warning,
                 )
+                provider.remove_text_unit(run_plan, request.artifact_id)
                 LOGGER.warning(
                     "Episode transcription failed; project_id=%s season_id=%s episode_id=%s error=%s",
                     project_id,
                     request.season_id,
                     request.episode_id,
                     warning,
+                )
+                self._record_extraction_failure_sample(
+                    project_id,
+                    prompt_purpose="audio_transcription",
+                    provider="local_transcription",
+                    backend="local",
+                    media_type="audio",
+                    content_form="unknown",
+                    source_path=(
+                        self._project_relative_source_path(project_id, request.material_paths[0])
+                        if request.material_paths
+                        else ""
+                    ),
+                    source_paths=[
+                        self._project_relative_source_path(project_id, path)
+                        for path in request.material_paths
+                    ],
+                    extraction_stage="full",
+                    extraction_run_id=run_plan.run_id,
+                    season_id=request.season_id,
+                    episode_id=request.episode_id,
+                    failure_kind="audio_transcription_failed",
+                    exc=exc,
+                    metadata={"artifact_id": request.artifact_id},
                 )
                 if emit_event is not None:
                     emit_event(
@@ -2515,7 +3428,6 @@ class Extractor(QObject):
                         ).model_dump(mode="json")
                     )
                 continue
-            provider.mark_status(run_plan, request.artifact_id, DerivedArtifactStatus.READY)
             transcripts.append(transcript)
             self._emit_transcript_event(
                 emit_event,
@@ -2525,7 +3437,8 @@ class Extractor(QObject):
                 InsightStatus.DONE,
                 segment_count=len(transcript.segments),
             )
-        kb.save_extraction_run_plan(project_id, run_plan)
+        if persist_run_plan:
+            kb.save_extraction_run_plan(project_id, run_plan)
         return transcripts
 
     def _emit_transcript_event(
@@ -2754,6 +3667,8 @@ class Extractor(QObject):
                 config.project_id,
                 run_plan,
                 emit_event=emit_event,
+                include_video=True,
+                include_audio=False,
             )
             transcripts_by_episode = {
                 (transcript.source.season_id, transcript.source.episode_id): transcript
@@ -2970,6 +3885,17 @@ class Extractor(QObject):
                     ),
                     status=InsightStatus.WARNING,
                 )
+                self._record_video_chunk_failure_sample(
+                    config,
+                    chunk_input,
+                    prompt_purpose=FORMAL_VIDEO_CHUNK_PROMPT,
+                    provider=provider,
+                    backend=backend,
+                    model_name=model_name,
+                    extraction_stage=ExtractionArtifactStage.FULL,
+                    exc=exc,
+                    metadata={"mode": "fast", "attempts": exc.attempts},
+                )
                 return {"index": index, "status": "failed"}
             except ModelCallError as exc:
                 error_kind = (
@@ -3005,6 +3931,17 @@ class Extractor(QObject):
                         video_name=video_path.name,
                     ),
                     status=InsightStatus.WARNING,
+                )
+                self._record_video_chunk_failure_sample(
+                    config,
+                    chunk_input,
+                    prompt_purpose=FORMAL_VIDEO_CHUNK_PROMPT,
+                    provider=provider,
+                    backend=backend,
+                    model_name=model_name,
+                    extraction_stage=ExtractionArtifactStage.FULL,
+                    exc=exc,
+                    metadata={"mode": "fast", "status": status, "error_kind": error_kind},
                 )
                 return {"index": index, "status": status}
             except Exception as exc:  # noqa: BLE001
@@ -3501,6 +4438,8 @@ class Extractor(QObject):
                 config.project_id,
                 run_plan,
                 emit_event=emit_event,
+                include_video=True,
+                include_audio=False,
             )
             transcripts_by_episode = {
                 (transcript.source.season_id, transcript.source.episode_id): transcript
@@ -3767,6 +4706,17 @@ class Extractor(QObject):
                                 status=InsightStatus.WARNING,
                             ).model_dump(mode="json")
                         )
+                    self._record_video_chunk_failure_sample(
+                        config,
+                        chunk_input,
+                        prompt_purpose=FORMAL_VIDEO_CHUNK_PROMPT,
+                        provider=provider,
+                        backend=backend,
+                        model_name=model_name,
+                        extraction_stage=ExtractionArtifactStage.FULL,
+                        exc=exc,
+                        metadata={"mode": "full", "attempts": exc.attempts},
+                    )
                     stats["failed_chunks"] += 1
                     continue
                 except ModelCallError as exc:
@@ -3794,6 +4744,21 @@ class Extractor(QObject):
                             self._compact_exception_message(exc),
                         )
                         self._emit_full_warning(emit_event, description)
+                        self._record_video_chunk_failure_sample(
+                            config,
+                            chunk_input,
+                            prompt_purpose=FORMAL_VIDEO_CHUNK_PROMPT,
+                            provider=provider,
+                            backend=backend,
+                            model_name=model_name,
+                            extraction_stage=ExtractionArtifactStage.FULL,
+                            exc=exc,
+                            metadata={
+                                "mode": "full",
+                                "status": "stopped",
+                                "error_kind": error_kind,
+                            },
+                        )
                         raise ExtractionStoppedError(description) from exc
                     if self._provider_rejected_video(exc):
                         stats["skipped_chunks"] += 1
@@ -3824,6 +4789,17 @@ class Extractor(QObject):
                                 status=InsightStatus.WARNING,
                             ).model_dump(mode="json")
                         )
+                    self._record_video_chunk_failure_sample(
+                        config,
+                        chunk_input,
+                        prompt_purpose=FORMAL_VIDEO_CHUNK_PROMPT,
+                        provider=provider,
+                        backend=backend,
+                        model_name=model_name,
+                        extraction_stage=ExtractionArtifactStage.FULL,
+                        exc=exc,
+                        metadata={"mode": "full", "error_kind": error_kind},
+                    )
                     continue
                 except Exception as exc:  # noqa: BLE001
                     stats["failed_chunks"] += 1
@@ -4000,8 +4976,13 @@ class Extractor(QObject):
         emit_token_usage: Callable[[dict[str, int]], None] | None = None,
         emit_event: Callable[[dict], None] | None = None,
         emit_progress: Callable[[int], None] | None = None,
+        video_paths: list[Path] | None = None,
     ) -> tuple[int, dict[str, int], list[ChunkExtractionResult]]:
-        videos = self._collect_preview_video_chunks(config.project_id)
+        videos = (
+            list(video_paths)
+            if video_paths is not None
+            else self._collect_preview_video_chunks(config.project_id)
+        )
         if not videos:
             return (0, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}, [])
         created = 0
@@ -4176,6 +5157,23 @@ class Extractor(QObject):
                     error_kind,
                     self._compact_exception_message(exc),
                 )
+                self._record_extraction_failure_sample(
+                    config.project_id,
+                    project_name=config.name,
+                    prompt_purpose=PREVIEW_VIDEO_CHUNK_PROMPT,
+                    provider=provider,
+                    backend=backend,
+                    model_name=model_name,
+                    media_type="video",
+                    content_form="unknown",
+                    unit_kind="preview_video_chunk",
+                    source_path=self._project_relative_source_path(config.project_id, video_path),
+                    extraction_stage=ExtractionArtifactStage.PREVIEW.value,
+                    chunk_id=video_path.stem,
+                    failure_kind=error_kind,
+                    exc=exc,
+                    metadata={"stage": "preview"},
+                )
                 if emit_event is not None:
                     emit_event(
                         InsightEvent(
@@ -4316,6 +5314,51 @@ class Extractor(QObject):
     ) -> dict[str, Any] | None:
         return kb.load_previous_season_summary(project_id, season_id, enabled=enabled)
 
+    def _formal_unsupported_unit_meta(self, unsupported: FormalUnsupportedUnit) -> dict[str, str]:
+        unit = unsupported.unit
+        return {
+            "media_type": unit.media_type.value,
+            "content_form": unit.content_form.value,
+            "unit_id": unit.unit_id,
+            "material_id": unit.material_ref.material_id,
+            "relative_path": unit.material_ref.relative_path,
+            "stage": "full",
+            "reason": unsupported.reason,
+        }
+
+    def _formal_warning_reason(self, reason: str) -> str:
+        translation_key = FORMAL_REASON_TRANSLATION_KEYS.get(reason)
+        if translation_key is not None:
+            return t(translation_key)
+        return t("extractor.preview.reason.unknown", reason=reason)
+
+    def _emit_formal_unsupported_units(
+        self,
+        emit_event: Callable[[dict], None],
+        unsupported_units: tuple[FormalUnsupportedUnit, ...],
+    ) -> None:
+        for unsupported in unsupported_units:
+            source_name = Path(unsupported.unit.material_ref.relative_path).name
+            emit_event(
+                InsightEvent(
+                    title=t("extractor.full.chunk.title"),
+                    description=t(
+                        "extractor.full.unitUnsupported",
+                        name=source_name,
+                        reason=self._formal_warning_reason(unsupported.reason),
+                    ),
+                    status=InsightStatus.WARNING,
+                    meta=self._formal_unsupported_unit_meta(unsupported),
+                ).model_dump(mode="json")
+            )
+
+    def _formal_dispatch_meta(self, dispatch_plan: FormalDispatchPlan) -> dict[str, Any]:
+        return {
+            "dispatch_handlers": dispatch_plan.handler_kinds,
+            "dispatch_supported_units": dispatch_plan.supported_unit_count,
+            "unsupported_units": len(dispatch_plan.unsupported_units),
+        }
+
     def run_full_extraction_streaming(
         self,
         config: ProjectConfig,
@@ -4389,11 +5432,15 @@ class Extractor(QObject):
         kb.save_extraction_run_plan(config.project_id, run_plan)
         kb.initialize_structure_from_run_plan(config.project_id, run_plan)
         kb.save_source_manifest(config.project_id, manifest)
-        chunk_inputs = self._collect_formal_video_chunk_inputs_from_run_plan(
-            config.project_id,
+        initial_dispatch_plan = build_formal_dispatch_plan(
             run_plan,
+            image_input_supported=True,
         )
-        if not chunk_inputs:
+        if initial_dispatch_plan.supported_unit_count <= 0:
+            self._emit_formal_unsupported_units(
+                emit_event,
+                initial_dispatch_plan.unsupported_units,
+            )
             message = t("extractor.full.noVideoMaterials")
             emit_event(
                 InsightEvent(
@@ -4423,14 +5470,97 @@ class Extractor(QObject):
 
         video_input_mode = normalize_video_input_mode(preset.video_input_mode, preset.provider)
         provider_profile = cloud_model_provider(preset.provider)
-        if self._video_mode_requires_transcript(video_input_mode):
-            TranscriptProvider().prepare_run_plan(config.project_id, run_plan)
+        dispatch_plan = build_formal_dispatch_plan(
+            run_plan,
+            image_input_supported=provider_supports_capability(preset.provider, "image"),
+            native_media_handler=self._native_media_insight_handler(preset),
+        )
+        self._emit_formal_unsupported_units(emit_event, dispatch_plan.unsupported_units)
+        chunk_inputs = (
+            self._collect_formal_video_chunk_inputs_from_run_plan(
+                config.project_id,
+                run_plan,
+            )
+            if dispatch_plan.has_handler(FormalDispatchKind.VIDEO)
+            else []
+        )
+        text_unit_count = dispatch_plan.handler_unit_count(FormalDispatchKind.TEXT)
+        image_unit_count = dispatch_plan.handler_unit_count(FormalDispatchKind.IMAGE)
+        audio_transcript_count = dispatch_plan.handler_unit_count(
+            FormalDispatchKind.AUDIO_TRANSCRIPT
+        )
+        native_media_unit_count = dispatch_plan.handler_unit_count(
+            FormalDispatchKind.NATIVE_MEDIA
+        )
+        fast_serial_handlers = [
+            handler.value
+            for handler, unit_count in (
+                (FormalDispatchKind.TEXT, text_unit_count),
+                (FormalDispatchKind.IMAGE, image_unit_count),
+                (FormalDispatchKind.AUDIO_TRANSCRIPT, audio_transcript_count),
+                (FormalDispatchKind.NATIVE_MEDIA, native_media_unit_count),
+            )
+            if unit_count
+        ]
+        if is_fast_mode and fast_serial_handlers:
+            self._emit_full_event(
+                emit_event,
+                title=t("extractor.full.chunk.title"),
+                description=t(
+                    "extractor.fast.serialFallback",
+                    handlers="/".join(fast_serial_handlers),
+                ),
+                status=InsightStatus.WARNING,
+                meta={
+                    **self._formal_dispatch_meta(dispatch_plan),
+                    "serial_handlers": fast_serial_handlers,
+                },
+            )
+        if audio_transcript_count:
+            self.ensure_episode_transcripts_from_run_plan(
+                config.project_id,
+                run_plan,
+                emit_event=emit_event,
+                include_video=False,
+                include_audio=True,
+            )
+            dispatch_plan = build_formal_dispatch_plan(
+                run_plan,
+                image_input_supported=provider_supports_capability(preset.provider, "image"),
+                native_media_handler=self._native_media_insight_handler(preset),
+            )
+            text_unit_count = dispatch_plan.handler_unit_count(FormalDispatchKind.TEXT)
+            image_unit_count = dispatch_plan.handler_unit_count(FormalDispatchKind.IMAGE)
+            native_media_unit_count = dispatch_plan.handler_unit_count(
+                FormalDispatchKind.NATIVE_MEDIA
+            )
+        if chunk_inputs and self._video_mode_requires_transcript(video_input_mode):
+            self._transcript_provider().prepare_run_plan(
+                config.project_id,
+                run_plan,
+                include_video=True,
+                include_audio=False,
+            )
             kb.save_extraction_run_plan(config.project_id, run_plan)
             chunk_inputs = self._collect_formal_video_chunk_inputs_from_run_plan(
                 config.project_id,
                 run_plan,
             )
-        if is_fast_mode:
+        created_count = 0
+        extraction_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        extracted_chunks: list[ChunkExtractionResult] = []
+        run_stats = {
+            "succeeded_chunks": 0,
+            "skipped_chunks": 0,
+            "failed_chunks": 0,
+            "succeeded_episodes": 0,
+            "skipped_episodes": 0,
+            "failed_episodes": 0,
+            "succeeded_seasons": 0,
+            "skipped_seasons": 0,
+            "failed_seasons": 0,
+        }
+        if chunk_inputs and is_fast_mode:
             created_count, extraction_usage, extracted_chunks, run_stats = (
                 self._extract_fast_video_units(
                     config,
@@ -4453,7 +5583,7 @@ class Extractor(QObject):
                     emit_progress=emit_progress,
                 )
             )
-        else:
+        elif chunk_inputs:
             created_count, extraction_usage, extracted_chunks, run_stats = (
                 self._extract_full_video_units(
                     config,
@@ -4475,7 +5605,7 @@ class Extractor(QObject):
                     emit_progress=emit_progress,
                 )
             )
-        if is_fast_mode:
+        if is_fast_mode and chunk_inputs:
             extraction_usage, episode_stats = self._finalize_fast_episode_contexts_from_chunks(
                 config,
                 manifest,
@@ -4510,6 +5640,104 @@ class Extractor(QObject):
             )
             for key, value in season_stats.items():
                 run_stats[key] = run_stats.get(key, 0) + value
+
+        run_stats.update(self._formal_dispatch_meta(dispatch_plan))
+        if fast_serial_handlers:
+            run_stats["fast_serial_handlers"] = fast_serial_handlers
+        non_video_handler_count = sum(
+            (bool(text_unit_count), bool(image_unit_count), bool(native_media_unit_count))
+        )
+        non_video_progress_base = 80 if chunk_inputs else 5
+        non_video_progress_span = 15 if chunk_inputs else 90
+        per_handler_progress_span = (
+            non_video_progress_span // non_video_handler_count
+            if non_video_handler_count
+            else 0
+        )
+        text_progress_span = per_handler_progress_span if text_unit_count else 0
+        if text_unit_count:
+            text_created, text_usage, text_chunks, text_stats = self._extract_text_units(
+                config.project_id,
+                run_plan,
+                preset=preset,
+                extraction_stage=ExtractionArtifactStage.FULL,
+                emit_progress=emit_progress,
+                progress_base=non_video_progress_base,
+                progress_span=text_progress_span,
+            )
+        else:
+            text_created = 0
+            text_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            text_chunks = []
+            text_stats = {}
+        created_count += text_created
+        extracted_chunks.extend(text_chunks)
+        for key in extraction_usage:
+            extraction_usage[key] += text_usage.get(key, 0)
+        for key, value in text_stats.items():
+            run_stats[key] = run_stats.get(key, 0) + value
+
+        image_progress_base = non_video_progress_base + text_progress_span
+        image_progress_span = (
+            per_handler_progress_span if image_unit_count else 0
+        )
+        if image_unit_count:
+            image_created, image_usage, image_chunks, image_stats = self._extract_image_units(
+                config.project_id,
+                run_plan,
+                preset=preset,
+                extraction_stage=ExtractionArtifactStage.FULL,
+                emit_progress=emit_progress,
+                progress_base=image_progress_base,
+                progress_span=image_progress_span,
+            )
+        else:
+            image_created = 0
+            image_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            image_chunks = []
+            image_stats = {}
+        created_count += image_created
+        extracted_chunks.extend(image_chunks)
+        for key in extraction_usage:
+            extraction_usage[key] += image_usage.get(key, 0)
+        for key, value in image_stats.items():
+            run_stats[key] = run_stats.get(key, 0) + value
+
+        native_progress_base = image_progress_base + image_progress_span
+        native_progress_span = (
+            non_video_progress_span - text_progress_span - image_progress_span
+            if native_media_unit_count
+            else 0
+        )
+        if native_media_unit_count:
+            (
+                native_created,
+                native_usage,
+                native_chunks,
+                native_stats,
+            ) = self._extract_native_media_insight_units(
+                config.project_id,
+                run_plan,
+                preset=preset,
+                extraction_stage=ExtractionArtifactStage.FULL,
+                emit_event=emit_event,
+                emit_progress=emit_progress,
+                progress_base=native_progress_base,
+                progress_span=native_progress_span,
+            )
+        else:
+            native_created = 0
+            native_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            native_chunks = []
+            native_stats = {}
+        created_count += native_created
+        extracted_chunks.extend(native_chunks)
+        for key in extraction_usage:
+            extraction_usage[key] += native_usage.get(key, 0)
+        for key, value in native_stats.items():
+            run_stats[key] = run_stats.get(key, 0) + value
+        if emit_token_usage is not None and any(extraction_usage.values()):
+            emit_token_usage(extraction_usage)
         emit_progress(96)
         stale_card_ids: list[str] = []
         if extracted_chunks and (not is_fast_mode or run_stats.get("succeeded_seasons", 0) > 0):
@@ -4567,6 +5795,187 @@ class Extractor(QObject):
         )
         return extracted_chunks
 
+    def _preview_candidate_meta(
+        self,
+        candidate: PreviewCandidate | PreviewSkippedUnit,
+    ) -> dict[str, str]:
+        unit = candidate.unit
+        return {
+            "media_type": unit.media_type.value,
+            "content_form": unit.content_form.value,
+            "unit_id": unit.unit_id,
+            "material_id": unit.material_ref.material_id,
+            "relative_path": unit.material_ref.relative_path,
+            "stage": "preview",
+        }
+
+    def _preview_candidate_label(self, candidate: PreviewCandidate) -> str:
+        return t(PREVIEW_KIND_TRANSLATION_KEYS[candidate.kind])
+
+    def _preview_warning_reason(self, reason: str) -> str:
+        translation_key = PREVIEW_REASON_TRANSLATION_KEYS.get(reason)
+        if translation_key is not None:
+            return t(translation_key)
+        return t("extractor.preview.reason.unknown", reason=reason)
+
+    def _emit_preview_skipped_unit(
+        self,
+        emit_event: Callable[[dict], None],
+        skipped: PreviewSkippedUnit,
+    ) -> None:
+        source_name = Path(skipped.unit.material_ref.relative_path).name
+        emit_event(
+            InsightEvent(
+                title=t("extractor.chunk.title"),
+                description=t(
+                    "extractor.preview.unitUnsupported",
+                    name=source_name,
+                    reason=self._preview_warning_reason(skipped.reason),
+                ),
+                status=InsightStatus.WARNING,
+                meta={**self._preview_candidate_meta(skipped), "reason": skipped.reason},
+            ).model_dump(mode="json")
+        )
+
+    def _emit_preview_candidate_running(
+        self,
+        emit_event: Callable[[dict], None],
+        candidate: PreviewCandidate,
+        *,
+        current: int,
+        total: int,
+    ) -> None:
+        source_name = Path(candidate.unit.material_ref.relative_path).name
+        emit_event(
+            InsightEvent(
+                title=t("extractor.chunk.title"),
+                description=t(
+                    "extractor.preview.unitRunning",
+                    kind=self._preview_candidate_label(candidate),
+                    name=source_name,
+                    current=current,
+                    total=total,
+                ),
+                status=InsightStatus.RUNNING,
+                meta={
+                    **self._preview_candidate_meta(candidate),
+                    "execution_kind": candidate.kind.value,
+                },
+            ).model_dump(mode="json")
+        )
+
+    def _emit_preview_candidate_no_result(
+        self,
+        emit_event: Callable[[dict], None],
+        candidate: PreviewCandidate,
+    ) -> None:
+        source_name = Path(candidate.unit.material_ref.relative_path).name
+        emit_event(
+            InsightEvent(
+                title=t("extractor.chunk.title"),
+                description=t(
+                    "extractor.preview.unitNoResult",
+                    kind=self._preview_candidate_label(candidate),
+                    name=source_name,
+                ),
+                status=InsightStatus.WARNING,
+                meta={
+                    **self._preview_candidate_meta(candidate),
+                    "execution_kind": candidate.kind.value,
+                },
+            ).model_dump(mode="json")
+        )
+
+    def _execute_preview_candidate(
+        self,
+        config: ProjectConfig,
+        run_plan: FormalExtractionRunPlan,
+        candidate: PreviewCandidate,
+        *,
+        preset: CloudModelPreset,
+        emit_event: Callable[[dict], None],
+    ) -> tuple[int, dict[str, int], list[ChunkExtractionResult]]:
+        candidate_plan = run_plan_for_preview_unit(run_plan, candidate.unit.unit_id)
+        if candidate.kind in PREVIEW_TEXT_CANDIDATE_KINDS:
+            created, usage, chunks, _ = self._extract_text_units(
+                config.project_id,
+                candidate_plan,
+                preset=preset,
+                extraction_stage=ExtractionArtifactStage.PREVIEW,
+                chunk_limit=1,
+            )
+            return created, usage, chunks
+
+        if candidate.kind == PreviewCandidateKind.IMAGE:
+            created, usage, chunks, _ = self._extract_image_units(
+                config.project_id,
+                candidate_plan,
+                preset=preset,
+                extraction_stage=ExtractionArtifactStage.PREVIEW,
+                chunk_limit=1,
+            )
+            return created, usage, chunks
+
+        if candidate.kind == PreviewCandidateKind.AUDIO_TRANSCRIPT:
+            self.ensure_episode_transcripts_from_run_plan(
+                config.project_id,
+                candidate_plan,
+                emit_event=emit_event,
+                include_video=False,
+                include_audio=True,
+                persist_run_plan=False,
+            )
+            transcript_unit = next(
+                (
+                    unit
+                    for episode in candidate_plan.episodes
+                    for unit in episode.units
+                    if unit.unit_kind == "transcript_text"
+                ),
+                None,
+            )
+            if transcript_unit is None:
+                return 0, total_token_usage([]), []
+            transcript_plan = run_plan_for_preview_unit(candidate_plan, transcript_unit.unit_id)
+            created, usage, chunks, _ = self._extract_text_units(
+                config.project_id,
+                transcript_plan,
+                preset=preset,
+                extraction_stage=ExtractionArtifactStage.PREVIEW,
+                chunk_limit=1,
+            )
+            return created, usage, chunks
+
+        video_path = self._formal_material_video_path(
+            config.project_id,
+            candidate.unit.material_ref.relative_path,
+        )
+
+        def emit_video_event(event: dict) -> None:
+            if event.get("status") == InsightStatus.RUNNING.value:
+                return
+            payload = dict(event)
+            meta = payload.get("meta")
+            payload["meta"] = {
+                **(meta if isinstance(meta, dict) else {}),
+                **self._preview_candidate_meta(candidate),
+                "execution_kind": candidate.kind.value,
+            }
+            emit_event(payload)
+
+        return self._extract_preview_chunk_json_from_materials(
+            config,
+            backend=cloud_model_provider(preset.provider).backend_for("video"),
+            provider=preset.provider,
+            model_name=preset.model_name,
+            base_url=preset.base_url,
+            api_key=preset.api_key,
+            video_fps=preset.video_fps,
+            max_output_tokens=preset.max_output_tokens,
+            emit_event=emit_video_event,
+            video_paths=[video_path],
+        )
+
     def run_preview(self, config: ProjectConfig) -> None:
         self.run_preview_streaming(config)
 
@@ -4618,29 +6027,63 @@ class Extractor(QObject):
 
         preview_chunks: list[ChunkExtractionResult] = []
         overall_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-        try:
-            created_count, extraction_usage, extracted_chunks = self._extract_preview_chunk_json_from_materials(
-                config,
-                backend=cloud_model_provider(preset.provider).backend_for("video"),
-                provider=preset.provider,
-                model_name=preset.model_name,
-                base_url=preset.base_url,
-                api_key=preset.api_key,
-                video_fps=preset.video_fps,
-                max_output_tokens=preset.max_output_tokens,
-                emit_token_usage=emit_token_usage,
-                emit_event=emit_event,
-                emit_progress=emit_progress,
+        run_plan = self.prepare_formal_extraction_run_plan(config.project_id)
+        candidates, skipped_units = collect_preview_candidates(
+            run_plan,
+            image_input_supported=provider_supports_capability(preset.provider, "image"),
+        )
+        for skipped in skipped_units:
+            self._emit_preview_skipped_unit(emit_event, skipped)
+
+        extracted_chunks: list[ChunkExtractionResult] = []
+        attempted_candidates = candidates[:PREVIEW_MAX_CANDIDATE_ATTEMPTS]
+        total_candidates = len(attempted_candidates)
+        for index, candidate in enumerate(attempted_candidates, start=1):
+            if len(extracted_chunks) >= PREVIEW_MAX_CHUNKS:
+                break
+            self._emit_preview_candidate_running(
+                emit_event,
+                candidate,
+                current=index,
+                total=total_candidates,
             )
-        except ExtractionStoppedError:
-            raise
-        except Exception:  # noqa: BLE001
-            LOGGER.error("Preview chunk extraction from video failed; project_id=%s", config.project_id, exc_info=True)
-            created_count = 0
-            extraction_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-            extracted_chunks = []
-        for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-            overall_usage[key] += extraction_usage.get(key, 0)
+            try:
+                _, extraction_usage, candidate_chunks = self._execute_preview_candidate(
+                    config,
+                    run_plan,
+                    candidate,
+                    preset=preset,
+                    emit_event=emit_event,
+                )
+            except ExtractionStoppedError:
+                raise
+            except Exception:  # noqa: BLE001
+                LOGGER.error(
+                    "Preview candidate extraction failed; project_id=%s unit_id=%s kind=%s",
+                    config.project_id,
+                    candidate.unit.unit_id,
+                    candidate.kind.value,
+                    exc_info=True,
+                )
+                extraction_usage = {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                }
+                candidate_chunks = []
+
+            for key in overall_usage:
+                overall_usage[key] += extraction_usage.get(key, 0)
+            remaining = PREVIEW_MAX_CHUNKS - len(extracted_chunks)
+            extracted_chunks.extend(candidate_chunks[:remaining])
+            if emit_token_usage is not None and any(overall_usage.values()):
+                emit_token_usage(overall_usage)
+            if not candidate_chunks:
+                self._emit_preview_candidate_no_result(emit_event, candidate)
+            if total_candidates:
+                emit_progress(20 + int(index * 65 / total_candidates))
+
+        created_count = len(extracted_chunks)
         if created_count > 0:
             self._merge_preview_episode_contents(config.project_id, extracted_chunks)
             preview_chunks = extracted_chunks[:PREVIEW_MAX_CHUNKS]
@@ -4665,14 +6108,15 @@ class Extractor(QObject):
                 "Preview extraction aborted because no readable chunk JSON was found; project_id=%s",
                 config.project_id,
             )
+            emit_progress(100)
+            if emit_token_usage is not None and not any(overall_usage.values()):
+                emit_token_usage({})
             return ""
-        if created_count <= 0:
-            emit_progress(30)
 
         final_outputs: list[str] = []
         total_chunks = max(1, len(preview_chunks))
-        progress_base = 90 if created_count > 0 else 30
-        progress_span = 5 if created_count > 0 else 65
+        progress_base = 90
+        progress_span = 5
         for index, chunk in enumerate(preview_chunks, start=1):
             preview_chunk_text = self._format_preview_chunk_input(chunk)
             if not preview_chunk_text:

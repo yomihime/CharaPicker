@@ -1,6 +1,6 @@
 # CharaPicker 文档索引
 
-最近整理日期：2026-06-05。
+最近整理日期：2026-06-23。
 
 `docs/` 是 CharaPicker 的正式专题文档目录。根目录 `README.md` 负责项目首页说明；根目录和各主要代码目录中的 `ARCHITECTURE.md` 负责就近说明目录职责。已完成的一次性开发计划默认移入 `archive/`，稳定说明放入 `reference/`，仍有效路线和当前后续队列放入 `plans/`。
 
@@ -20,15 +20,11 @@
 
 ## 剩余项目队列
 
-以下顺序按“先稳住当前正式提取链路，再做多媒体前解耦，最后推进番剧、漫画、广播剧、小说等内容形态支持”整理。实施前仍必须重新核对当前代码和相关架构文档。
+路线 01 提取质量基线、路线 02 plan-first 重构、路线 03 多内容形态覆盖与真实验收已经完成并归档。当前执行入口只保留仍需跟踪的 TODO 和长期路线基准；实施前仍必须重新核对当前代码和相关架构文档。
 
 1. [当前计划与任务队列分组](plans/README.md)：仍需执行或持续跟踪的计划类文档入口。
 2. [TODO List](plans/TODO.zh_CN.md)：当前剩余任务总表，已移出完成的历史项目。
-3. [提取质量与可观测性执行计划](plans/01-extraction-quality-observability-plan.zh_CN.md)：TODO P1 的第一阶段执行计划。
-4. [多媒体平级接入前重构解耦执行计划](plans/02-multi-material-refactor-plan.zh_CN.md)：第二阶段架构体检与解耦计划，约束进入多内容形态覆盖前的重构边界。
-5. [番剧、漫画、广播剧、小说等内容形态支持执行计划](plans/03-multi-material-coverage-plan.zh_CN.md)：TODO P0 的第三阶段执行计划，要求路线 02 先准备好多媒体接入矩阵。
-6. [提取与角色成长编译路线](plans/extraction-development-roadmap.zh_CN.md)：Extract Once、知识库和角色状态编译的长期目标与验收基准。
-7. [真实预览结果后续计划](plans/preview-real-result-ingestion-plan.zh_CN.md)：小说/设定文本、字幕/台本、广播剧/音频、图片/漫画和视频+字幕混合资料进入预览与统一知识库消费路径的后续专项计划。
+3. [提取与角色成长编译路线](plans/extraction-development-roadmap.zh_CN.md)：Extract Once、知识库和角色状态编译的长期目标与验收基准。
 
 ## 发布与维护
 
@@ -52,6 +48,10 @@
 - [角色卡质量后续执行计划完成记录](archive/character-card-quality-followup-plan.completed.zh_CN.md)
 - [多供应商与多 API 规范接入计划完成记录](archive/multi-provider-api-support-plan.completed.zh_CN.md)
 - [Proxy 运行时网络能力计划完成记录](archive/proxy-runtime-network-plan.completed.zh_CN.md)
+- [提取质量与可观测性执行计划完成记录](archive/01-extraction-quality-observability-plan.completed.zh_CN.md)
+- [多媒体平级接入前重构解耦执行计划完成记录](archive/02-multi-material-refactor-plan.completed.zh_CN.md)
+- [番剧、漫画、广播剧、小说等内容形态支持执行计划完成记录](archive/03-multi-material-coverage-plan.completed.zh_CN.md)
+- [真实预览结果后续计划完成记录](archive/preview-real-result-followup-plan.completed.zh_CN.md)
 
 ## 目录说明
 

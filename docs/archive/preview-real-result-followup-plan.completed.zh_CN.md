@@ -1,12 +1,14 @@
 # 真实预览结果后续计划（zh_CN）
 
+归档状态：本文原本跟踪文本、字幕、音频转写、图片/漫画和视频+字幕进入预览与统一知识库消费路径的缺口；这些内容已由路线 03 多内容形态覆盖吸收并完成。当前剩余容器导入缺口以 `docs/plans/TODO.zh_CN.md` 为准。
+
 最近核对日期：2026-06-05。
 
 计划阶段：待执行专项计划。
 
 可用性：可用。实施前仍需重新核对 `core/extractor.py`、`core/source_scanner.py`、`core/knowledge_base.py` 和 `utils/audio_transcription.py`。
 
-本文只保留真实预览链路仍未完成的后续计划。视频 chunk 预览、`preview__` 产物隔离和正式视频提取 MVP 的详细完成记录已归档到 [真实预览结果接入计划完成记录](../archive/preview-real-result-ingestion-plan.completed.zh_CN.md) 与 [正式视频提取架构指南与任务计划](../archive/formal-video-extraction-architecture-plan.zh_CN.md)。
+本文原本保留真实预览链路仍未完成的后续计划。视频 chunk 预览、`preview__` 产物隔离和正式视频提取 MVP 的详细完成记录已归档到 [真实预览结果接入计划完成记录](preview-real-result-ingestion-plan.completed.zh_CN.md) 与 [正式视频提取架构指南与任务计划](formal-video-extraction-architecture-plan.zh_CN.md)。
 
 当前事实：
 

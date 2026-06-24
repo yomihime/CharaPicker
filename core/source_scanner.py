@@ -12,6 +12,7 @@ from core.extraction_plan import (
     MaterialRef,
     MediaType,
 )
+from core.material_unit_scanner import extend_episode_plans
 from utils.media_types import VIDEO_SUFFIXES
 from utils.paths import ensure_project_tree
 
@@ -85,7 +86,9 @@ def scan_formal_materials(project_id: str) -> list[EpisodePlan]:
             episode_plan = _video_episode_plan_from_scan(season, episode)
             if episode_plan.units:
                 episodes.append(episode_plan)
-    return episodes
+
+    materials_root = ensure_project_tree(project_id).materials
+    return extend_episode_plans(materials_root, episodes)
 
 
 def _scan_formal_video_materials(project_id: str) -> dict[str, Any]:
