@@ -226,6 +226,7 @@
   "project.inputFormat.pdf": "PDF 文档",
   "project.inputFormat.7z": "7z 压缩包",
   "project.inputFormat.rar": "RAR 压缩包",
+  "project.inputFormat.cbr": "CBR 漫画包",
   "project.inputFormat.7z": "7z 压缩包",
   "project.fileDialog.folder": "选择素材文件夹",
   "cards.title": "角色卡",

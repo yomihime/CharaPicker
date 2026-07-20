@@ -820,20 +820,198 @@ def _assert_real_rar_corrupt_boundary(root: Path) -> None:
     assert not corrupt_result.manifest_path.exists()
 
 
+def _assert_cbr_fake_failure_boundaries(root: Path) -> None:
+    source = root / "fake.cbr"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"fake CBR handled by injected backend")
+
+    password = _FakeArchiveBackend(
+        _available_capability(),
+        list_failure=ArchivePasswordRequiredError("ArchivePasswordRequired"),
+    )
+    password_result = preprocess_material(
+        _request(root / "password", source),
+        archive_backend=password,
+    )
+    assert password_result.status == "failed"
+    assert _warning_codes(password_result) == {"archive_password_protected"}
+
+    unsafe = _FakeArchiveBackend(
+        _available_capability(),
+        listing=_listing(
+            [_file_entry("../escape.png", b"escape")],
+            archive_format="rar",
+        ),
+    )
+    unsafe_result = preprocess_material(
+        _request(root / "unsafe", source),
+        archive_backend=unsafe,
+    )
+    assert unsafe_result.status == "failed"
+    assert _warning_codes(unsafe_result) == {"entry_path_unsafe"}
+    assert unsafe.test_calls == unsafe.extract_calls == 0
+    assert not (root / "escape.png").exists()
+
+
+def _assert_cbr_missing_backend_workflow(root: Path) -> None:
+    import utils.archive_material_preprocessor as archive_preprocessor
+
+    projects_root = root / "projects"
+    external_source = root / "external" / "missing-backend.cbr"
+    external_source.parent.mkdir(parents=True)
+    external_source.write_bytes(b"fake")
+    project_id = "cbr-missing-backend"
+    config = ProjectConfig(
+        project_id=project_id,
+        name="Missing CBR backend validation",
+        source_paths=[str(external_source)],
+    )
+    missing = _FakeArchiveBackend(
+        ArchiveBackendCapability(
+            available=False,
+            backend_name="missing-7zip",
+            reason="executable_not_found",
+        )
+    )
+
+    previous_projects_root = path_utils.PROJECTS_ROOT
+    original_default_backend = archive_preprocessor.default_archive_backend
+    path_utils.PROJECTS_ROOT = projects_root
+    archive_preprocessor.default_archive_backend = lambda: missing
+    try:
+        result = process_source_request(config)
+        project_root = projects_root / project_id
+        raw_source = project_root / "raw" / external_source.name
+        assert result.preprocessed_source_count == 0
+        assert result.derived_material_count == 0
+        assert result.preprocessing_warning_codes == ["archive_backend_unavailable"]
+        assert raw_source.is_file()
+        assert not (project_root / "materials" / external_source.name).exists()
+        assert remove_project_sources(project_id, [str(external_source)]) == 1
+        assert not raw_source.exists()
+    finally:
+        archive_preprocessor.default_archive_backend = original_default_backend
+        path_utils.PROJECTS_ROOT = previous_projects_root
+
+
+def _assert_cbr_profile_end_to_end(root: Path) -> None:
+    projects_root = root / "projects"
+    external_source = root / "external" / "chapter.cbr"
+    _write_rar(
+        external_source,
+        [
+            ("chapter/page10.png", b"page-ten"),
+            ("cover/page1.webp", b"cover"),
+            ("chapter/page2.jpg", b"page-two"),
+            ("notes.txt", b"not a comic page"),
+            ("nested/archive.zip", b"nested"),
+        ],
+    )
+    project_id = "cbr-profile-e2e"
+    config = ProjectConfig(
+        project_id=project_id,
+        name="CBR profile validation",
+        source_paths=[str(external_source)],
+    )
+
+    previous_projects_root = path_utils.PROJECTS_ROOT
+    path_utils.PROJECTS_ROOT = projects_root
+    try:
+        result = process_source_request(config)
+        project_root = projects_root / project_id
+        raw_source = project_root / "raw" / external_source.name
+        assert result.linked_count == 0
+        assert result.preprocessed_source_count == 1
+        assert result.derived_material_count == 3
+        assert set(result.preprocessing_warning_codes) == {
+            "cbr_entry_not_image",
+            "nested_container_not_supported",
+        }
+        assert raw_source.is_file()
+        assert not (project_root / "materials" / external_source.name).exists()
+
+        request = _project_request(project_root, raw_source)
+        manifest = json.loads(request.manifest_path.read_text(encoding="utf-8"))
+        assert manifest["source_suffix"] == ".cbr"
+        assert manifest["preprocessor"] == "archive"
+        records = manifest["derived_materials"]
+        assert [record["source_entry_path"] for record in records] == [
+            "chapter\\page2.jpg",
+            "chapter\\page10.png",
+            "cover\\page1.webp",
+        ]
+        assert [record["page_number"] for record in records] == [1, 2, 3]
+        assert all(record["content_form_hint"] == "manga" for record in records)
+        assert [Path(record["material_relative_path"]).name for record in records] == [
+            "page_0001.jpg",
+            "page_0002.png",
+            "page_0003.webp",
+        ]
+        assert set(manifest["failed_entries"]) == {
+            "notes.txt",
+            "nested\\archive.zip",
+        }
+
+        episodes = scan_formal_materials(project_id)
+        assert len(episodes) == 1
+        episode = episodes[0]
+        assert "manga" in {content_form.value for content_form in episode.content_forms}
+        assert [
+            unit.material_ref.metadata["source_entry_path"] for unit in episode.units
+        ] == [
+            "chapter\\page2.jpg",
+            "chapter\\page10.png",
+            "cover\\page1.webp",
+        ]
+        assert [unit.material_ref.page_range.start_page for unit in episode.units] == [1, 2, 3]
+        run_plan = FormalExtractionRunPlan(project_id=project_id, episodes=episodes)
+        assert [unit.material_ref.metadata["page_number"] for unit in run_plan.all_units] == [
+            1,
+            2,
+            3,
+        ]
+        assert all(
+            unit.material_ref.metadata["container_format"] == "cbr"
+            for unit in run_plan.all_units
+        )
+
+        reused = preprocess_project_source(
+            _project_request(project_root, raw_source),
+            raw_root=project_root / "raw",
+            materials_root=project_root / "materials",
+            cache_root=project_root / "cache",
+        )
+        assert reused.succeeded and reused.reused
+
+        assert clean_raw_sources(project_id, [raw_source]) == [external_source.name]
+        assert not raw_source.exists()
+        assert request.output_root.exists()
+        external_source.unlink()
+        assert remove_project_sources(project_id, [str(external_source)]) == 0
+        assert not request.output_root.exists()
+        assert not request.manifest_path.exists()
+    finally:
+        path_utils.PROJECTS_ROOT = previous_projects_root
+
+
+def _assert_real_cbr_corrupt_boundary(root: Path) -> None:
+    corrupt_source = root / "corrupt" / "corrupt.cbr"
+    corrupt_source.parent.mkdir(parents=True)
+    corrupt_source.write_bytes(b"not a CBR archive")
+    corrupt_result = preprocess_material(_request(root / "corrupt", corrupt_source))
+    assert corrupt_result.status == "failed"
+    assert _warning_codes(corrupt_result) == {"archive_container_invalid"}
+    assert not corrupt_result.manifest_path.exists()
+
+
 def _assert_profile_gate() -> None:
-    for suffix in (".7z", ".rar"):
+    for suffix in (".7z", ".rar", ".cbr"):
         profile = input_format_profile(f"fixture{suffix}")
         assert profile is not None
         assert profile.state == InputFormatSupportState.ENABLED
         assert profile.display_name_key == f"project.inputFormat.{suffix.lstrip('.')}"
         assert is_preprocessable_source(f"fixture{suffix}")
         assert f"*{suffix}" in project_input_file_patterns()
-    for suffix in (".cbr",):
-        blocked = input_format_profile(f"fixture{suffix}")
-        assert blocked is not None
-        assert blocked.state == InputFormatSupportState.BLOCKED
-        assert not is_preprocessable_source(f"fixture{suffix}")
-        assert f"*{suffix}" not in project_input_file_patterns()
 
 
 def main() -> None:
@@ -849,8 +1027,12 @@ def main() -> None:
         _assert_rar_missing_backend_workflow(root / "rar-missing-workflow")
         _assert_rar_profile_end_to_end(root / "rar-profile")
         _assert_real_rar_corrupt_boundary(root / "rar-real-boundaries")
+        _assert_cbr_fake_failure_boundaries(root / "cbr-fake")
+        _assert_cbr_missing_backend_workflow(root / "cbr-missing-workflow")
+        _assert_cbr_profile_end_to_end(root / "cbr-profile")
+        _assert_real_cbr_corrupt_boundary(root / "cbr-real-boundaries")
         _assert_profile_gate()
-    print("7z/RAR archive material preprocessing validation passed")
+    print("7z/RAR/CBR archive material preprocessing validation passed")
 
 
 if __name__ == "__main__":

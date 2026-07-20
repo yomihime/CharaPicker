@@ -121,9 +121,9 @@ INPUT_FORMAT_PROFILES = (
     InputFormatProfile(
         suffix=".cbr",
         toolchain="archive",
-        state=InputFormatSupportState.BLOCKED,
+        state=InputFormatSupportState.ENABLED,
         preprocessor_key="archive",
-        reason="archive_backend_not_selected",
+        display_name_key="project.inputFormat.cbr",
     ),
 )
 INPUT_FORMAT_SUFFIXES = frozenset(profile.suffix for profile in INPUT_FORMAT_PROFILES)

@@ -226,6 +226,7 @@
   "project.inputFormat.pdf": "PDF ドキュメント",
   "project.inputFormat.7z": "7z アーカイブ",
   "project.inputFormat.rar": "RAR アーカイブ",
+  "project.inputFormat.cbr": "CBR コミックアーカイブ",
   "project.inputFormat.7z": "7z アーカイブ",
   "project.fileDialog.folder": "素材フォルダーを選択",
   "cards.title": "キャラクターカード",
