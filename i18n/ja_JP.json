@@ -221,6 +221,7 @@
   "project.fileDialog.files": "素材ファイルを選択",
   "project.fileDialog.supportedFilter": "対応素材（{patterns}）",
   "project.inputFormat.zip": "ZIP アーカイブ",
+  "project.inputFormat.cbz": "CBZ コミックアーカイブ",
   "project.fileDialog.folder": "素材フォルダーを選択",
   "cards.title": "キャラクターカード",
   "cards.noProject": "キャラクターカードを管理するには、プロジェクトを選択または作成してください。",

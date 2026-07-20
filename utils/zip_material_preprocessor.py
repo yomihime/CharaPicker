@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import stat
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 
 from utils.material_preprocessing import (
@@ -19,6 +20,7 @@ from utils.material_preprocessing import (
     validate_archive_entry_path,
 )
 from utils.media_types import (
+    IMAGE_SUFFIXES,
     INPUT_FORMAT_SUFFIXES,
     SUPPORTED_SOURCE_SUFFIXES,
     source_support_profile,
@@ -26,6 +28,7 @@ from utils.media_types import (
 
 
 _READ_CHUNK_SIZE = 1024 * 1024
+_NATURAL_SORT_PATTERN = re.compile(r"\d+|\D+")
 _MEDIA_OUTPUT_DIRECTORIES = {
     "video": "video",
     "image": "images",
@@ -51,6 +54,7 @@ class _ValidatedZipEntry:
     relative_output_path: PurePosixPath
     media_type: str
     content_form_hint: str
+    page_number: int | None = None
 
 
 def extract_zip_materials(
@@ -230,7 +234,16 @@ def _validate_entries(
                 "Nested input containers are not expanded.",
             )
             continue
-        if suffix not in SUPPORTED_SOURCE_SUFFIXES:
+        if request.preprocessor_key == "cbz" and suffix not in IMAGE_SUFFIXES:
+            _reject_entry(
+                warnings,
+                failed_entries,
+                entry_name,
+                "cbz_entry_not_image",
+                "CBZ containers only accept image page entries.",
+            )
+            continue
+        if request.preprocessor_key != "cbz" and suffix not in SUPPORTED_SOURCE_SUFFIXES:
             _reject_entry(
                 warnings,
                 failed_entries,
@@ -271,9 +284,15 @@ def _validate_entries(
                 source_path=entry_name,
                 relative_output_path=output_path,
                 media_type=profile.media_type,
-                content_form_hint=profile.content_form_hint,
+                content_form_hint=(
+                    "manga"
+                    if request.preprocessor_key == "cbz"
+                    else profile.content_form_hint
+                ),
             )
         )
+    if request.preprocessor_key == "cbz":
+        validated = _finalize_cbz_page_order(validated)
     return validated, entry_count, False
 
 
@@ -338,6 +357,7 @@ def _extract_entries(
                 original_name=PurePosixPath(entry.source_path.replace("\\", "/")).name,
                 size_bytes=written,
                 fingerprint=f"sha256:{digest.hexdigest()}",
+                page_number=entry.page_number,
             )
         )
     return derived, expanded_size
@@ -347,6 +367,32 @@ def _is_unsupported_file_type(info: zipfile.ZipInfo) -> bool:
     unix_mode = (info.external_attr >> 16) & 0xFFFF
     file_type = stat.S_IFMT(unix_mode)
     return file_type not in {0, stat.S_IFREG}
+
+
+def _finalize_cbz_page_order(
+    entries: list[_ValidatedZipEntry],
+) -> list[_ValidatedZipEntry]:
+    ordered = sorted(entries, key=lambda entry: _natural_sort_key(entry.source_path))
+    return [
+        replace(
+            entry,
+            relative_output_path=PurePosixPath(
+                "images",
+                "pages",
+                f"page_{page_number:04d}{PurePosixPath(entry.source_path).suffix.lower()}",
+            ),
+            page_number=page_number,
+        )
+        for page_number, entry in enumerate(ordered, start=1)
+    ]
+
+
+def _natural_sort_key(value: str) -> tuple[tuple[int, int | str], ...]:
+    normalized = value.replace("\\", "/").casefold()
+    return tuple(
+        (0, int(part)) if part.isdigit() else (1, part)
+        for part in _NATURAL_SORT_PATTERN.findall(normalized)
+    )
 
 
 def _collides_with_output(candidate: str, existing: set[str]) -> bool:

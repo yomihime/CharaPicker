@@ -26,6 +26,7 @@ from utils.material_preprocessing import (  # noqa: E402
 )
 from utils.media_types import (  # noqa: E402
     InputFormatSupportState,
+    InputPreprocessorKey,
     input_format_profile,
     is_import_supported_source,
     is_preprocessable_source,
@@ -254,25 +255,30 @@ def _assert_corrupt_and_cancelled_leave_no_partial_output(root: Path) -> None:
     assert not list(staging_root.glob(".material-preprocessing-*"))
 
 
-def _assert_zip_enabled_without_opening_later_formats() -> None:
-    profile = input_format_profile("fixture.zip")
-    assert profile is not None
-    assert profile.state == InputFormatSupportState.ENABLED
-    assert is_preprocessable_source("fixture.zip") is True
-    assert is_import_supported_source("fixture.zip") is False
-    assert "*.zip" in project_input_file_patterns()
-    for suffix in (".cbz", ".epub", ".pdf", ".7z", ".rar", ".cbr"):
+def _assert_zip_profiles_enabled_without_opening_later_formats() -> None:
+    for suffix in (".zip", ".cbz"):
+        profile = input_format_profile(f"fixture{suffix}")
+        assert profile is not None
+        assert profile.state == InputFormatSupportState.ENABLED
+        assert is_preprocessable_source(f"fixture{suffix}") is True
+        assert is_import_supported_source(f"fixture{suffix}") is False
+        assert f"*{suffix}" in project_input_file_patterns()
+    for suffix in (".epub", ".pdf", ".7z", ".rar", ".cbr"):
         assert is_preprocessable_source(f"fixture{suffix}") is False
         assert f"*{suffix}" not in project_input_file_patterns()
 
 
-def _project_request(project_root: Path, raw_source: Path) -> PreprocessingRequest:
+def _project_request(
+    project_root: Path,
+    raw_source: Path,
+    preprocessor_key: InputPreprocessorKey = "zip",
+) -> PreprocessingRequest:
     return build_project_preprocessing_request(
         raw_root=project_root / "raw",
         materials_root=project_root / "materials",
         cache_root=project_root / "cache",
         raw_source=raw_source,
-        preprocessor_key="zip",
+        preprocessor_key=preprocessor_key,
     )
 
 
@@ -513,6 +519,128 @@ def _assert_zip_profile_end_to_end(root: Path) -> None:
         path_utils.PROJECTS_ROOT = previous_projects_root
 
 
+def _assert_cbz_profile_end_to_end(root: Path) -> None:
+    projects_root = root / "projects"
+    external_source = root / "external" / "chapter.cbz"
+    _write_zip(
+        external_source,
+        [
+            ("chapter/page10.png", b"page-ten"),
+            ("cover/page1.webp", b"cover"),
+            ("chapter/page2.jpg", b"page-two"),
+            ("notes.txt", b"not a comic page"),
+            ("nested/archive.zip", b"nested"),
+            ("../escape.png", b"escape"),
+        ],
+    )
+    project_id = "cbz-profile-e2e"
+    config = ProjectConfig(
+        project_id=project_id,
+        name="CBZ profile validation",
+        source_paths=[str(external_source)],
+    )
+
+    previous_projects_root = path_utils.PROJECTS_ROOT
+    path_utils.PROJECTS_ROOT = projects_root
+    try:
+        result = process_source_request(config)
+        project_root = projects_root / project_id
+        raw_source = project_root / "raw" / external_source.name
+        assert result.preprocessed_source_count == 1
+        assert result.derived_material_count == 3
+        assert set(result.preprocessing_warning_codes) == {
+            "cbz_entry_not_image",
+            "nested_container_not_supported",
+            "entry_path_unsafe",
+        }
+        assert raw_source.is_file()
+        assert not (project_root / "materials" / external_source.name).exists()
+        assert not (root / "escape.png").exists()
+
+        request = _project_request(project_root, raw_source, "cbz")
+        manifest = json.loads(request.manifest_path.read_text(encoding="utf-8"))
+        assert manifest["source_suffix"] == ".cbz"
+        assert manifest["preprocessor"] == "cbz"
+        records = manifest["derived_materials"]
+        assert [record["source_entry_path"] for record in records] == [
+            "chapter/page2.jpg",
+            "chapter/page10.png",
+            "cover/page1.webp",
+        ]
+        assert [record["page_number"] for record in records] == [1, 2, 3]
+        material_paths = [Path(record["material_relative_path"]) for record in records]
+        assert [path.name for path in material_paths] == [
+            "page_0001.jpg",
+            "page_0002.png",
+            "page_0003.webp",
+        ]
+        assert len({path.parent.as_posix() for path in material_paths}) == 1
+
+        episodes = scan_formal_materials(project_id)
+        assert len(episodes) == 1
+        episode = episodes[0]
+        assert "manga" in {content_form.value for content_form in episode.content_forms}
+        assert [
+            unit.material_ref.metadata["source_entry_path"] for unit in episode.units
+        ] == [
+            "chapter/page2.jpg",
+            "chapter/page10.png",
+            "cover/page1.webp",
+        ]
+        assert [unit.material_ref.page_range.start_page for unit in episode.units] == [
+            1,
+            2,
+            3,
+        ]
+
+        assert clean_raw_sources(project_id, [raw_source]) == [external_source.name]
+        assert not raw_source.exists()
+        assert request.output_root.exists()
+        external_source.unlink()
+        assert remove_project_sources(project_id, [str(external_source)]) == 0
+        assert not request.output_root.exists()
+        assert not request.manifest_path.exists()
+
+        empty_source = root / "external" / "empty.cbz"
+        _write_zip(empty_source, [("notes.txt", b"notes")])
+        empty_config = ProjectConfig(
+            project_id="cbz-empty",
+            name="Empty CBZ validation",
+            source_paths=[str(empty_source)],
+        )
+        empty_result = process_source_request(empty_config)
+        empty_raw = projects_root / "cbz-empty" / "raw" / empty_source.name
+        assert empty_result.preprocessed_source_count == 1
+        assert empty_result.derived_material_count == 0
+        assert set(empty_result.preprocessing_warning_codes) == {
+            "cbz_entry_not_image",
+            "no_supported_entries",
+        }
+        assert clean_raw_sources("cbz-empty", [empty_raw]) == []
+        assert empty_raw.exists()
+        assert remove_project_sources("cbz-empty", [str(empty_source)]) == 1
+
+        corrupt_source = root / "external" / "corrupt.cbz"
+        corrupt_source.write_bytes(b"not a CBZ")
+        corrupt_config = ProjectConfig(
+            project_id="cbz-corrupt",
+            name="Corrupt CBZ validation",
+            source_paths=[str(corrupt_source)],
+        )
+        corrupt_result = process_source_request(corrupt_config)
+        assert corrupt_result.preprocessed_source_count == 0
+        assert corrupt_result.derived_material_count == 0
+        assert corrupt_result.preprocessing_warning_codes == ["zip_container_invalid"]
+        assert not list(
+            (projects_root / "cbz-corrupt" / "cache" / "material_preprocessing").glob(
+                "*.json"
+            )
+        )
+        assert remove_project_sources("cbz-corrupt", [str(corrupt_source)]) == 1
+    finally:
+        path_utils.PROJECTS_ROOT = previous_projects_root
+
+
 def main() -> None:
     with TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
@@ -523,7 +651,8 @@ def main() -> None:
         _assert_corrupt_and_cancelled_leave_no_partial_output(root / "failures")
         _assert_project_lifecycle_and_source_trace(root / "lifecycle")
         _assert_zip_profile_end_to_end(root / "zip-profile")
-    _assert_zip_enabled_without_opening_later_formats()
+        _assert_cbz_profile_end_to_end(root / "cbz-profile")
+    _assert_zip_profiles_enabled_without_opening_later_formats()
     print("input format preprocessing validation passed")
 
 

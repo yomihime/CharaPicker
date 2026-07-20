@@ -199,7 +199,7 @@ def preprocess_material(request: PreprocessingRequest) -> PreprocessingResult:
     staged_output.mkdir()
 
     try:
-        if request.preprocessor_key == "zip":
+        if request.preprocessor_key in {"zip", "cbz"}:
             from utils.zip_material_preprocessor import extract_zip_materials
 
             extraction = extract_zip_materials(request, staged_output)

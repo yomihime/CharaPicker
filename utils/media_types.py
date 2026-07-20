@@ -86,9 +86,9 @@ INPUT_FORMAT_PROFILES = (
     InputFormatProfile(
         suffix=".cbz",
         toolchain="standard_library_zip",
-        state=InputFormatSupportState.CANDIDATE,
+        state=InputFormatSupportState.ENABLED,
         preprocessor_key="cbz",
-        reason="preprocessing_not_implemented",
+        display_name_key="project.inputFormat.cbz",
     ),
     InputFormatProfile(
         suffix=".epub",
