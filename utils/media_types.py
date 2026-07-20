@@ -273,6 +273,24 @@ def is_preprocessable_source(path_or_suffix: str | Path) -> bool:
     return profile is not None and profile.state == InputFormatSupportState.ENABLED
 
 
+def enabled_input_format_profiles() -> tuple[InputFormatProfile, ...]:
+    return tuple(
+        profile
+        for profile in INPUT_FORMAT_PROFILES
+        if profile.state == InputFormatSupportState.ENABLED
+    )
+
+
+def is_project_input_supported_source(path_or_suffix: str | Path) -> bool:
+    return is_import_supported_source(path_or_suffix) or is_preprocessable_source(path_or_suffix)
+
+
+def project_input_file_patterns() -> tuple[str, ...]:
+    suffixes = set(SUPPORTED_SOURCE_SUFFIXES)
+    suffixes.update(profile.suffix for profile in enabled_input_format_profiles())
+    return tuple(f"*{suffix}" for suffix in sorted(suffixes))
+
+
 def is_import_supported_source(path: str | Path) -> bool:
     return source_support_profile(path).import_supported
 

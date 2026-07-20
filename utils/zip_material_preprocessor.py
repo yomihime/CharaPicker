@@ -10,9 +10,9 @@ from pathlib import Path, PurePosixPath
 
 from utils.material_preprocessing import (
     DerivedMaterialRecord,
+    PreprocessingCancelledError,
     PreprocessingRequest,
     PreprocessingWarning,
-    _PreprocessingCancelled,
     _raise_if_cancelled,
     ensure_path_within_root,
     normalized_path_key,
@@ -303,7 +303,7 @@ def _extract_entries(
                         raise ValueError("entry size exceeded its declared safety limit")
                     output.write(chunk)
                     digest.update(chunk)
-        except _PreprocessingCancelled:
+        except PreprocessingCancelledError:
             raise
         except (
             EOFError,

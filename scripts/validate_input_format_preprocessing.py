@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 import sys
 import zipfile
@@ -16,14 +17,27 @@ from utils.material_preprocessing import (  # noqa: E402
     PREPROCESSING_MANIFEST_SCHEMA_VERSION,
     PreprocessingLimits,
     PreprocessingRequest,
+    build_project_preprocessing_request,
+    complete_preprocessing_manifest_for_raw,
+    current_preprocessing_manifest_for_raw,
+    preprocess_project_source,
     preprocess_material,
+    preprocessing_material_metadata_index,
 )
 from utils.media_types import (  # noqa: E402
     InputFormatSupportState,
     input_format_profile,
     is_import_supported_source,
     is_preprocessable_source,
+    project_input_file_patterns,
 )
+from core.source_scanner import scan_formal_materials  # noqa: E402
+from utils.source_importer import (  # noqa: E402
+    clean_raw_sources,
+    link_raw_sources_to_materials,
+    remove_raw_sources,
+)
+import utils.paths as path_utils  # noqa: E402
 
 
 def _request(
@@ -243,6 +257,159 @@ def _assert_candidate_format_remains_disabled() -> None:
     assert profile.state == InputFormatSupportState.CANDIDATE
     assert is_preprocessable_source("fixture.zip") is False
     assert is_import_supported_source("fixture.zip") is False
+    assert "*.zip" not in project_input_file_patterns()
+
+
+def _project_request(project_root: Path, raw_source: Path) -> PreprocessingRequest:
+    return build_project_preprocessing_request(
+        raw_root=project_root / "raw",
+        materials_root=project_root / "materials",
+        cache_root=project_root / "cache",
+        raw_source=raw_source,
+        preprocessor_key="zip",
+    )
+
+
+def _assert_project_lifecycle_and_source_trace(root: Path) -> None:
+    projects_root = root / "projects"
+    project_id = "input-format-lifecycle"
+    project_root = projects_root / project_id
+    raw_root = project_root / "raw"
+    materials_root = project_root / "materials"
+    cache_root = project_root / "cache"
+    for path in (raw_root, materials_root, cache_root, project_root / "knowledge_base"):
+        path.mkdir(parents=True, exist_ok=True)
+
+    raw_source = raw_root / "collection.zip"
+    _write_zip(
+        raw_source,
+        [("chapters/01.txt", b"chapter"), ("pages/001.png", b"image")],
+    )
+    request = _project_request(project_root, raw_source)
+    result = preprocess_project_source(
+        request,
+        raw_root=raw_root,
+        materials_root=materials_root,
+        cache_root=cache_root,
+    )
+    assert result.succeeded and not result.reused
+    assert request.output_root.name.endswith(result.source_hash[:16])
+    assert request.output_root_reference.startswith("derived_inputs/")
+    assert request.source_raw_path == "raw/collection.zip"
+
+    reused = preprocess_project_source(
+        _project_request(project_root, raw_source),
+        raw_root=raw_root,
+        materials_root=materials_root,
+        cache_root=cache_root,
+    )
+    assert reused.succeeded and reused.reused
+    assert current_preprocessing_manifest_for_raw(
+        raw_root=raw_root,
+        materials_root=materials_root,
+        cache_root=cache_root,
+        raw_source=raw_source,
+    ) is not None
+
+    source_stat = raw_source.stat()
+    os.utime(
+        raw_source,
+        ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns + 1_000_000),
+    )
+    assert current_preprocessing_manifest_for_raw(
+        raw_root=raw_root,
+        materials_root=materials_root,
+        cache_root=cache_root,
+        raw_source=raw_source,
+    ) is None
+    refreshed_reuse = preprocess_project_source(
+        _project_request(project_root, raw_source),
+        raw_root=raw_root,
+        materials_root=materials_root,
+        cache_root=cache_root,
+    )
+    assert refreshed_reuse.reused
+    assert current_preprocessing_manifest_for_raw(
+        raw_root=raw_root,
+        materials_root=materials_root,
+        cache_root=cache_root,
+        raw_source=raw_source,
+    ) is not None
+
+    metadata_index = preprocessing_material_metadata_index(materials_root)
+    assert len(metadata_index) == 2
+    assert all(
+        metadata["preprocessed_from_raw"] == "raw/collection.zip"
+        for metadata in metadata_index.values()
+    )
+    assert {metadata["source_entry_path"] for metadata in metadata_index.values()} == {
+        "chapters/01.txt",
+        "pages/001.png",
+    }
+
+    previous_projects_root = path_utils.PROJECTS_ROOT
+    path_utils.PROJECTS_ROOT = projects_root
+    try:
+        episodes = scan_formal_materials(project_id)
+        units = [unit for episode in episodes for unit in episode.units]
+        assert len(units) == 2
+        assert all(unit.material_ref.metadata["preprocessed_from_raw"] for unit in units)
+        assert {
+            unit.material_ref.metadata["source_entry_path"] for unit in units
+        } == {"chapters/01.txt", "pages/001.png"}
+        assert all(not unit.material_ref.relative_path.startswith("cache/") for unit in units)
+        assert link_raw_sources_to_materials(project_id, [raw_source]) == 0
+        assert not (materials_root / raw_source.name).exists()
+
+        cleaned = clean_raw_sources(project_id, [raw_source])
+        assert cleaned == ["collection.zip"]
+        assert not raw_source.exists()
+        assert request.output_root.is_dir()
+        assert request.manifest_path.is_file()
+        assert complete_preprocessing_manifest_for_raw(
+            raw_root=raw_root,
+            materials_root=materials_root,
+            cache_root=cache_root,
+            raw_source=raw_source,
+        ) is not None
+
+        _write_zip(raw_source, [("replacement.txt", b"replacement")])
+        replacement_request = _project_request(project_root, raw_source)
+        replacement = preprocess_project_source(
+            replacement_request,
+            raw_root=raw_root,
+            materials_root=materials_root,
+            cache_root=cache_root,
+        )
+        assert replacement.succeeded
+        assert replacement.source_hash != result.source_hash
+        assert not request.output_root.exists()
+        assert not request.manifest_path.exists()
+
+        replacement_output = replacement_request.output_root
+        replacement_manifest = replacement_request.manifest_path
+        raw_source.write_bytes(b"damaged replacement")
+        failed_request = _project_request(project_root, raw_source)
+        failed = preprocess_project_source(
+            failed_request,
+            raw_root=raw_root,
+            materials_root=materials_root,
+            cache_root=cache_root,
+        )
+        assert failed.status == "failed"
+        assert replacement_output.is_dir()
+        assert replacement_manifest.is_file()
+        stale_units = [
+            unit for episode in scan_formal_materials(project_id) for unit in episode.units
+        ]
+        assert stale_units == []
+
+        assert remove_raw_sources(project_id, [raw_source]) == 1
+        assert not raw_source.exists()
+        assert not replacement_output.exists()
+        assert not replacement_manifest.exists()
+    finally:
+        path_utils.PROJECTS_ROOT = previous_projects_root
 
 
 def main() -> None:
@@ -253,6 +420,7 @@ def main() -> None:
         _assert_special_file_and_encryption_rejected(root / "special")
         _assert_limits(root / "limits")
         _assert_corrupt_and_cancelled_leave_no_partial_output(root / "failures")
+        _assert_project_lifecycle_and_source_trace(root / "lifecycle")
     _assert_candidate_format_remains_disabled()
     print("input format preprocessing validation passed")
 

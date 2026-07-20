@@ -81,9 +81,11 @@ from utils.material_processing_events import FFMPEG_EVENT_PREFIX
 from utils.material_processing_middleware import (
     MaterialProcessingError,
     SOURCE_PROCESSING_CANCELLED_MESSAGE,
+    SourceProcessingResult,
     process_source_request,
     validate_source_processing_tools,
 )
+from utils.media_types import project_input_file_patterns
 from utils.source_importer import (
     clean_raw_sources,
     remove_project_sources,
@@ -489,7 +491,7 @@ class WhisperSetupDialog(FluentDialog):
 
 class SourceProcessingWorker(QObject):
     progressChanged = pyqtSignal(int, int, str)
-    succeeded = pyqtSignal(object, int, bool)
+    succeeded = pyqtSignal(object)
     failed = pyqtSignal(str)
     cancelled = pyqtSignal()
     finished = pyqtSignal()
@@ -511,7 +513,7 @@ class SourceProcessingWorker(QObject):
                 progress=self._emit_progress,
                 cancelled=lambda: self._cancel_requested,
             )
-            self.succeeded.emit(result.config, result.linked_count, result.uses_original_sources)
+            self.succeeded.emit(result)
         except MaterialProcessingError as exc:
             LOGGER.warning("Source processing failed because required tools are unavailable")
             self.failed.emit(str(exc))
@@ -1465,15 +1467,38 @@ class ProjectPage(QWidget):
             return
         self._source_processing_dialog.set_progress(done, total, name)
 
-    def _finish_source_processing_success(self, config: ProjectConfig, linked_count: int, uses_original_sources: bool) -> None:
+    def _finish_source_processing_success(self, result: SourceProcessingResult) -> None:
         if self._source_processing_dialog is not None:
             self._source_processing_dialog.finish()
+        config = result.config
         self._upsert_project(config)
         self._refresh_project_sources(config.project_id)
-        if uses_original_sources:
+        if result.preprocessed_source_count or result.preprocessing_warning_codes:
+            warning_count = len(result.preprocessing_warning_codes)
+            message_key = (
+                "project.processing.done.containersWithWarnings"
+                if warning_count
+                else "project.processing.done.containers"
+            )
+            info_bar = InfoBar.warning if warning_count else InfoBar.success
+            info_bar(
+                title=t("project.processing.done.title"),
+                content=t(
+                    message_key,
+                    direct_count=result.linked_count,
+                    container_count=result.preprocessed_source_count,
+                    derived_count=result.derived_material_count,
+                    warning_count=warning_count,
+                ),
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=5000 if warning_count else 3500,
+            )
+            return
+        if result.uses_original_sources:
             InfoBar.success(
                 title=t("project.processing.done.title"),
-                content=t("project.processing.done.original", count=linked_count),
+                content=t("project.processing.done.original", count=result.linked_count),
                 parent=self.window(),
                 position=InfoBarPosition.TOP_RIGHT,
                 duration=3500,
@@ -1481,7 +1506,7 @@ class ProjectPage(QWidget):
             return
         InfoBar.success(
             title=t("project.processing.done.title"),
-            content=t("project.processing.done.ffmpeg", count=linked_count),
+            content=t("project.processing.done.ffmpeg", count=result.linked_count),
             parent=self.window(),
             position=InfoBarPosition.TOP_RIGHT,
             duration=3500,
@@ -1975,7 +2000,13 @@ class ProjectPage(QWidget):
         self.projects.insert(0, config)
 
     def _add_files(self) -> None:
-        paths, _ = QFileDialog.getOpenFileNames(self, t("project.fileDialog.files"))
+        patterns = " ".join(project_input_file_patterns())
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            t("project.fileDialog.files"),
+            "",
+            t("project.fileDialog.supportedFilter", patterns=patterns),
+        )
         self._append_sources(paths)
 
     def _add_folder(self) -> None:

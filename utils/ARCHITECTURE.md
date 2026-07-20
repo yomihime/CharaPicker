@@ -18,7 +18,7 @@
 - `i18n.py`：管理语言偏好、系统语言归一化、文案加载和 `t()` 翻译函数。
 - `app_metadata.py`：集中保存应用名、组织名、当前运行时版本/阶段和 HTTP User-Agent。
 - `media_types.py`：集中保存视频、图片、音频、文本后缀，以及直接素材和容器输入格式的独立支持档位；容器 profile 不新增顶层媒体类型，也不进入直接素材后缀集合。
-- `material_preprocessing.py`：定义容器输入预处理请求、结果、warning、派生材料记录和 manifest 协议，统一负责安全路径校验、取消检查、临时目录与原子落盘，不依赖 `core` 或 `gui`。
+- `material_preprocessing.py`：定义容器输入预处理请求、结果、warning、派生材料记录和 manifest 协议，统一负责安全路径校验、取消检查、临时目录、原子落盘、稳定派生路径、manifest 索引、完整性/复用判断和生命周期清理，不依赖 `core` 或 `gui`。
 - `zip_material_preprocessor.py`：在预处理边界内使用标准库列举和流式展开 ZIP entry，复用统一的大小、数量、压缩比、后缀和路径安全规则；不负责项目导入或 UI 状态。
 - `material_processing_events.py`：集中保存素材处理取消消息和 FFmpeg 进度事件前缀等跨层协议常量。
 - `paths.py`：定义应用根目录、项目根目录和单个项目的标准目录结构。
@@ -37,9 +37,9 @@
 - `whispercpp_downloader.py`：下载并安装 whisper.cpp 运行时到 `bin/whisper.cpp/`，下载 Whisper 模型到 `models/whisper/`。
 - `audio_transcription.py`：封装本地 whisper.cpp episode 转写、音频/视频输入准备、缓存命中判断和 `episode_transcript.json` 写入；缓存键覆盖素材指纹、运行时、模型和语言，日志不记录完整转写文本。
 - `ffmpeg_downloader.py`：下载并安装 ffmpeg 运行时到 `bin/`。
-- `source_importer.py`：把外部原始素材按项目目录规则复制到 `projects/{project_id}/raw`，计算外部路径对应的 raw 目标，准备 `materials`，并支持 raw 清理和素材移除。
-- `source_status.py`：计算项目页需要的素材显示名、raw/materials 映射、项目内素材列表和素材状态。
-- `material_processing_middleware.py`：统一接收上层的素材处理请求与工具可用性校验请求，桥接 `source_importer.py` 和 `ffmpeg_tool.py`。
+- `source_importer.py`：把直接素材或已启用容器按项目目录规则原子复制到 `projects/{project_id}/raw`，计算 raw 目标，并通过预处理 manifest 协调 raw 清理、素材移除和 stale 派生产物清理；容器不得进入普通 materials link 分支。
+- `source_status.py`：计算项目页需要的素材显示名、raw/materials 或预处理 manifest 映射、项目内素材列表和素材状态。
+- `material_processing_middleware.py`：统一接收上层的素材处理请求与工具可用性校验请求，把 raw 拆成直接素材、已启用容器和 unsupported 三类，再分别桥接预处理、source importer 和 FFmpeg。
 - `startup_middleware.py`：启动阶段预加载中间件，集中探测 FFmpeg/llama.cpp/whisper.cpp、预取项目配置和云模型预设，供启动页线程复用。
 - `logging_preferences.py`：管理日志等级偏好。
 - `logging_middleware.py`：安装全局日志中间件，日志只写入文件；日志等级边界和敏感信息规则见运行时中间件参考文档。

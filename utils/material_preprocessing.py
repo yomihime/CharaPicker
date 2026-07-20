@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 import unicodedata
@@ -21,7 +22,10 @@ PreprocessingStatus = Literal["completed", "failed", "cancelled"]
 WarningContextValue = str | int | float | bool
 
 PREPROCESSING_MANIFEST_SCHEMA_VERSION = 1
+DERIVED_INPUTS_DIRECTORY_NAME = "derived_inputs"
+PREPROCESSING_CACHE_DIRECTORY_NAME = "material_preprocessing"
 _COPY_CHUNK_SIZE = 1024 * 1024
+_SOURCE_HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _WINDOWS_RESERVED_NAMES = {
     "CON",
     "PRN",
@@ -106,6 +110,7 @@ class PreprocessingRequest:
     output_root_reference: str
     manifest_path: Path
     preprocessor_key: InputPreprocessorKey
+    source_hash: str = ""
     limits: PreprocessingLimits = DEFAULT_PREPROCESSING_LIMITS
     cancelled: CancelledCallback | None = None
     staging_root: Path | None = None
@@ -123,6 +128,7 @@ class PreprocessingResult:
     entry_count: int = 0
     input_size_bytes: int = 0
     expanded_size_bytes: int = 0
+    reused: bool = False
 
     @property
     def succeeded(self) -> bool:
@@ -136,7 +142,16 @@ class ArchivePathValidation:
     warning_message: str = ""
 
 
-class _PreprocessingCancelled(RuntimeError):
+@dataclass(frozen=True)
+class PreprocessingArtifactPaths:
+    source_hash: str
+    source_raw_path: str
+    output_root: Path
+    output_root_reference: str
+    manifest_path: Path
+
+
+class PreprocessingCancelledError(RuntimeError):
     pass
 
 
@@ -152,9 +167,18 @@ def preprocess_material(request: PreprocessingRequest) -> PreprocessingResult:
         return _failed_result(request, request_warning, input_size_bytes=input_size)
 
     try:
-        source_hash = _hash_file(source, request.cancelled)
+        source_hash = request.source_hash or source_content_hash(source, request.cancelled)
+        if not _SOURCE_HASH_PATTERN.fullmatch(source_hash):
+            return _failed_result(
+                request,
+                PreprocessingWarning(
+                    code="source_hash_invalid",
+                    message="The preprocessing source hash is invalid.",
+                ),
+                input_size_bytes=input_size,
+            )
         _raise_if_cancelled(request.cancelled)
-    except _PreprocessingCancelled:
+    except PreprocessingCancelledError:
         return _cancelled_result(request, input_size_bytes=input_size)
     except OSError as exc:
         return _failed_result(
@@ -239,7 +263,7 @@ def preprocess_material(request: PreprocessingRequest) -> PreprocessingResult:
             input_size_bytes=input_size,
             expanded_size_bytes=extraction.expanded_size_bytes,
         )
-    except _PreprocessingCancelled:
+    except PreprocessingCancelledError:
         return _cancelled_result(
             request,
             source_hash=source_hash,
@@ -258,6 +282,534 @@ def preprocess_material(request: PreprocessingRequest) -> PreprocessingResult:
         )
     finally:
         shutil.rmtree(stage_root, ignore_errors=True)
+
+
+def source_content_hash(path: Path, cancelled: CancelledCallback | None = None) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(_COPY_CHUNK_SIZE):
+            _raise_if_cancelled(cancelled)
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def preprocessing_artifact_paths(
+    *,
+    raw_root: Path,
+    materials_root: Path,
+    cache_root: Path,
+    raw_source: Path,
+    source_hash: str,
+) -> PreprocessingArtifactPaths:
+    if not _SOURCE_HASH_PATTERN.fullmatch(source_hash):
+        raise ValueError("source_hash must be a lowercase SHA-256 digest")
+    relative_raw = raw_source.resolve().relative_to(raw_root.resolve())
+    source_raw_path = PurePosixPath("raw", *relative_raw.parts).as_posix()
+    safe_stem = _safe_source_stem(raw_source.stem)
+    derived_name = f"{safe_stem}_{source_hash[:16]}"
+    output_reference = PurePosixPath(DERIVED_INPUTS_DIRECTORY_NAME, derived_name).as_posix()
+    return PreprocessingArtifactPaths(
+        source_hash=source_hash,
+        source_raw_path=source_raw_path,
+        output_root=materials_root / DERIVED_INPUTS_DIRECTORY_NAME / derived_name,
+        output_root_reference=output_reference,
+        manifest_path=cache_root / PREPROCESSING_CACHE_DIRECTORY_NAME / f"{source_hash}.json",
+    )
+
+
+def build_project_preprocessing_request(
+    *,
+    raw_root: Path,
+    materials_root: Path,
+    cache_root: Path,
+    raw_source: Path,
+    preprocessor_key: InputPreprocessorKey,
+    cancelled: CancelledCallback | None = None,
+    limits: PreprocessingLimits = DEFAULT_PREPROCESSING_LIMITS,
+) -> PreprocessingRequest:
+    source_hash = source_content_hash(raw_source, cancelled)
+    artifacts = preprocessing_artifact_paths(
+        raw_root=raw_root,
+        materials_root=materials_root,
+        cache_root=cache_root,
+        raw_source=raw_source,
+        source_hash=source_hash,
+    )
+    return PreprocessingRequest(
+        source_path=raw_source,
+        source_raw_path=artifacts.source_raw_path,
+        output_root=artifacts.output_root,
+        output_root_reference=artifacts.output_root_reference,
+        manifest_path=artifacts.manifest_path,
+        preprocessor_key=preprocessor_key,
+        source_hash=source_hash,
+        limits=limits,
+        cancelled=cancelled,
+        staging_root=cache_root / PREPROCESSING_CACHE_DIRECTORY_NAME / "tmp",
+    )
+
+
+def preprocess_project_source(
+    request: PreprocessingRequest,
+    *,
+    raw_root: Path,
+    materials_root: Path,
+    cache_root: Path,
+) -> PreprocessingResult:
+    existing = load_preprocessing_manifest(request.manifest_path)
+    if existing is not None and preprocessing_manifest_is_complete(
+        existing,
+        materials_root=materials_root,
+        expected_source_hash=request.source_hash,
+        expected_source_raw_path=request.source_raw_path,
+    ):
+        refreshed = dict(existing)
+        refreshed["input_size_bytes"] = _safe_file_size(request.source_path)
+        refreshed["source_mtime_ns"] = _safe_file_mtime_ns(request.source_path)
+        try:
+            _write_json_atomically(request.manifest_path, refreshed)
+        except OSError:
+            pass
+        else:
+            return _result_from_manifest(request, refreshed, reused=True)
+
+    result = preprocess_material(request)
+    if result.succeeded:
+        remove_stale_preprocessing_artifacts(
+            raw_root=raw_root,
+            materials_root=materials_root,
+            cache_root=cache_root,
+            raw_source=request.source_path,
+            keep_source_hash=result.source_hash,
+        )
+    return result
+
+
+def load_preprocessing_manifest(path: Path) -> dict[str, object] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("schema_version") != PREPROCESSING_MANIFEST_SCHEMA_VERSION:
+        return None
+    return payload
+
+
+def preprocessing_material_metadata_index(materials_root: Path) -> dict[str, dict[str, object]]:
+    cache_directory = (
+        materials_root.parent / "cache" / PREPROCESSING_CACHE_DIRECTORY_NAME
+    )
+    index: dict[str, dict[str, object]] = {}
+    if not cache_directory.is_dir():
+        return index
+
+    for manifest_path in sorted(cache_directory.glob("*.json")):
+        manifest = load_preprocessing_manifest(manifest_path)
+        if manifest is None:
+            continue
+        source_raw_path = _manifest_string(manifest.get("source_raw_path"))
+        source_hash = _manifest_string(manifest.get("source_hash"))
+        preprocessor = _manifest_string(manifest.get("preprocessor"))
+        source_suffix = _manifest_string(manifest.get("source_suffix"))
+        output_reference = _safe_material_reference(
+            _manifest_string(manifest.get("output_root"))
+        )
+        if (
+            not source_raw_path
+            or not _SOURCE_HASH_PATTERN.fullmatch(source_hash)
+            or not output_reference
+            or not preprocessing_manifest_is_complete(
+                manifest,
+                materials_root=materials_root,
+            )
+            or not _manifest_matches_current_raw(materials_root.parent, manifest)
+        ):
+            continue
+        records = manifest.get("derived_materials")
+        if not isinstance(records, list):
+            continue
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            relative_path = _safe_material_reference(
+                _manifest_string(record.get("material_relative_path"))
+            )
+            if not relative_path:
+                continue
+            if not relative_path.startswith(f"{output_reference}/"):
+                continue
+            metadata: dict[str, object] = {
+                "preprocessed_from_raw": source_raw_path,
+                "preprocessor": preprocessor,
+                "source_entry_path": _manifest_string(record.get("source_entry_path")),
+                "container_format": source_suffix.lstrip("."),
+                "source_hash": source_hash,
+            }
+            content_form_hint = _manifest_string(record.get("content_form_hint"))
+            if content_form_hint:
+                metadata["preprocessed_content_form_hint"] = content_form_hint
+            for key in ("page_number", "chapter_index"):
+                value = record.get(key)
+                if isinstance(value, int) and not isinstance(value, bool):
+                    metadata[key] = value
+            fingerprint = _manifest_string(record.get("fingerprint"))
+            if fingerprint:
+                metadata["preprocessed_fingerprint"] = fingerprint
+            index[relative_path] = metadata
+    return index
+
+
+def material_path_is_active_preprocessed_output(
+    materials_root: Path,
+    material_path: Path,
+    metadata_index: dict[str, dict[str, object]],
+) -> bool:
+    try:
+        relative_path = material_path.resolve().relative_to(materials_root.resolve())
+    except ValueError:
+        return False
+    relative_reference = relative_path.as_posix()
+    if not relative_path.parts or relative_path.parts[0] != DERIVED_INPUTS_DIRECTORY_NAME:
+        return True
+    return relative_reference in metadata_index
+
+
+def preprocessing_manifest_is_complete(
+    manifest: dict[str, object],
+    *,
+    materials_root: Path,
+    expected_source_hash: str = "",
+    expected_source_raw_path: str = "",
+) -> bool:
+    source_hash = _manifest_string(manifest.get("source_hash"))
+    source_raw_path = _manifest_string(manifest.get("source_raw_path"))
+    if not _SOURCE_HASH_PATTERN.fullmatch(source_hash):
+        return False
+    if expected_source_hash and source_hash != expected_source_hash:
+        return False
+    if expected_source_raw_path and source_raw_path != _normalized_reference(
+        expected_source_raw_path
+    ):
+        return False
+    output_reference = _safe_material_reference(_manifest_string(manifest.get("output_root")))
+    records = manifest.get("derived_materials")
+    if not output_reference or not isinstance(records, list) or not records:
+        return False
+    output_root = _path_from_material_reference(materials_root, output_reference)
+    if output_root is None or not output_root.is_dir():
+        return False
+    for record in records:
+        if not isinstance(record, dict):
+            return False
+        reference = _safe_material_reference(
+            _manifest_string(record.get("material_relative_path"))
+        )
+        material_path = _path_from_material_reference(materials_root, reference)
+        if material_path is None or not material_path.is_file():
+            return False
+        size_bytes = record.get("size_bytes")
+        if isinstance(size_bytes, int):
+            try:
+                if material_path.stat().st_size != size_bytes:
+                    return False
+            except OSError:
+                return False
+    return True
+
+
+def complete_preprocessing_manifest_for_raw(
+    *,
+    raw_root: Path,
+    materials_root: Path,
+    cache_root: Path,
+    raw_source: Path,
+) -> dict[str, object] | None:
+    source_reference = _raw_source_reference(raw_root, raw_source)
+    if not source_reference:
+        return None
+    for _path, manifest in _manifests_for_source(cache_root, source_reference):
+        if preprocessing_manifest_is_complete(
+            manifest,
+            materials_root=materials_root,
+            expected_source_raw_path=source_reference,
+        ):
+            return manifest
+    return None
+
+
+def current_preprocessing_manifest_for_raw(
+    *,
+    raw_root: Path,
+    materials_root: Path,
+    cache_root: Path,
+    raw_source: Path,
+) -> dict[str, object] | None:
+    if not raw_source.is_file():
+        return None
+    try:
+        source_stat = raw_source.stat()
+    except OSError:
+        return None
+    source_reference = _raw_source_reference(raw_root, raw_source)
+    if not source_reference:
+        return None
+    for _path, manifest in _manifests_for_source(cache_root, source_reference):
+        if manifest.get("input_size_bytes") != source_stat.st_size:
+            continue
+        if manifest.get("source_mtime_ns") != source_stat.st_mtime_ns:
+            continue
+        if preprocessing_manifest_is_complete(
+            manifest,
+            materials_root=materials_root,
+            expected_source_raw_path=source_reference,
+        ):
+            return manifest
+    return None
+
+
+def remove_preprocessing_artifacts_for_raw(
+    *,
+    raw_root: Path,
+    materials_root: Path,
+    cache_root: Path,
+    raw_source: Path,
+) -> int:
+    source_reference = _raw_source_reference(raw_root, raw_source)
+    if not source_reference:
+        return 0
+    removed = 0
+    for manifest_path, manifest in _manifests_for_source(cache_root, source_reference):
+        if _remove_manifest_output(materials_root, manifest):
+            removed += 1
+        manifest_path.unlink(missing_ok=True)
+
+    if raw_source.is_file():
+        try:
+            source_hash = source_content_hash(raw_source)
+            artifacts = preprocessing_artifact_paths(
+                raw_root=raw_root,
+                materials_root=materials_root,
+                cache_root=cache_root,
+                raw_source=raw_source,
+                source_hash=source_hash,
+            )
+            if artifacts.output_root.exists():
+                shutil.rmtree(artifacts.output_root)
+                removed += 1
+            artifacts.manifest_path.unlink(missing_ok=True)
+        except (OSError, ValueError):
+            pass
+    return removed
+
+
+def remove_stale_preprocessing_artifacts(
+    *,
+    raw_root: Path,
+    materials_root: Path,
+    cache_root: Path,
+    raw_source: Path,
+    keep_source_hash: str,
+) -> int:
+    source_reference = _raw_source_reference(raw_root, raw_source)
+    if not source_reference:
+        return 0
+    removed = 0
+    for manifest_path, manifest in _manifests_for_source(cache_root, source_reference):
+        if _manifest_string(manifest.get("source_hash")) == keep_source_hash:
+            continue
+        if _remove_manifest_output(materials_root, manifest):
+            removed += 1
+        manifest_path.unlink(missing_ok=True)
+    return removed
+
+
+def _safe_source_stem(value: str) -> str:
+    normalized = unicodedata.normalize("NFC", value)
+    safe = "".join(
+        "_" if character in '<>:"/\\|?*' or ord(character) < 32 else character
+        for character in normalized
+    ).strip(" .")
+    safe = re.sub(r"\s+", "_", safe)
+    if not safe or safe.split(".", maxsplit=1)[0].upper() in _WINDOWS_RESERVED_NAMES:
+        safe = "source"
+    return safe[:40].rstrip(" .") or "source"
+
+
+def _manifest_matches_current_raw(
+    project_root: Path,
+    manifest: dict[str, object],
+) -> bool:
+    source_reference = _normalized_reference(
+        _manifest_string(manifest.get("source_raw_path"))
+    )
+    if not _is_safe_project_reference(source_reference):
+        return False
+    source_parts = PurePosixPath(source_reference).parts
+    if not source_parts or source_parts[0] != "raw":
+        return False
+    raw_source = project_root.joinpath(*source_parts)
+    if not raw_source.exists():
+        return True
+    try:
+        source_stat = raw_source.stat()
+    except OSError:
+        return False
+    return (
+        manifest.get("input_size_bytes") == source_stat.st_size
+        and manifest.get("source_mtime_ns") == source_stat.st_mtime_ns
+    )
+
+
+def _normalized_reference(value: str) -> str:
+    return PurePosixPath(value.replace("\\", "/")).as_posix()
+
+
+def _safe_material_reference(value: str) -> str:
+    normalized = _normalized_reference(value) if value else ""
+    if not _is_safe_project_reference(normalized):
+        return ""
+    parts = PurePosixPath(normalized).parts
+    if not parts or parts[0] != DERIVED_INPUTS_DIRECTORY_NAME:
+        return ""
+    return PurePosixPath(*parts).as_posix()
+
+
+def _path_from_material_reference(materials_root: Path, reference: str) -> Path | None:
+    if not reference:
+        return None
+    target = materials_root.joinpath(*PurePosixPath(reference).parts).resolve()
+    try:
+        target.relative_to(materials_root.resolve())
+    except ValueError:
+        return None
+    return target
+
+
+def _raw_source_reference(raw_root: Path, raw_source: Path) -> str:
+    try:
+        relative = raw_source.resolve().relative_to(raw_root.resolve())
+    except ValueError:
+        return ""
+    return PurePosixPath("raw", *relative.parts).as_posix()
+
+
+def _manifests_for_source(
+    cache_root: Path,
+    source_reference: str,
+) -> list[tuple[Path, dict[str, object]]]:
+    directory = cache_root / PREPROCESSING_CACHE_DIRECTORY_NAME
+    if not directory.is_dir():
+        return []
+    matches: list[tuple[Path, dict[str, object]]] = []
+    for manifest_path in sorted(directory.glob("*.json")):
+        manifest = load_preprocessing_manifest(manifest_path)
+        if manifest is None:
+            continue
+        if _manifest_string(manifest.get("source_raw_path")) == source_reference:
+            matches.append((manifest_path, manifest))
+    return matches
+
+
+def _remove_manifest_output(materials_root: Path, manifest: dict[str, object]) -> bool:
+    reference = _safe_material_reference(_manifest_string(manifest.get("output_root")))
+    output_root = _path_from_material_reference(materials_root, reference)
+    if output_root is None or not output_root.exists():
+        return False
+    try:
+        if output_root.is_dir():
+            shutil.rmtree(output_root)
+        else:
+            output_root.unlink()
+    except OSError:
+        return False
+    return True
+
+
+def _result_from_manifest(
+    request: PreprocessingRequest,
+    manifest: dict[str, object],
+    *,
+    reused: bool,
+) -> PreprocessingResult:
+    derived_materials: list[DerivedMaterialRecord] = []
+    records = manifest.get("derived_materials")
+    if isinstance(records, list):
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            derived_materials.append(
+                DerivedMaterialRecord(
+                    material_relative_path=_manifest_string(
+                        record.get("material_relative_path")
+                    ),
+                    source_entry_path=_manifest_string(record.get("source_entry_path")),
+                    media_type=_manifest_string(record.get("media_type")),
+                    content_form_hint=_manifest_string(record.get("content_form_hint")),
+                    original_name=_manifest_string(record.get("original_name")),
+                    size_bytes=_manifest_int(record.get("size_bytes")),
+                    fingerprint=_manifest_string(record.get("fingerprint")),
+                    page_number=_manifest_optional_int(record.get("page_number")),
+                    chapter_index=_manifest_optional_int(record.get("chapter_index")),
+                )
+            )
+
+    warnings: list[PreprocessingWarning] = []
+    warning_records = manifest.get("warnings")
+    if isinstance(warning_records, list):
+        for warning in warning_records:
+            if not isinstance(warning, dict):
+                continue
+            context = warning.get("context")
+            warnings.append(
+                PreprocessingWarning(
+                    code=_manifest_string(warning.get("code")),
+                    message=_manifest_string(warning.get("message")),
+                    entry_path=_manifest_string(warning.get("entry_path")) or None,
+                    context=(
+                        {
+                            str(key): value
+                            for key, value in context.items()
+                            if isinstance(value, (str, int, float, bool))
+                        }
+                        if isinstance(context, dict)
+                        else {}
+                    ),
+                )
+            )
+    failed_entries = manifest.get("failed_entries")
+    return PreprocessingResult(
+        status="completed",
+        source_hash=_manifest_string(manifest.get("source_hash")),
+        output_root=request.output_root,
+        manifest_path=request.manifest_path,
+        derived_materials=tuple(derived_materials),
+        warnings=tuple(warnings),
+        failed_entries=(
+            tuple(value for value in failed_entries if isinstance(value, str))
+            if isinstance(failed_entries, list)
+            else ()
+        ),
+        entry_count=_manifest_int(manifest.get("entry_count")),
+        input_size_bytes=_manifest_int(manifest.get("input_size_bytes")),
+        expanded_size_bytes=_manifest_int(manifest.get("expanded_size_bytes")),
+        reused=reused,
+    )
+
+
+def _write_json_atomically(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.updating")
+    temporary.unlink(missing_ok=True)
+    try:
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def validate_archive_entry_path(entry_name: str) -> ArchivePathValidation:
@@ -366,15 +918,6 @@ def _is_safe_project_reference(value: str) -> bool:
     )
 
 
-def _hash_file(path: Path, cancelled: CancelledCallback | None) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        while chunk := source.read(_COPY_CHUNK_SIZE):
-            _raise_if_cancelled(cancelled)
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _safe_file_size(path: Path) -> int:
     try:
         return path.stat().st_size
@@ -384,7 +927,7 @@ def _safe_file_size(path: Path) -> int:
 
 def _raise_if_cancelled(cancelled: CancelledCallback | None) -> None:
     if cancelled is not None and cancelled():
-        raise _PreprocessingCancelled
+        raise PreprocessingCancelledError
 
 
 def _build_manifest(
@@ -413,10 +956,30 @@ def _build_manifest(
         "derived_materials": [record.to_dict() for record in derived_materials],
         "entry_count": entry_count,
         "input_size_bytes": input_size_bytes,
+        "source_mtime_ns": _safe_file_mtime_ns(request.source_path),
         "expanded_size_bytes": expanded_size_bytes,
         "warnings": [warning.to_dict() for warning in warnings],
         "failed_entries": list(failed_entries),
     }
+
+
+def _safe_file_mtime_ns(path: Path) -> int:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+def _manifest_string(value: object) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _manifest_int(value: object) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _manifest_optional_int(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def _commit_preprocessing_outputs(

@@ -23,9 +23,12 @@ from utils.media_types import (  # noqa: E402
     InputFormatSupportState,
     SourceSupportLevel,
     classify_source_collection,
+    enabled_input_format_profiles,
     input_format_profile,
     is_import_supported_source,
     is_preprocessable_source,
+    is_project_input_supported_source,
+    project_input_file_patterns,
     source_media_type,
     source_support_profile,
 )
@@ -95,6 +98,11 @@ def _assert_input_format_profiles() -> None:
 
     assert input_format_profile("notes.custom") is None
     assert input_format_profile("README") is None
+    assert enabled_input_format_profiles() == ()
+    assert all(f"*{suffix}" not in project_input_file_patterns() for suffix in expected_suffixes)
+    assert "*.mp4" in project_input_file_patterns()
+    assert is_project_input_supported_source("episode.mp4") is True
+    assert is_project_input_supported_source("chapter.zip") is False
 
 
 def _assert_special_support_states() -> None:
