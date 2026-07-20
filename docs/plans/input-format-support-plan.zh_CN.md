@@ -4,7 +4,7 @@
 
 最近整理日期：2026-07-20。
 
-计划状态：执行中，M01 基线回归和 M02“输入格式支持档位与预处理协议”已完成；下一阶段为 M03“安全预处理核心”。
+计划状态：执行中，M01-M03 已完成；下一阶段为 M04“素材生命周期与处理中间件接线”。
 
 适用阶段：在路线 01、路线 02、路线 03 已完成并归档后，补齐真实素材暴露出的输入格式与输入容器缺口。本文档只覆盖 `.zip`、`.cbz`、`.epub`、`.pdf`、`.7z`、`.rar` 和 `.cbr` 的受控导入、预处理、来源追踪和验收策略。
 
@@ -340,7 +340,7 @@ cache/
 
 验收：
 
-- 通过 6.1 的六步流程验证，派生图片目录能被扫描为 `image_set` / `manga` 候选，文本仍进入既有 text 链路。
+- 通过 6.2 的六步流程验证，派生图片目录能被扫描为 `image_set` / `manga` 候选，文本仍进入既有 text 链路。
 - zip bomb、路径穿越、文件名碰撞、损坏包、未知 entry 和取消操作都有离线验证；不支持的图片如 GIF/BMP 仍保留当前 warning。
 - `.zip` profile、此前通用验证和 `validate_multi_material_regression.py` 全部通过后，才能进入 M06。
 
@@ -361,7 +361,7 @@ cache/
 
 验收：
 
-- 通过 6.1 的六步流程验证；图片页顺序、空包、夹杂非图片 entry、损坏包和路径安全都有覆盖。
+- 通过 6.2 的六步流程验证；图片页顺序、空包、夹杂非图片 entry、损坏包和路径安全都有覆盖。
 - `.zip` 与 `.cbz` profile、统一离线回归全部通过后，才能进入 M07。
 
 边界：
@@ -380,7 +380,7 @@ cache/
 
 验收：
 
-- 通过 6.1 的六步流程验证；派生文本被扫描为 `text` 与合理的小说 content form，章节顺序稳定，run plan 具有 spine/entry 来源摘要。
+- 通过 6.2 的六步流程验证；派生文本被扫描为 `text` 与合理的小说 content form，章节顺序稳定，run plan 具有 spine/entry 来源摘要。
 - 缺失 OPF/spine、损坏 XHTML、DRM/加密提示、复杂 HTML 标签、ruby、脚注和图片 alt 均有保守降级或 warning 验证；内嵌图片不会被扫描为正式 image unit。
 - `.zip`、`.cbz`、`.epub` profile、标准库 ZIP 工具链复核与统一离线回归全部通过后，才允许切换到 PDF 工具链。
 
@@ -401,7 +401,7 @@ cache/
 
 验收：
 
-- 通过 6.1 的六步流程验证；文本型 PDF 进入既有 text unit，页码和原容器来源能进入 run plan。
+- 通过 6.2 的六步流程验证；文本型 PDF 进入既有 text unit，页码和原容器来源能进入 run plan。
 - 已有标准库 ZIP 工具链 profile、`.pdf` profile、PDF backend 可用/缺失路径、PDF 工具链复核和统一离线回归全部通过后，才能切换到 Archive 工具链 M09。
 
 边界：
@@ -421,7 +421,7 @@ cache/
 
 验收：
 
-- 通过 6.1 的六步流程验证；`.7z` 派生材料能进入已有图片或文本扫描链路，完整 archive 明细仍只保存在 manifest；真实 backend 的 capability probe 和集成验证独立通过。
+- 通过 6.2 的六步流程验证；`.7z` 派生材料能进入已有图片或文本扫描链路，完整 archive 明细仍只保存在 manifest；真实 backend 的 capability probe 和集成验证独立通过。
 - 已有所有 profile、`.7z` profile、archive backend 可用/缺失路径和统一离线回归全部通过后，才能进入 M10。
 
 边界：
@@ -440,7 +440,7 @@ cache/
 
 验收：
 
-- 通过 6.1 的六步流程验证；RAR 特有的 backend 不可用、密码保护、损坏包和 entry 安全路径都有稳定 warning，真实 backend 的 capability probe 和集成验证独立通过。
+- 通过 6.2 的六步流程验证；RAR 特有的 backend 不可用、密码保护、损坏包和 entry 安全路径都有稳定 warning，真实 backend 的 capability probe 和集成验证独立通过。
 - 已有所有 profile、`.rar` profile 和统一离线回归全部通过后，才能进入 M11。
 
 边界：
@@ -460,7 +460,7 @@ cache/
 
 验收：
 
-- 通过 6.1 的六步流程验证；漫画页自然排序、夹杂非图片 entry、密码保护、损坏包和移除/清理生命周期都有覆盖，真实 backend 的 capability probe 和集成验证独立通过。
+- 通过 6.2 的六步流程验证；漫画页自然排序、夹杂非图片 entry、密码保护、损坏包和移除/清理生命周期都有覆盖，真实 backend 的 capability probe 和集成验证独立通过。
 - 所有七种 profile 与统一离线回归全部通过后，才能进入 M12。
 
 边界：

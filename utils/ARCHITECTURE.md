@@ -17,7 +17,9 @@
 
 - `i18n.py`：管理语言偏好、系统语言归一化、文案加载和 `t()` 翻译函数。
 - `app_metadata.py`：集中保存应用名、组织名、当前运行时版本/阶段和 HTTP User-Agent。
-- `media_types.py`：集中保存视频、图片、音频、文本后缀，以及导入、预览、正式提取支持状态和集合内容形态提示；当前 PNG/JPEG/WEBP 与 `.srt` / `.ass` 可提取，BMP/GIF、`.vtt` / `.lrc` 可导入但暂不提取。
+- `media_types.py`：集中保存视频、图片、音频、文本后缀，以及直接素材和容器输入格式的独立支持档位；容器 profile 不新增顶层媒体类型，也不进入直接素材后缀集合。
+- `material_preprocessing.py`：定义容器输入预处理请求、结果、warning、派生材料记录和 manifest 协议，统一负责安全路径校验、取消检查、临时目录与原子落盘，不依赖 `core` 或 `gui`。
+- `zip_material_preprocessor.py`：在预处理边界内使用标准库列举和流式展开 ZIP entry，复用统一的大小、数量、压缩比、后缀和路径安全规则；不负责项目导入或 UI 状态。
 - `material_processing_events.py`：集中保存素材处理取消消息和 FFmpeg 进度事件前缀等跨层协议常量。
 - `paths.py`：定义应用根目录、项目根目录和单个项目的标准目录结构。
 - `global_store.py`：提供全局用户数据和配置选项的读写中间件，默认使用根目录 `config.yaml`。
@@ -60,6 +62,7 @@
 - `audio_transcription.py` 通过 `ffmpeg_tool.py` 提取视频音轨，并通过 `core.knowledge_base` 写入 episode transcript；不得在日志中输出完整 transcript。
 - `ai_model_middleware.py`、`cloud_models.py` 和联网下载器在记录 endpoint 或错误摘要前应复用 `network_middleware.py` 的脱敏能力。
 - `ffmpeg_tool.py`、`material_processing_middleware.py` 和 `source_importer.py` 只记录素材处理摘要、文件名或项目内相对标识，不把完整 FFmpeg 命令或外部素材绝对路径作为常规日志输出。
+- 容器输入必须先通过 `material_preprocessing.py` 产生可扫描派生材料；格式处理模块不得自行拼接项目路径、写 manifest 或把原容器链接进 `materials/`。
 - `source_importer.py` 由 `gui/pages/project_page.py` 调用；它只处理文件系统操作，不负责弹窗、按钮状态或用户提示。
 - `source_status.py` 由 `gui/pages/project_page.py` 调用；它只计算素材状态，不负责渲染列表行、弹窗或 InfoBar。
 - `gui/pages/project_page.py` 通过 `material_processing_middleware.py` 触发素材处理和工具校验，不直接承担下层处理细节。
