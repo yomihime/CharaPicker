@@ -282,15 +282,15 @@ def _assert_corrupt_and_cancelled_leave_no_partial_output(root: Path) -> None:
     assert not list(staging_root.glob(".material-preprocessing-*"))
 
 
-def _assert_zip_profiles_enabled_without_opening_later_formats() -> None:
-    for suffix in (".zip", ".cbz", ".epub"):
+def _assert_profiles_enabled_without_opening_archive_formats() -> None:
+    for suffix in (".zip", ".cbz", ".epub", ".pdf"):
         profile = input_format_profile(f"fixture{suffix}")
         assert profile is not None
         assert profile.state == InputFormatSupportState.ENABLED
         assert is_preprocessable_source(f"fixture{suffix}") is True
         assert is_import_supported_source(f"fixture{suffix}") is False
         assert f"*{suffix}" in project_input_file_patterns()
-    for suffix in (".pdf", ".7z", ".rar", ".cbr"):
+    for suffix in (".7z", ".rar", ".cbr"):
         assert is_preprocessable_source(f"fixture{suffix}") is False
         assert f"*{suffix}" not in project_input_file_patterns()
 
@@ -931,7 +931,7 @@ def main() -> None:
         _assert_cbz_profile_end_to_end(root / "cbz-profile")
         _assert_epub_profile_end_to_end(root / "epub-profile")
         _assert_epub_failure_and_fallback_boundaries(root / "epub-boundaries")
-    _assert_zip_profiles_enabled_without_opening_later_formats()
+    _assert_profiles_enabled_without_opening_archive_formats()
     print("input format preprocessing validation passed")
 
 

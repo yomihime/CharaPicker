@@ -29,6 +29,7 @@ should be updated before publishing.
 | Qt 6 runtime files | Qt application framework runtime included through PyQt6 wheels/builds | Qt licensing varies by module and distribution; PyQt6 GPL wheels include corresponding Qt runtime files | https://www.qt.io/licensing/ |
 | PyQt6-Fluent-Widgets / qfluentwidgets | Fluent UI widgets | GPL-3.0 for the Python package unless another upstream license is obtained | https://github.com/zhiyiYo/PyQt-Fluent-Widgets |
 | pydantic | Data validation and models | MIT | https://github.com/pydantic/pydantic |
+| pypdf | Text extraction and metadata inspection for PDF inputs | BSD-3-Clause | https://github.com/py-pdf/pypdf |
 | requests | HTTP client | Apache-2.0 | https://github.com/psf/requests |
 | dashscope | Alibaba Cloud DashScope SDK | Apache-2.0 | https://github.com/dashscope/dashscope-sdk-python |
 | PySocks | SOCKS proxy support for requests | BSD-style license | https://github.com/Anorov/PySocks |

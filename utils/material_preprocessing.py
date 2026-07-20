@@ -12,9 +12,13 @@ import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Callable, Literal
+from typing import TYPE_CHECKING, Callable, Literal
 
 from utils.media_types import InputPreprocessorKey
+
+
+if TYPE_CHECKING:
+    from utils.pdf_backend import PdfBackend
 
 
 CancelledCallback = Callable[[], bool]
@@ -108,6 +112,7 @@ class PreprocessingEntrySummary:
     role: str
     media_type: str = ""
     media_subtype: str = ""
+    page_number: int | None = None
     spine_index: int | None = None
     title: str = ""
     size_bytes: int = 0
@@ -119,6 +124,7 @@ class PreprocessingEntrySummary:
             "role": self.role,
             "media_type": self.media_type,
             "media_subtype": self.media_subtype,
+            "page_number": self.page_number,
             "spine_index": self.spine_index,
             "title": self.title,
             "size_bytes": self.size_bytes,
@@ -191,7 +197,11 @@ class PreprocessingCancelledError(RuntimeError):
     pass
 
 
-def preprocess_material(request: PreprocessingRequest) -> PreprocessingResult:
+def preprocess_material(
+    request: PreprocessingRequest,
+    *,
+    pdf_backend: PdfBackend | None = None,
+) -> PreprocessingResult:
     """Preprocess one source without exposing partial output or manifest files."""
     source = request.source_path.resolve()
     output_root = request.output_root.resolve()
@@ -243,6 +253,14 @@ def preprocess_material(request: PreprocessingRequest) -> PreprocessingResult:
             from utils.epub_material_preprocessor import extract_epub_materials
 
             extraction = extract_epub_materials(request, staged_output)
+        elif request.preprocessor_key == "pdf":
+            from utils.pdf_material_preprocessor import extract_pdf_materials
+
+            extraction = extract_pdf_materials(
+                request,
+                staged_output,
+                backend=pdf_backend,
+            )
         else:
             return _failed_result(
                 request,
@@ -812,6 +830,7 @@ def _result_from_manifest(
                     role=_manifest_string(summary.get("role")),
                     media_type=_manifest_string(summary.get("media_type")),
                     media_subtype=_manifest_string(summary.get("media_subtype")),
+                    page_number=_manifest_optional_int(summary.get("page_number")),
                     spine_index=_manifest_optional_int(summary.get("spine_index")),
                     title=_manifest_string(summary.get("title")),
                     size_bytes=_manifest_int(summary.get("size_bytes")),

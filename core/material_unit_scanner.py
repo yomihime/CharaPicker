@@ -35,6 +35,11 @@ GENERIC_MATERIAL_SEASON_ID = "season_materials"
 NATURAL_SORT_PATTERN = re.compile(r"\d+|\D+")
 TIMED_TEXT_ALIGNMENT_AMBIGUOUS = "timed_text_episode_alignment_ambiguous"
 TIMED_TEXT_ALIGNMENT_UNMATCHED = "timed_text_episode_alignment_unmatched"
+PREPROCESSED_TEXT_CONTENT_FORMS = {
+    ContentForm.NOVEL.value: ContentForm.NOVEL,
+    ContentForm.SCRIPT.value: ContentForm.SCRIPT,
+    ContentForm.SETTING_BOOK.value: ContentForm.SETTING_BOOK,
+}
 
 
 def extend_episode_plans(
@@ -372,8 +377,15 @@ def _single_material_episode(
     preprocessing_index: dict[str, dict[str, object]],
 ) -> EpisodePlan:
     media_type = _material_media_type(path)
-    content_form = _material_content_form(path, media_type)
     relative_path = _relative_material_path(materials_root, path)
+    preprocessing_metadata = preprocessing_index.get(relative_path, {})
+    content_form = _material_content_form(
+        path,
+        media_type,
+        preprocessed_hint=_string(
+            preprocessing_metadata.get("preprocessed_content_form_hint")
+        ),
+    )
     episode_id = _stable_episode_id(media_type, relative_path)
     unit = _material_unit(
         materials_root,
@@ -430,6 +442,14 @@ def _material_unit(
     relative_path = _relative_material_path(materials_root, path)
     support = source_support_profile(path)
     preprocessing_metadata = preprocessing_index.get(relative_path, {})
+    preprocessed_page_number = preprocessing_metadata.get("page_number")
+    effective_page_number = page_number
+    if (
+        effective_page_number is None
+        and isinstance(preprocessed_page_number, int)
+        and not isinstance(preprocessed_page_number, bool)
+    ):
+        effective_page_number = preprocessed_page_number
     unit_metadata = {
         **preprocessing_metadata,
         "display_title": path.name,
@@ -448,8 +468,11 @@ def _material_unit(
         content_form=content_form,
         origin=MaterialOrigin.MATERIAL,
         page_range=(
-            PageRange(start_page=page_number, end_page=page_number)
-            if page_number is not None
+            PageRange(
+                start_page=effective_page_number,
+                end_page=effective_page_number,
+            )
+            if effective_page_number is not None
             else None
         ),
         text_range=TextRange(chapter=path.stem) if media_type == MediaType.TEXT else None,
@@ -489,7 +512,15 @@ def _material_media_type(path: Path) -> MediaType:
     return MediaType(media_type)
 
 
-def _material_content_form(path: Path, media_type: MediaType) -> ContentForm:
+def _material_content_form(
+    path: Path,
+    media_type: MediaType,
+    *,
+    preprocessed_hint: str = "",
+) -> ContentForm:
+    controlled_hint = PREPROCESSED_TEXT_CONTENT_FORMS.get(preprocessed_hint)
+    if controlled_hint is not None and media_type == MediaType.TEXT:
+        return controlled_hint
     if media_type == MediaType.AUDIO:
         return ContentForm.AUDIO_DRAMA
     if media_type == MediaType.IMAGE:

@@ -223,6 +223,7 @@
   "project.inputFormat.zip": "ZIP Archive",
   "project.inputFormat.cbz": "CBZ Comic Archive",
   "project.inputFormat.epub": "EPUB eBook",
+  "project.inputFormat.pdf": "PDF Document",
   "project.fileDialog.folder": "Select Source Folder",
   "cards.title": "Character Cards",
   "cards.noProject": "Select or create a project before managing character cards.",

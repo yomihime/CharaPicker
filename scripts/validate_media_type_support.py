@@ -70,7 +70,7 @@ def _assert_input_format_profiles() -> None:
         ".zip": InputFormatSupportState.ENABLED,
         ".cbz": InputFormatSupportState.ENABLED,
         ".epub": InputFormatSupportState.ENABLED,
-        ".pdf": InputFormatSupportState.BLOCKED,
+        ".pdf": InputFormatSupportState.ENABLED,
         ".7z": InputFormatSupportState.BLOCKED,
         ".rar": InputFormatSupportState.BLOCKED,
         ".cbr": InputFormatSupportState.BLOCKED,
@@ -95,13 +95,14 @@ def _assert_input_format_profiles() -> None:
             ".zip": "project.inputFormat.zip",
             ".cbz": "project.inputFormat.cbz",
             ".epub": "project.inputFormat.epub",
+            ".pdf": "project.inputFormat.pdf",
         }
         assert profile.display_name_key == expected_display_keys.get(suffix, "")
         assert source_media_type(f"material{suffix}") is None
         assert suffix not in SUPPORTED_SOURCE_SUFFIXES
         assert is_import_supported_source(f"material{suffix}") is False
         assert is_preprocessable_source(f"material{suffix}") is (
-            suffix in {".zip", ".cbz", ".epub"}
+            suffix in {".zip", ".cbz", ".epub", ".pdf"}
         )
 
     assert input_format_profile("notes.custom") is None
@@ -110,18 +111,22 @@ def _assert_input_format_profiles() -> None:
         ".zip",
         ".cbz",
         ".epub",
+        ".pdf",
     )
-    assert {"*.zip", "*.cbz", "*.epub"} <= set(project_input_file_patterns())
+    assert {"*.zip", "*.cbz", "*.epub", "*.pdf"} <= set(
+        project_input_file_patterns()
+    )
     assert all(
         f"*{suffix}" not in project_input_file_patterns()
         for suffix in expected_suffixes
-        if suffix not in {".zip", ".cbz", ".epub"}
+        if suffix not in {".zip", ".cbz", ".epub", ".pdf"}
     )
     assert "*.mp4" in project_input_file_patterns()
     assert is_project_input_supported_source("episode.mp4") is True
     assert is_project_input_supported_source("chapter.zip") is True
     assert is_project_input_supported_source("chapter.cbz") is True
     assert is_project_input_supported_source("novel.epub") is True
+    assert is_project_input_supported_source("document.pdf") is True
 
 
 def _assert_special_support_states() -> None:
@@ -226,6 +231,7 @@ def _assert_importer_uses_support_matrix() -> None:
             "animation.gif",
             "chapter.cbz",
             "novel.epub",
+            "document.pdf",
             "chapter.zip",
         }
 

@@ -100,9 +100,9 @@ INPUT_FORMAT_PROFILES = (
     InputFormatProfile(
         suffix=".pdf",
         toolchain="pdf",
-        state=InputFormatSupportState.BLOCKED,
+        state=InputFormatSupportState.ENABLED,
         preprocessor_key="pdf",
-        reason="pdf_backend_not_selected",
+        display_name_key="project.inputFormat.pdf",
     ),
     InputFormatProfile(
         suffix=".7z",

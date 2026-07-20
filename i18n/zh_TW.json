@@ -223,6 +223,7 @@
   "project.inputFormat.zip": "ZIP 壓縮檔",
   "project.inputFormat.cbz": "CBZ 漫畫包",
   "project.inputFormat.epub": "EPUB 電子書",
+  "project.inputFormat.pdf": "PDF 文件",
   "project.fileDialog.folder": "選擇素材資料夾",
   "cards.title": "角色卡",
   "cards.noProject": "請選擇或新建一個項目後管理角色卡。",
