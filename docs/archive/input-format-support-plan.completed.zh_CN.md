@@ -1,10 +1,12 @@
 # 更多输入格式支持执行计划（zh_CN）
 
-> 本文档是执行计划，不代表实现状态。
+> 本文档是已完成计划的执行与验收记录；当前实现事实仍以代码、架构说明和稳定参考文档为准。
 
 最近整理日期：2026-07-20。
 
-计划状态：执行中，M01-M11 已完成；下一阶段为 M12“全量回归、真实素材验收与文档同步”。
+归档状态：M01-M12 已于 2026-07-20 全部完成并移出当前执行队列。
+
+计划状态：已完成。七种输入格式均已启用；ZIP/CBZ/EPUB 使用标准库工具链，文本型 PDF 使用 `pypdf>=6.14.2,<7`，7z/RAR/CBR 复用可选的本地 7-Zip backend。
 
 适用阶段：在路线 01、路线 02、路线 03 已完成并归档后，补齐真实素材暴露出的输入格式与输入容器缺口。本文档只覆盖 `.zip`、`.cbz`、`.epub`、`.pdf`、`.7z`、`.rar` 和 `.cbr` 的受控导入、预处理、来源追踪和验收策略。
 
@@ -490,6 +492,14 @@ cache/
 
 - 不把用户素材、派生材料、验收输出或第三批格式写入仓库或产品承诺。
 
+完成记录（2026-07-20）：
+
+- `validate_input_format_preprocessing.py`、`validate_pdf_material_preprocessing.py` 和 `validate_archive_material_preprocessing.py` 使用临时目录内的确定性构造样本覆盖七种 profile；统一入口 `validate_multi_material_regression.py` 会自动运行这些脚本和 `tests/` 单测发现。
+- ZIP 覆盖混合图片/文本、未知后缀、嵌套容器、来源 trace、复用和清理；CBZ 覆盖仅图片页、自然排序、非图片 warning 和页码映射；EPUB 覆盖 OPF/spine/XHTML 阅读顺序、受控降级、内嵌图片只观察不物化和 DRM/加密拒绝。
+- PDF 覆盖真实 `pypdf` 文本页提取、页码 trace、backend 缺失、加密、损坏和空文本；7z 覆盖真实 7-Zip capability/list/test/extract、backend 缺失、密码、损坏和安全边界；RAR 覆盖真实 RAR4、RAR5 listing 契约及同类失败语义；CBR 覆盖真实 RAR 容器的仅图片页自然排序和独立失败语义。
+- 七种格式的项目流程均验证导入、预处理、扫描、`FormalExtractionRunPlan`、缓存复用、raw 清理和项目移除；统一回归中的角色卡质量单测继续断言 `source_context.source_runs`，角色卡编译没有新增打开原容器的路径。
+- 根目录两个未跟踪用户素材按私有数据边界保留原状，未读取、未移动、未暂存；本轮完成判定使用可重复的真实 parser/backend 构造样本，不把用户文件作为自动化门禁或提交内容。
+
 ## 12. 验证与自审查
 
 默认验证命令：
@@ -600,6 +610,6 @@ conda run -n CharaPicker python scripts\validate_i18n_keys.py
 
 ## 15. 待确认问题
 
-- PDF 首版采用哪种方案：新增纯 Python 依赖、调用外部工具，还是先后置只保留 warning？
-- 7z/RAR/CBR 是否允许依赖外部 archive backend；若允许，是只做用户本地路径配置，还是新增受审查的 Python 依赖？不实现应用内下载器。
+- PDF 首版已确认使用 `pypdf>=6.14.2,<7`，只处理可提取文本，不安装 crypto extra，不执行 OCR。
+- 7z/RAR/CBR 已确认使用可选的本地 7-Zip backend；应用只做 capability probe 和受控调用，不实现下载器，backend 缺失时返回结构化 warning。
 - 第三批和其它非常规格式已明确不在本计划内；未来如要扩展，必须新开计划并重新评估输入价值、依赖、数据安全和长期维护成本。

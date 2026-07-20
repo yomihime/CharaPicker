@@ -17,4 +17,5 @@
 - [提取质量与可观测性执行计划完成记录](01-extraction-quality-observability-plan.completed.zh_CN.md)：路线 01 已完成，正式提取回归、失败策略和可观察状态已建立；长期 prompt 与进度监测留在当前 TODO 跟踪。
 - [多媒体平级接入前重构解耦执行计划完成记录](02-multi-material-refactor-plan.completed.zh_CN.md)：路线 02 已完成，正式提取已转向 `FormalExtractionRunPlan`、通用 unit、派生成果和四媒体类型边界。
 - [番剧、漫画、广播剧、小说等内容形态支持执行计划完成记录](03-multi-material-coverage-plan.completed.zh_CN.md)：路线 03 已完成 M19 收尾，多内容形态扫描、预览、正式分派、知识库证据、真实验收和文档同步均已落地。
-- [真实预览结果后续计划完成记录](preview-real-result-followup-plan.completed.zh_CN.md)：原文本、字幕、音频转写、图片/漫画和视频+字幕预览覆盖计划已被路线 03 吸收；剩余容器导入缺口留在当前 TODO。
+- [真实预览结果后续计划完成记录](preview-real-result-followup-plan.completed.zh_CN.md)：原文本、字幕、音频转写、图片/漫画和视频+字幕预览覆盖计划已被路线 03 吸收；当时遗留的容器导入缺口已由更多输入格式计划完成。
+- [更多输入格式支持执行计划完成记录](input-format-support-plan.completed.zh_CN.md)：ZIP、CBZ、EPUB、文本型 PDF、7z、RAR 与 CBR 的受控预处理、来源追踪、安全边界和全量回归已完成。

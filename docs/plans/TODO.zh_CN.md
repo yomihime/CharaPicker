@@ -6,19 +6,14 @@
 
 ## 近期执行路线
 
-路线 01 的提取质量基线、路线 02 的正式提取架构重构、路线 03 的多内容形态实现与真实验收已经按顺序完成。当前执行重点调整为：
+路线 01 的提取质量基线、路线 02 的正式提取架构重构、路线 03 的多内容形态实现与真实验收，以及更多输入格式专项计划已经按顺序完成。当前执行重点调整为：
 
 1. 持续运行统一离线回归，保持四媒体类型、预览/正式隔离、来源追踪和旧视频链路不回退。
-2. 完成更多输入格式计划的全量验收与文档收尾；ZIP、CBZ、EPUB、PDF、7z、RAR 与 CBR 均已通过受控预处理和格式独立验证。
-3. 根据真实验收结果继续调整供应商拒绝、证据质量、进度和 UI 反馈，不提前扩展新的媒体类型或大范围插件架构。
+2. 根据真实验收结果继续调整供应商拒绝、证据质量、进度和 UI 反馈，不提前扩展新的媒体类型或大范围插件架构。
 
 ## P0：Extract Once 覆盖缺口
 
-路线 03 的扫描、handler、预览、正式聚合、角色卡证据、失败记录、GUI 状态、统一离线回归和支持格式真实验收已经落地，执行事实见 [番剧、漫画、广播剧、小说等内容形态支持执行计划完成记录](../archive/03-multi-material-coverage-plan.completed.zh_CN.md)。当前 P0 只保留真实素材暴露出的输入容器缺口。
-
-| 顺序 | 待办 | 优先级 | 规模 | 主要验收点 |
-| --- | --- | --- | --- | --- |
-| 1 | 完成 [更多输入格式支持执行计划](input-format-support-plan.zh_CN.md) M12 的全量验收与文档同步 | 中 | 小 | 七种 profile 均已启用并通过独立验证；收尾阶段复核统一回归、来源追踪、清理边界、依赖缺失路径和用户文档，不再增加新格式。 |
+路线 03 的扫描、handler、预览、正式聚合、角色卡证据、失败记录、GUI 状态和统一离线回归已经落地；ZIP、CBZ、EPUB、PDF、7z、RAR 与 CBR 的受控输入预处理也已完成并归档。当前没有独立 P0 覆盖缺口；后续如真实素材暴露新的阻断问题，应先核对 [多内容形态完成记录](../archive/03-multi-material-coverage-plan.completed.zh_CN.md) 和 [更多输入格式完成记录](../archive/input-format-support-plan.completed.zh_CN.md)，再建立专项任务。
 
 ## P1：提取质量与可观测性
 
@@ -26,23 +21,24 @@
 
 | 顺序 | 待办 | 优先级 | 规模 | 主要验收点 |
 | --- | --- | --- | --- | --- |
-| 2 | 持续更新提示词以尽量避免安全拒绝 | 中 | 中/长期 | 遇到新拒绝样例时优先维护 `res/default_prompts.json` 或用户 prompt override，不把 prompt 硬编码进代码，并保持 JSON 输出约束。 |
-| 3 | 长期监测提取进度条是否真实反映工作流进度 | 中 | 小/长期 | 每次调整提取链路、chunk 跳过策略、失败处理或洞察流信号后，回归检查预览和正式提取的进度条是否随 chunk 处理、跳过、失败和完成事件稳定推进；前置失败不应显示为 100%。 |
+| 1 | 持续更新提示词以尽量避免安全拒绝 | 中 | 中/长期 | 遇到新拒绝样例时优先维护 `res/default_prompts.json` 或用户 prompt override，不把 prompt 硬编码进代码，并保持 JSON 输出约束。 |
+| 2 | 长期监测提取进度条是否真实反映工作流进度 | 中 | 小/长期 | 每次调整提取链路、chunk 跳过策略、失败处理或洞察流信号后，回归检查预览和正式提取的进度条是否随 chunk 处理、跳过、失败和完成事件稳定推进；前置失败不应显示为 100%。 |
 
 ## P2：归档后续与可选增强
 
 | 顺序 | 待办 | 优先级 | 规模 | 主要验收点 |
 | --- | --- | --- | --- | --- |
-| 4 | 补充模型页图片与视频测试素材来源记录 | 低 | 小 | 如后续需要更完整素材声明，补充原始 URL；或替换为新的自由素材并更新 `docs/reference/asset-material-declaration.zh_CN.md`。 |
-| 5 | 继续扩展首版以外的 API 规范 | 低 | 大 | 在多供应商首版稳定后，按优先级继续评估 OpenAI Responses、Gemini GenerateContent、Anthropic Messages 等 schema；每个 schema 需通过中间件路由和模型页测试验证后再开放。 |
-| 6 | 增强 transcript 后处理能力 | 低 | 中 | 在 episode transcript 基础上按需增加说话人识别、置信度、字幕导入合并或人工校正流程，不影响首版 Whisper 接入。 |
+| 3 | 补充模型页图片与视频测试素材来源记录 | 低 | 小 | 如后续需要更完整素材声明，补充原始 URL；或替换为新的自由素材并更新 `docs/reference/asset-material-declaration.zh_CN.md`。 |
+| 4 | 继续扩展首版以外的 API 规范 | 低 | 大 | 在多供应商首版稳定后，按优先级继续评估 OpenAI Responses、Gemini GenerateContent、Anthropic Messages 等 schema；每个 schema 需通过中间件路由和模型页测试验证后再开放。 |
+| 5 | 增强 transcript 后处理能力 | 低 | 中 | 在 episode transcript 基础上按需增加说话人识别、置信度、字幕导入合并或人工校正流程，不影响首版 Whisper 接入。 |
 
 ## 已完成并移出队列
 
 - 路线 01 提取质量与可观测性基础实施完成，正式提取回归、失败策略和可观察状态已建立。
 - 路线 02 多媒体平级接入前重构完成：正式提取以 `FormalExtractionRunPlan` 为主索引，顶层媒体类型固定为 `video`、`image`、`audio`、`text`，transcript 作为 text 型派生成果处理。
 - 路线 03 离线实现完成：普通文本、SRT/ASS、音频 transcript、PNG/JPEG/WEBP、漫画页组、视频 + 字幕关联和原生视听补充 handler 已进入统一扫描、预览、正式分派、聚合、角色卡证据和失败记录链路；`scripts/validate_multi_material_regression.py` 提供统一离线回归。
-- 路线 03 多内容形态真实验收完成：视频、小说文本、独立图片、漫画目录、SRT 字幕、独立音频 transcript、视频 + 字幕、当前 run 聚合和非视频角色卡编译均已验证。验收使用从 EPUB/漫画 ZIP 安全抽取后的支持格式，容器直接导入仍保留在 P0。
+- 路线 03 多内容形态真实验收完成：视频、小说文本、独立图片、漫画目录、SRT 字幕、独立音频 transcript、视频 + 字幕、当前 run 聚合和非视频角色卡编译均已验证。
+- 更多输入格式计划完成：ZIP、CBZ、EPUB、文本型 PDF、7z、RAR 与 CBR 已进入受控预处理、来源追踪、缓存复用和清理流程，完成记录见 [更多输入格式支持执行计划](../archive/input-format-support-plan.completed.zh_CN.md)。
 - 模型级原生音频能力判断已统一：阿里云普通模型不会再因 provider 能力被误派到 native audio；不支持时保留 transcript 路径并返回可解释 warning，预检可通过 `--preset-name` 复用同一规则。
 - 正式提取回归验证已覆盖 run 过滤、clean/fast 边界、handler 分派、preview/full 隔离、失败样例、stale 标记和多内容形态聚合；手动真实验收仍不能被离线回归替代。
 - 整理输出角色卡空间：基础版已完成，详细计划归档到 [角色卡最终编译与角色卡页面计划](../archive/character-card-compilation-plan.completed.zh_CN.md)。
