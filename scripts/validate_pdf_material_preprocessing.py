@@ -299,7 +299,7 @@ def _assert_missing_backend_workflow(root: Path) -> None:
         assert raw_source.is_file()
         assert not (project_root / "materials" / external_source.name).exists()
         assert not list(
-            (project_root / "cache" / "material_preprocessing").glob("*.json")
+            (project_root / "cache" / "material_preprocessing").rglob("*.json")
         )
         assert remove_project_sources(project_id, [str(external_source)]) == 1
         assert not raw_source.exists()

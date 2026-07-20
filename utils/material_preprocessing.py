@@ -29,8 +29,10 @@ WarningContextValue = str | int | float | bool
 PREPROCESSING_MANIFEST_SCHEMA_VERSION = 1
 DERIVED_INPUTS_DIRECTORY_NAME = "derived_inputs"
 PREPROCESSING_CACHE_DIRECTORY_NAME = "material_preprocessing"
+PREPROCESSING_MANIFEST_DIRECTORY_NAME = "manifests"
 _COPY_CHUNK_SIZE = 1024 * 1024
 _SOURCE_HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_MATERIAL_FINGERPRINT_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 _WINDOWS_RESERVED_NAMES = {
     "CON",
     "PRN",
@@ -376,15 +378,23 @@ def preprocessing_artifact_paths(
         raise ValueError("source_hash must be a lowercase SHA-256 digest")
     relative_raw = raw_source.resolve().relative_to(raw_root.resolve())
     source_raw_path = PurePosixPath("raw", *relative_raw.parts).as_posix()
-    safe_stem = _safe_source_stem(raw_source.stem)
-    derived_name = f"{safe_stem}_{source_hash[:16]}"
-    output_reference = PurePosixPath(DERIVED_INPUTS_DIRECTORY_NAME, derived_name).as_posix()
+    output_reference = PurePosixPath(
+        DERIVED_INPUTS_DIRECTORY_NAME,
+        *relative_raw.parts,
+    ).as_posix()
+    manifest_relative = Path(*relative_raw.parts)
     return PreprocessingArtifactPaths(
         source_hash=source_hash,
         source_raw_path=source_raw_path,
-        output_root=materials_root / DERIVED_INPUTS_DIRECTORY_NAME / derived_name,
+        output_root=materials_root / DERIVED_INPUTS_DIRECTORY_NAME / relative_raw,
         output_root_reference=output_reference,
-        manifest_path=cache_root / PREPROCESSING_CACHE_DIRECTORY_NAME / f"{source_hash}.json",
+        manifest_path=(
+            cache_root
+            / PREPROCESSING_CACHE_DIRECTORY_NAME
+            / PREPROCESSING_MANIFEST_DIRECTORY_NAME
+            / manifest_relative.parent
+            / f"{manifest_relative.name}.json"
+        ),
     )
 
 
@@ -476,7 +486,7 @@ def preprocessing_material_metadata_index(materials_root: Path) -> dict[str, dic
     if not cache_directory.is_dir():
         return index
 
-    for manifest_path in sorted(cache_directory.glob("*.json")):
+    for manifest_path in _preprocessing_manifest_paths(cache_directory.parent):
         manifest = load_preprocessing_manifest(manifest_path)
         if manifest is None:
             continue
@@ -581,12 +591,18 @@ def preprocessing_manifest_is_complete(
         if material_path is None or not material_path.is_file():
             return False
         size_bytes = record.get("size_bytes")
-        if isinstance(size_bytes, int):
-            try:
-                if material_path.stat().st_size != size_bytes:
-                    return False
-            except OSError:
+        if not isinstance(size_bytes, int) or isinstance(size_bytes, bool) or size_bytes < 0:
+            return False
+        fingerprint = _manifest_string(record.get("fingerprint"))
+        if not _MATERIAL_FINGERPRINT_PATTERN.fullmatch(fingerprint):
+            return False
+        try:
+            if material_path.stat().st_size != size_bytes:
                 return False
+            if _file_sha256_fingerprint(material_path) != fingerprint:
+                return False
+        except OSError:
+            return False
     return True
 
 
@@ -696,18 +712,6 @@ def remove_stale_preprocessing_artifacts(
     return removed
 
 
-def _safe_source_stem(value: str) -> str:
-    normalized = unicodedata.normalize("NFC", value)
-    safe = "".join(
-        "_" if character in '<>:"/\\|?*' or ord(character) < 32 else character
-        for character in normalized
-    ).strip(" .")
-    safe = re.sub(r"\s+", "_", safe)
-    if not safe or safe.split(".", maxsplit=1)[0].upper() in _WINDOWS_RESERVED_NAMES:
-        safe = "source"
-    return safe[:40].rstrip(" .") or "source"
-
-
 def _manifest_matches_current_raw(
     project_root: Path,
     manifest: dict[str, object],
@@ -770,17 +774,32 @@ def _manifests_for_source(
     cache_root: Path,
     source_reference: str,
 ) -> list[tuple[Path, dict[str, object]]]:
-    directory = cache_root / PREPROCESSING_CACHE_DIRECTORY_NAME
-    if not directory.is_dir():
-        return []
     matches: list[tuple[Path, dict[str, object]]] = []
-    for manifest_path in sorted(directory.glob("*.json")):
+    for manifest_path in _preprocessing_manifest_paths(cache_root):
         manifest = load_preprocessing_manifest(manifest_path)
         if manifest is None:
             continue
         if _manifest_string(manifest.get("source_raw_path")) == source_reference:
             matches.append((manifest_path, manifest))
     return matches
+
+
+def _preprocessing_manifest_paths(cache_root: Path) -> list[Path]:
+    directory = cache_root / PREPROCESSING_CACHE_DIRECTORY_NAME
+    if not directory.is_dir():
+        return []
+    legacy_paths = list(directory.glob("*.json"))
+    manifests_root = directory / PREPROCESSING_MANIFEST_DIRECTORY_NAME
+    current_paths = list(manifests_root.rglob("*.json")) if manifests_root.is_dir() else []
+    return sorted({*legacy_paths, *current_paths})
+
+
+def _file_sha256_fingerprint(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(_COPY_CHUNK_SIZE):
+            digest.update(chunk)
+    return f"sha256:{digest.hexdigest()}"
 
 
 def _remove_manifest_output(materials_root: Path, manifest: dict[str, object]) -> bool:

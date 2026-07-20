@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 import sys
 import zipfile
@@ -329,8 +330,11 @@ def _assert_project_lifecycle_and_source_trace(root: Path) -> None:
         cache_root=cache_root,
     )
     assert result.succeeded and not result.reused
-    assert request.output_root.name.endswith(result.source_hash[:16])
-    assert request.output_root_reference.startswith("derived_inputs/")
+    assert request.output_root == materials_root / "derived_inputs" / "collection.zip"
+    assert request.output_root_reference == "derived_inputs/collection.zip"
+    assert request.manifest_path == (
+        cache_root / "material_preprocessing" / "manifests" / "collection.zip.json"
+    )
     assert request.source_raw_path == "raw/collection.zip"
 
     reused = preprocess_project_source(
@@ -383,6 +387,27 @@ def _assert_project_lifecycle_and_source_trace(root: Path) -> None:
         "pages/001.png",
     }
 
+    text_record = next(
+        record for record in result.derived_materials if record.media_type == "text"
+    )
+    text_material = materials_root / text_record.material_relative_path
+    text_material.write_bytes(b"CHAPTER")
+    assert current_preprocessing_manifest_for_raw(
+        raw_root=raw_root,
+        materials_root=materials_root,
+        cache_root=cache_root,
+        raw_source=raw_source,
+    ) is None
+    assert preprocessing_material_metadata_index(materials_root) == {}
+    repaired = preprocess_project_source(
+        _project_request(project_root, raw_source),
+        raw_root=raw_root,
+        materials_root=materials_root,
+        cache_root=cache_root,
+    )
+    assert repaired.succeeded and not repaired.reused
+    assert text_material.read_bytes() == b"chapter"
+
     previous_projects_root = path_utils.PROJECTS_ROOT
     path_utils.PROJECTS_ROOT = projects_root
     try:
@@ -419,8 +444,10 @@ def _assert_project_lifecycle_and_source_trace(root: Path) -> None:
         )
         assert replacement.succeeded
         assert replacement.source_hash != result.source_hash
-        assert not request.output_root.exists()
-        assert not request.manifest_path.exists()
+        assert replacement_request.output_root == request.output_root
+        assert replacement_request.manifest_path == request.manifest_path
+        assert request.output_root.exists()
+        assert request.manifest_path.exists()
 
         replacement_output = replacement_request.output_root
         replacement_manifest = replacement_request.manifest_path
@@ -444,6 +471,68 @@ def _assert_project_lifecycle_and_source_trace(root: Path) -> None:
         assert not raw_source.exists()
         assert not replacement_output.exists()
         assert not replacement_manifest.exists()
+    finally:
+        path_utils.PROJECTS_ROOT = previous_projects_root
+
+
+def _assert_source_relative_artifact_isolation(root: Path) -> None:
+    projects_root = root / "projects"
+    project_id = "input-format-source-isolation"
+    project_root = projects_root / project_id
+    raw_root = project_root / "raw"
+    materials_root = project_root / "materials"
+    cache_root = project_root / "cache"
+    for path in (raw_root, materials_root, cache_root, project_root / "knowledge_base"):
+        path.mkdir(parents=True, exist_ok=True)
+
+    first_source = raw_root / "groupA" / "book.zip"
+    second_source = raw_root / "groupB" / "book.zip"
+    _write_zip(first_source, [("chapter.txt", b"same content")])
+    second_source.parent.mkdir(parents=True)
+    shutil.copy2(first_source, second_source)
+
+    first_request = _project_request(project_root, first_source)
+    second_request = _project_request(project_root, second_source)
+    first_result = preprocess_project_source(
+        first_request,
+        raw_root=raw_root,
+        materials_root=materials_root,
+        cache_root=cache_root,
+    )
+    second_result = preprocess_project_source(
+        second_request,
+        raw_root=raw_root,
+        materials_root=materials_root,
+        cache_root=cache_root,
+    )
+    assert first_result.succeeded and second_result.succeeded
+    assert first_result.source_hash == second_result.source_hash
+    assert first_request.output_root == materials_root / "derived_inputs" / "groupA" / "book.zip"
+    assert second_request.output_root == materials_root / "derived_inputs" / "groupB" / "book.zip"
+    assert first_request.output_root != second_request.output_root
+    assert first_request.manifest_path != second_request.manifest_path
+    assert first_request.manifest_path.is_file()
+    assert second_request.manifest_path.is_file()
+
+    metadata_index = preprocessing_material_metadata_index(materials_root)
+    assert {
+        metadata["preprocessed_from_raw"] for metadata in metadata_index.values()
+    } == {"raw/groupA/book.zip", "raw/groupB/book.zip"}
+
+    previous_projects_root = path_utils.PROJECTS_ROOT
+    path_utils.PROJECTS_ROOT = projects_root
+    try:
+        assert remove_raw_sources(project_id, [first_source]) == 1
+        assert not first_request.output_root.exists()
+        assert not first_request.manifest_path.exists()
+        assert second_request.output_root.is_dir()
+        assert second_request.manifest_path.is_file()
+        assert current_preprocessing_manifest_for_raw(
+            raw_root=raw_root,
+            materials_root=materials_root,
+            cache_root=cache_root,
+            raw_source=second_source,
+        ) is not None
     finally:
         path_utils.PROJECTS_ROOT = previous_projects_root
 
@@ -487,7 +576,7 @@ def _assert_zip_profile_end_to_end(root: Path) -> None:
         assert not (project_root / "materials" / external_source.name).exists()
 
         manifests = list(
-            (project_root / "cache" / "material_preprocessing").glob("*.json")
+            (project_root / "cache" / "material_preprocessing").rglob("*.json")
         )
         assert len(manifests) == 1
         manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
@@ -656,7 +745,7 @@ def _assert_cbz_profile_end_to_end(root: Path) -> None:
         assert corrupt_result.derived_material_count == 0
         assert corrupt_result.preprocessing_warning_codes == ["zip_container_invalid"]
         assert not list(
-            (projects_root / "cbz-corrupt" / "cache" / "material_preprocessing").glob(
+            (projects_root / "cbz-corrupt" / "cache" / "material_preprocessing").rglob(
                 "*.json"
             )
         )
@@ -924,6 +1013,7 @@ def main() -> None:
         _assert_limits(root / "limits")
         _assert_corrupt_and_cancelled_leave_no_partial_output(root / "failures")
         _assert_project_lifecycle_and_source_trace(root / "lifecycle")
+        _assert_source_relative_artifact_isolation(root / "source-isolation")
         _assert_zip_profile_end_to_end(root / "zip-profile")
         _assert_cbz_profile_end_to_end(root / "cbz-profile")
         _assert_epub_profile_end_to_end(root / "epub-profile")
