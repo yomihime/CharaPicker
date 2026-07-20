@@ -258,6 +258,7 @@ def _assert_backend_probe_and_fake_contract(root: Path) -> None:
     files = {
         "chapters/01.txt": b"chapter one",
         "pages/001.png": b"page one",
+        "video/episode.mp4": b"video-must-be-imported-explicitly",
         "metadata.bin": b"ignored",
         "nested/book.epub": b"ignored nested",
     }
@@ -273,6 +274,7 @@ def _assert_backend_probe_and_fake_contract(root: Path) -> None:
     assert _warning_codes(result) == {
         "entry_suffix_unsupported",
         "nested_container_not_supported",
+        "container_video_requires_explicit_import",
     }
     assert backend.list_calls == backend.test_calls == backend.extract_calls == 1
     assert (request.output_root / "text" / "chapters" / "01.txt").read_bytes() == b"chapter one"
@@ -280,7 +282,7 @@ def _assert_backend_probe_and_fake_contract(root: Path) -> None:
     manifest = json.loads(request.manifest_path.read_text(encoding="utf-8"))
     assert manifest["source_suffix"] == ".7z"
     assert manifest["preprocessor"] == "archive"
-    assert len(manifest["entry_summaries"]) == 4
+    assert len(manifest["entry_summaries"]) == 5
     assert {item["status"] for item in manifest["entry_summaries"]} == {
         "materialized",
         "rejected",
@@ -521,6 +523,7 @@ def _assert_7z_profile_end_to_end(root: Path) -> None:
         [
             ("pages/001.png", b"page-one"),
             ("text/chapter.txt", b"chapter"),
+            ("video/episode.mp4", b"video-must-be-imported-explicitly"),
             ("metadata.bin", b"ignored"),
             ("nested/book.epub", b"nested"),
         ],
@@ -544,6 +547,7 @@ def _assert_7z_profile_end_to_end(root: Path) -> None:
         assert set(result.preprocessing_warning_codes) == {
             "entry_suffix_unsupported",
             "nested_container_not_supported",
+            "container_video_requires_explicit_import",
         }
         assert raw_source.is_file()
         assert not (project_root / "materials" / external_source.name).exists()
@@ -740,6 +744,7 @@ def _assert_rar_profile_end_to_end(root: Path) -> None:
         [
             ("pages/001.png", b"rar-page"),
             ("text/chapter.txt", b"rar-chapter"),
+            ("video/episode.mp4", b"video-must-be-imported-explicitly"),
             ("metadata.bin", b"ignored"),
             ("nested/book.epub", b"nested"),
         ],
@@ -763,6 +768,7 @@ def _assert_rar_profile_end_to_end(root: Path) -> None:
         assert set(result.preprocessing_warning_codes) == {
             "entry_suffix_unsupported",
             "nested_container_not_supported",
+            "container_video_requires_explicit_import",
         }
         assert raw_source.is_file()
         assert not (project_root / "materials" / external_source.name).exists()

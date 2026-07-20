@@ -117,6 +117,7 @@ def _assert_valid_extract_and_manifest(root: Path) -> None:
         [
             ("chapters/01.txt", b"chapter one"),
             ("pages/001.png", b"not-a-real-png-but-safe-fixture"),
+            ("video/episode.mp4", b"video-must-be-imported-explicitly"),
             ("metadata.bin", b"ignored"),
             ("nested/book.epub", b"ignored"),
         ],
@@ -129,6 +130,7 @@ def _assert_valid_extract_and_manifest(root: Path) -> None:
     assert _warning_codes(result) == {
         "entry_suffix_unsupported",
         "nested_container_not_supported",
+        "container_video_requires_explicit_import",
     }
     assert (request.output_root / "text" / "chapters" / "01.txt").read_bytes() == b"chapter one"
     assert (request.output_root / "images" / "pages" / "001.png").is_file()
@@ -153,7 +155,7 @@ def _assert_valid_extract_and_manifest(root: Path) -> None:
     assert manifest["schema_version"] == PREPROCESSING_MANIFEST_SCHEMA_VERSION
     assert manifest["source_raw_path"] == "raw/valid.zip"
     assert manifest["preprocessor"] == "zip"
-    assert manifest["entry_count"] == 4
+    assert manifest["entry_count"] == 5
     assert len(manifest["derived_materials"]) == 2
     assert all(
         Path(record["material_relative_path"]).as_posix().startswith(
@@ -548,6 +550,7 @@ def _assert_zip_profile_end_to_end(root: Path) -> None:
             ("pages/animation.gif", b"gif"),
             ("pages/scan.bmp", b"bmp"),
             ("text/chapter.txt", b"chapter"),
+            ("video/episode.mp4", b"video-must-be-imported-explicitly"),
             ("unknown.bin", b"unknown"),
             ("nested/book.epub", b"nested"),
         ],
@@ -571,6 +574,7 @@ def _assert_zip_profile_end_to_end(root: Path) -> None:
         assert set(result.preprocessing_warning_codes) == {
             "entry_suffix_unsupported",
             "nested_container_not_supported",
+            "container_video_requires_explicit_import",
         }
         assert raw_source.is_file()
         assert not (project_root / "materials" / external_source.name).exists()
@@ -586,6 +590,7 @@ def _assert_zip_profile_end_to_end(root: Path) -> None:
         assert set(manifest["failed_entries"]) == {
             "unknown.bin",
             "nested/book.epub",
+            "video/episode.mp4",
         }
 
         episodes = scan_formal_materials(project_id)
@@ -607,6 +612,7 @@ def _assert_zip_profile_end_to_end(root: Path) -> None:
         )
         assert not any(unit.material_ref.relative_path.endswith(".bin") for unit in units)
         assert not any(unit.material_ref.relative_path.endswith(".epub") for unit in units)
+        assert not any(unit.media_type.value == "video" for unit in units)
 
         artifact_request = _project_request(project_root, raw_source)
         artifact_output = artifact_request.output_root

@@ -11,6 +11,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from utils.media_types import (  # noqa: E402
     AUDIO_SUFFIXES,
+    CONTAINER_MATERIAL_SUFFIXES,
     DEFERRED_TIMED_TEXT_SUFFIXES,
     IMAGE_SUFFIXES,
     INPUT_FORMAT_PROFILES,
@@ -52,6 +53,8 @@ def _assert_suffix_matrix() -> None:
     assert AUDIO_SUFFIXES <= SUPPORTED_SOURCE_SUFFIXES
     assert IMAGE_SUFFIXES <= SUPPORTED_SOURCE_SUFFIXES
     assert TEXT_SUFFIXES <= SUPPORTED_SOURCE_SUFFIXES
+    assert CONTAINER_MATERIAL_SUFFIXES == AUDIO_SUFFIXES | IMAGE_SUFFIXES | TEXT_SUFFIXES
+    assert not CONTAINER_MATERIAL_SUFFIXES & VIDEO_SUFFIXES
     assert source_media_type("episode.mp4") == "video"
     assert source_media_type("portrait.PNG") == "image"
     assert source_media_type("voice.flac") == "audio"

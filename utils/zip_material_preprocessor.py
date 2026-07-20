@@ -21,9 +21,10 @@ from utils.material_preprocessing import (
     validate_archive_entry_path,
 )
 from utils.media_types import (
+    CONTAINER_MATERIAL_SUFFIXES,
     IMAGE_SUFFIXES,
     INPUT_FORMAT_SUFFIXES,
-    SUPPORTED_SOURCE_SUFFIXES,
+    VIDEO_SUFFIXES,
     source_support_profile,
 )
 
@@ -269,7 +270,16 @@ def _validate_entries(
                 "CBZ containers only accept image page entries.",
             )
             continue
-        if request.preprocessor_key != "cbz" and suffix not in SUPPORTED_SOURCE_SUFFIXES:
+        if request.preprocessor_key != "cbz" and suffix in VIDEO_SUFFIXES:
+            _reject_entry(
+                warnings,
+                failed_entries,
+                entry_name,
+                "container_video_requires_explicit_import",
+                "Video files must be imported explicitly instead of through a container.",
+            )
+            continue
+        if request.preprocessor_key != "cbz" and suffix not in CONTAINER_MATERIAL_SUFFIXES:
             _reject_entry(
                 warnings,
                 failed_entries,
