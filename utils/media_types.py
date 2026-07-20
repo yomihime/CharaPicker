@@ -42,6 +42,7 @@ class InputFormatProfile:
     toolchain: InputFormatToolchain
     state: InputFormatSupportState
     preprocessor_key: InputPreprocessorKey
+    display_name_key: str = ""
     reason: str = ""
 
 
@@ -78,9 +79,9 @@ INPUT_FORMAT_PROFILES = (
     InputFormatProfile(
         suffix=".zip",
         toolchain="standard_library_zip",
-        state=InputFormatSupportState.CANDIDATE,
+        state=InputFormatSupportState.ENABLED,
         preprocessor_key="zip",
-        reason="preprocessing_not_implemented",
+        display_name_key="project.inputFormat.zip",
     ),
     InputFormatProfile(
         suffix=".cbz",

@@ -85,7 +85,7 @@ from utils.material_processing_middleware import (
     process_source_request,
     validate_source_processing_tools,
 )
-from utils.media_types import project_input_file_patterns
+from utils.media_types import enabled_input_format_profiles, project_input_file_patterns
 from utils.source_importer import (
     clean_raw_sources,
     remove_project_sources,
@@ -2001,11 +2001,17 @@ class ProjectPage(QWidget):
 
     def _add_files(self) -> None:
         patterns = " ".join(project_input_file_patterns())
+        filters = [t("project.fileDialog.supportedFilter", patterns=patterns)]
+        filters.extend(
+            t(profile.display_name_key) + f" (*{profile.suffix})"
+            for profile in enabled_input_format_profiles()
+            if profile.display_name_key
+        )
         paths, _ = QFileDialog.getOpenFileNames(
             self,
             t("project.fileDialog.files"),
             "",
-            t("project.fileDialog.supportedFilter", patterns=patterns),
+            ";;".join(filters),
         )
         self._append_sources(paths)
 

@@ -220,6 +220,7 @@
   "project.new.dialog.create": "Create Project",
   "project.fileDialog.files": "Select Source Files",
   "project.fileDialog.supportedFilter": "Supported materials ({patterns})",
+  "project.inputFormat.zip": "ZIP Archive",
   "project.fileDialog.folder": "Select Source Folder",
   "cards.title": "Character Cards",
   "cards.noProject": "Select or create a project before managing character cards.",

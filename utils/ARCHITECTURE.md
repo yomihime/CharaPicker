@@ -17,7 +17,7 @@
 
 - `i18n.py`：管理语言偏好、系统语言归一化、文案加载和 `t()` 翻译函数。
 - `app_metadata.py`：集中保存应用名、组织名、当前运行时版本/阶段和 HTTP User-Agent。
-- `media_types.py`：集中保存视频、图片、音频、文本后缀，以及直接素材和容器输入格式的独立支持档位；容器 profile 不新增顶层媒体类型，也不进入直接素材后缀集合。
+- `media_types.py`：集中保存视频、图片、音频、文本后缀，以及直接素材和容器输入格式的独立支持档位；容器 profile 不新增顶层媒体类型，也不进入直接素材后缀集合。当前 `.zip` 已启用，后续格式仍受各自里程碑门禁控制。
 - `material_preprocessing.py`：定义容器输入预处理请求、结果、warning、派生材料记录和 manifest 协议，统一负责安全路径校验、取消检查、临时目录、原子落盘、稳定派生路径、manifest 索引、完整性/复用判断和生命周期清理，不依赖 `core` 或 `gui`。
 - `zip_material_preprocessor.py`：在预处理边界内使用标准库列举和流式展开 ZIP entry，复用统一的大小、数量、压缩比、后缀和路径安全规则；不负责项目导入或 UI 状态。
 - `material_processing_events.py`：集中保存素材处理取消消息和 FFmpeg 进度事件前缀等跨层协议常量。

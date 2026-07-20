@@ -32,9 +32,12 @@ from utils.media_types import (  # noqa: E402
     project_input_file_patterns,
 )
 from core.source_scanner import scan_formal_materials  # noqa: E402
+from core.models import ProjectConfig  # noqa: E402
+from utils.material_processing_middleware import process_source_request  # noqa: E402
 from utils.source_importer import (  # noqa: E402
     clean_raw_sources,
     link_raw_sources_to_materials,
+    remove_project_sources,
     remove_raw_sources,
 )
 import utils.paths as path_utils  # noqa: E402
@@ -251,13 +254,16 @@ def _assert_corrupt_and_cancelled_leave_no_partial_output(root: Path) -> None:
     assert not list(staging_root.glob(".material-preprocessing-*"))
 
 
-def _assert_candidate_format_remains_disabled() -> None:
+def _assert_zip_enabled_without_opening_later_formats() -> None:
     profile = input_format_profile("fixture.zip")
     assert profile is not None
-    assert profile.state == InputFormatSupportState.CANDIDATE
-    assert is_preprocessable_source("fixture.zip") is False
+    assert profile.state == InputFormatSupportState.ENABLED
+    assert is_preprocessable_source("fixture.zip") is True
     assert is_import_supported_source("fixture.zip") is False
-    assert "*.zip" not in project_input_file_patterns()
+    assert "*.zip" in project_input_file_patterns()
+    for suffix in (".cbz", ".epub", ".pdf", ".7z", ".rar", ".cbr"):
+        assert is_preprocessable_source(f"fixture{suffix}") is False
+        assert f"*{suffix}" not in project_input_file_patterns()
 
 
 def _project_request(project_root: Path, raw_source: Path) -> PreprocessingRequest:
@@ -412,6 +418,101 @@ def _assert_project_lifecycle_and_source_trace(root: Path) -> None:
         path_utils.PROJECTS_ROOT = previous_projects_root
 
 
+def _assert_zip_profile_end_to_end(root: Path) -> None:
+    projects_root = root / "projects"
+    external_source = root / "external" / "mixed-materials.zip"
+    _write_zip(
+        external_source,
+        [
+            ("pages/001.png", b"page-one"),
+            ("pages/002.jpg", b"page-two"),
+            ("pages/animation.gif", b"gif"),
+            ("pages/scan.bmp", b"bmp"),
+            ("text/chapter.txt", b"chapter"),
+            ("unknown.bin", b"unknown"),
+            ("nested/book.epub", b"nested"),
+        ],
+    )
+    project_id = "zip-profile-e2e"
+    config = ProjectConfig(
+        project_id=project_id,
+        name="ZIP profile validation",
+        source_paths=[str(external_source)],
+    )
+
+    previous_projects_root = path_utils.PROJECTS_ROOT
+    path_utils.PROJECTS_ROOT = projects_root
+    try:
+        result = process_source_request(config)
+        project_root = projects_root / project_id
+        raw_source = project_root / "raw" / external_source.name
+        assert result.linked_count == 0
+        assert result.preprocessed_source_count == 1
+        assert result.derived_material_count == 5
+        assert set(result.preprocessing_warning_codes) == {
+            "entry_suffix_unsupported",
+            "nested_container_not_supported",
+        }
+        assert raw_source.is_file()
+        assert not (project_root / "materials" / external_source.name).exists()
+
+        manifests = list(
+            (project_root / "cache" / "material_preprocessing").glob("*.json")
+        )
+        assert len(manifests) == 1
+        manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
+        assert manifest["source_suffix"] == ".zip"
+        assert manifest["preprocessor"] == "zip"
+        assert len(manifest["derived_materials"]) == 5
+        assert set(manifest["failed_entries"]) == {
+            "unknown.bin",
+            "nested/book.epub",
+        }
+
+        episodes = scan_formal_materials(project_id)
+        units = [unit for episode in episodes for unit in episode.units]
+        assert len(units) == 5
+        assert {unit.media_type.value for unit in units} == {"image", "text"}
+        image_episode = next(
+            episode for episode in episodes if any(unit.media_type.value == "image" for unit in episode.units)
+        )
+        assert "manga" in {content_form.value for content_form in image_episode.content_forms}
+        support_reasons = {
+            unit.material_ref.metadata.get("support_reason") for unit in image_episode.units
+        }
+        assert {"animated_image_not_supported", "bmp_image_not_supported"} <= support_reasons
+        assert all(
+            unit.material_ref.metadata["preprocessed_from_raw"]
+            == f"raw/{external_source.name}"
+            for unit in units
+        )
+        assert not any(unit.material_ref.relative_path.endswith(".bin") for unit in units)
+        assert not any(unit.material_ref.relative_path.endswith(".epub") for unit in units)
+
+        artifact_request = _project_request(project_root, raw_source)
+        artifact_output = artifact_request.output_root
+        artifact_manifest = artifact_request.manifest_path
+        assert remove_project_sources(project_id, [str(external_source)]) == 1
+        assert not raw_source.exists()
+        assert not artifact_output.exists()
+        assert not artifact_manifest.exists()
+
+        process_source_request(config)
+        raw_source = project_root / "raw" / external_source.name
+        artifact_request = _project_request(project_root, raw_source)
+        assert clean_raw_sources(project_id, [raw_source]) == [external_source.name]
+        assert not raw_source.exists()
+        assert artifact_request.output_root.exists()
+        assert artifact_request.manifest_path.exists()
+
+        external_source.unlink()
+        assert remove_project_sources(project_id, [str(external_source)]) == 0
+        assert not artifact_request.output_root.exists()
+        assert not artifact_request.manifest_path.exists()
+    finally:
+        path_utils.PROJECTS_ROOT = previous_projects_root
+
+
 def main() -> None:
     with TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
@@ -421,7 +522,8 @@ def main() -> None:
         _assert_limits(root / "limits")
         _assert_corrupt_and_cancelled_leave_no_partial_output(root / "failures")
         _assert_project_lifecycle_and_source_trace(root / "lifecycle")
-    _assert_candidate_format_remains_disabled()
+        _assert_zip_profile_end_to_end(root / "zip-profile")
+    _assert_zip_enabled_without_opening_later_formats()
     print("input format preprocessing validation passed")
 
 
