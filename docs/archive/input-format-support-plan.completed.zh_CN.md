@@ -139,13 +139,14 @@ M05-M11 每完成一项，必须运行该格式 profile 用例、此前所有 pr
 ```text
 materials/
 └── derived_inputs/
-    └── {safe_stem}_{source_hash}/
-        ├── text/
-        │   ├── chapter_001.txt
-        │   └── chapter_002.txt
-        └── images/
-            ├── 001.jpg
-            └── 002.png
+    └── {raw_relative_parent}/
+        └── {source_name}/
+            ├── text/
+            │   ├── chapter_001.txt
+            │   └── chapter_002.txt
+            └── images/
+                ├── 001.jpg
+                └── 002.png
 ```
 
 - 预处理 manifest 不直接放在会被扫描成文本 unit 的普通材料目录中。建议写入：
@@ -153,11 +154,13 @@ materials/
 ```text
 cache/
 └── material_preprocessing/
-    └── {source_hash}.json
+    └── manifests/
+        └── {raw_relative_parent}/
+            └── {source_name}.json
 ```
 
 - 如果确需在 `materials/` 放 sidecar，必须同步让 scanner 忽略 `.charapicker/` 或等价保留目录，避免 manifest 被当成用户素材。
-- 派生输出根目录必须由 raw 相对路径和内容 hash 共同决定，避免两个同名外部文件互相覆盖。
+- 派生输出根目录和 manifest 路径由完整 raw 相对路径稳定寻址；例如 `raw/groupA/book.zip` 与 `raw/groupB/book.zip` 分别映射到 `derived_inputs/groupA/book.zip/` 与 `derived_inputs/groupB/book.zip/`。`source_hash` 只判断内容是否变化，不参与路径命名。
 
 ### 7.2 Manifest 最小字段
 
@@ -189,6 +192,8 @@ cache/
 - `size_bytes`
 - `fingerprint`
 
+当前 manifest 保持 schema v1；`size_bytes` 与 SHA256 `fingerprint` 已足够在复用、扫描映射和 raw 清理前验证派生文件完整性，无需为本轮修复升级 schema。
+
 ### 7.3 来源追踪接入
 
 - `core.material_unit_scanner` 扫描派生材料时，应能从预处理 manifest 补充 `MaterialRef.metadata`。
@@ -215,6 +220,7 @@ cache/
 - 忽略或拒绝 symlink、hardlink、设备文件、目录伪装和平台危险路径。
 - 限制 entry 总数、单文件大小、解包总大小和压缩比。
 - 只允许进入白名单后缀；未知后缀进入 warning，不写入可扫描材料目录。
+- 通用 ZIP/7z/RAR 不允许视频 entry 进入派生材料；命中视频后缀时记录 `container_video_requires_explicit_import`，要求用户把视频作为独立素材显式导入。CBZ/CBR 继续只允许图片页。
 - 先解到 `cache` 下临时目录，完成校验后再原子移动或复制到 `materials/`。
 - 取消任务时清理临时目录，不留下半截材料。
 - 外部工具后端必须使用 `subprocess` 参数列表调用，不拼接 shell 字符串；执行前先 list/test archive，按白名单逐项抽取或在抽取后再次校验目标路径。
@@ -499,6 +505,7 @@ cache/
 - PDF 覆盖真实 `pypdf` 文本页提取、页码 trace、backend 缺失、加密、损坏和空文本；7z 覆盖真实 7-Zip capability/list/test/extract、backend 缺失、密码、损坏和安全边界；RAR 覆盖真实 RAR4、RAR5 listing 契约及同类失败语义；CBR 覆盖真实 RAR 容器的仅图片页自然排序和独立失败语义。
 - 七种格式的项目流程均验证导入、预处理、扫描、`FormalExtractionRunPlan`、缓存复用、raw 清理和项目移除；统一回归中的角色卡质量单测继续断言 `source_context.source_runs`，角色卡编译没有新增打开原容器的路径。
 - 根目录两个未跟踪用户素材按私有数据边界保留原状，未读取、未移动、未暂存；本轮完成判定使用可重复的真实 parser/backend 构造样本，不把用户文件作为自动化门禁或提交内容。
+- 完成后的复查修正了四个边界：派生材料和 manifest 改为按 raw 相对路径隔离并以现有 fingerprint 校验完整性；通用 ZIP/7z/RAR 明确拒绝视频 entry；非原始方案只把直接视频交给 FFmpeg；缺少 FFmpeg 时项目页提供取消、忽略视频继续、下载后自动执行三种选择。manifest 继续保持 schema v1。
 
 ## 12. 验证与自审查
 

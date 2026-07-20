@@ -18,13 +18,13 @@
 - `i18n.py`：管理语言偏好、系统语言归一化、文案加载和 `t()` 翻译函数。
 - `app_metadata.py`：集中保存应用名、组织名、当前运行时版本/阶段和 HTTP User-Agent。
 - `media_types.py`：集中保存视频、图片、音频、文本后缀，以及直接素材和容器输入格式的独立支持档位；容器 profile 不新增顶层媒体类型，也不进入直接素材后缀集合。当前 `.zip`、`.cbz`、`.epub`、`.pdf`、`.7z`、`.rar`、`.cbr` 均已启用。
-- `material_preprocessing.py`：定义容器输入预处理请求、结果、warning、派生材料记录、容器 entry 摘要和 manifest 协议，统一负责安全路径校验、取消检查、临时目录、原子落盘、稳定派生路径、manifest 索引、完整性/复用判断和生命周期清理，不依赖 `core` 或 `gui`。
-- `zip_material_preprocessor.py`：在预处理边界内使用标准库列举和流式展开 ZIP entry，提供 ZIP/CBZ/EPUB 共用的数量、大小、压缩比、加密和路径安全校验；通用 ZIP 保留白名单叶子路径，CBZ 只接纳图片并按自然顺序派生为单一页目录；不负责项目导入或 UI 状态。
+- `material_preprocessing.py`：定义容器输入预处理请求、结果、warning、派生材料记录、容器 entry 摘要和 manifest v1 协议，统一负责安全路径校验、取消检查、临时目录、原子落盘、按 raw 相对路径隔离的稳定派生路径、manifest 索引、派生文件大小/SHA256 完整性检查、复用判断和生命周期清理，不依赖 `core` 或 `gui`。
+- `zip_material_preprocessor.py`：在预处理边界内使用标准库列举和流式展开 ZIP entry，提供 ZIP/CBZ/EPUB 共用的数量、大小、压缩比、加密和路径安全校验；通用 ZIP 只保留图片、音频和文本白名单叶子，容器内视频返回 `container_video_requires_explicit_import`，CBZ 只接纳图片并按自然顺序派生为单一页目录；不负责项目导入或 UI 状态。
 - `epub_material_preprocessor.py`：复用 ZIP 安全列举结果解析 EPUB container.xml、OPF manifest/spine 和 XHTML，按阅读顺序派生章节 TXT；对缺失元数据和损坏 XHTML 采用受控降级，拒绝 DRM/加密内容，内嵌图片只进入 manifest 摘要而不落入 `materials/`。
 - `pdf_backend.py`：定义 PDF capability、文档/页文本结果和可注入 backend 协议，并提供延迟导入的 `pypdf` 6.x 生产适配器；不处理项目路径、manifest 或 warning 策略。
 - `pdf_material_preprocessor.py`：通过 PDF backend 按页提取文本，验证 backend 页序协议和公共大小上限，派生带页码来源的 TXT；加密、损坏、空文本或 backend 缺失均转为结构化 warning，不执行 OCR。
 - `archive_backend.py`：定义 Archive capability、entry/listing 和可注入 backend 协议，并提供唯一的 7-Zip CLI 生产适配器；只发现受信名称的项目内、环境变量、PATH 或系统安装路径，通过 `7z i` 校验身份与格式能力，所有 list/test/extract 调用使用参数列表、关闭 stdin、设置超时并支持取消，不记录命令、绝对路径或原始输出。
-- `archive_material_preprocessor.py`：复用 Archive backend 对 7z/RAR 容器执行先列举、再完整性测试、后展开和落盘后二次清单校验；统一拒绝加密、链接、路径逃逸、规范化冲突和超过数量/大小/压缩比限制的容器，只把白名单叶子复制到预处理输出。`.7z`、`.rar` 保留支持叶子的相对路径；`.cbr` 只接纳图片并按自然顺序派生为单一页目录。
+- `archive_material_preprocessor.py`：复用 Archive backend 对 7z/RAR 容器执行先列举、再完整性测试、后展开和落盘后二次清单校验；统一拒绝加密、链接、路径逃逸、规范化冲突和超过数量/大小/压缩比限制的容器，只把图片、音频和文本白名单叶子复制到预处理输出。`.7z`、`.rar` 保留支持叶子的相对路径，容器内视频返回 `container_video_requires_explicit_import`；`.cbr` 只接纳图片并按自然顺序派生为单一页目录。
 - `material_processing_events.py`：集中保存素材处理取消消息和 FFmpeg 进度事件前缀等跨层协议常量。
 - `paths.py`：定义应用根目录、项目根目录和单个项目的标准目录结构。
 - `global_store.py`：提供全局用户数据和配置选项的读写中间件，默认使用根目录 `config.yaml`。
@@ -44,7 +44,7 @@
 - `ffmpeg_downloader.py`：下载并安装 ffmpeg 运行时到 `bin/`。
 - `source_importer.py`：把直接素材或已启用容器按项目目录规则原子复制到 `projects/{project_id}/raw`，计算 raw 目标，并通过预处理 manifest 协调 raw 清理、素材移除和 stale 派生产物清理；容器不得进入普通 materials link 分支。
 - `source_status.py`：计算项目页需要的素材显示名、raw/materials 或预处理 manifest 映射、项目内素材列表和素材状态。
-- `material_processing_middleware.py`：统一接收上层的素材处理请求与工具可用性校验请求，把 raw 拆成直接素材、已启用容器和 unsupported 三类，再分别桥接预处理、source importer 和 FFmpeg。
+- `material_processing_middleware.py`：统一接收上层的素材处理请求，把 raw 拆成直接视频、直接非视频、已启用容器和 unsupported 四类；容器先预处理，直接非视频走 source importer，只有非原始方案中的直接视频进入 FFmpeg。FFmpeg 缺失策略由调用方显式选择 `error` 或 `skip_video`，并由 middleware 在执行点再次校验。
 - `startup_middleware.py`：启动阶段预加载中间件，集中探测 FFmpeg/llama.cpp/whisper.cpp、预取项目配置和云模型预设，供启动页线程复用。
 - `logging_preferences.py`：管理日志等级偏好。
 - `logging_middleware.py`：安装全局日志中间件，日志只写入文件；日志等级边界和敏感信息规则见运行时中间件参考文档。
@@ -70,7 +70,7 @@
 - 容器输入必须先通过 `material_preprocessing.py` 产生可扫描派生材料；格式处理模块不得自行拼接项目路径、写 manifest 或把原容器链接进 `materials/`。
 - `source_importer.py` 由 `gui/pages/project_page.py` 调用；它只处理文件系统操作，不负责弹窗、按钮状态或用户提示。
 - `source_status.py` 由 `gui/pages/project_page.py` 调用；它只计算素材状态，不负责渲染列表行、弹窗或 InfoBar。
-- `gui/pages/project_page.py` 通过 `material_processing_middleware.py` 触发素材处理和工具校验，不直接承担下层处理细节。
+- `gui/pages/project_page.py` 通过 `material_processing_middleware.py` 查询当前请求是否包含需要 FFmpeg 的直接视频并触发素材处理；页面只负责缺工具时的取消、忽略视频继续、下载后自动执行三种交互，不直接承担下层处理细节。
 - `gui/splash_screen.py` 通过 `startup_middleware.py` 在子线程预热启动数据，再交给主窗口和页面复用。
 - `main.py`、`gui/main_window.py`、`gui/splash_screen.py`、构建脚本和联网工具共享 `app_metadata.py` 中的应用名、版本和 User-Agent。
 

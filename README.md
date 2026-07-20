@@ -62,6 +62,8 @@ CharaPicker（拾卡姬）是一个面向二次元素材分析的桌面工具，
 - PDF 首版只提取已有文本，不执行 OCR；加密 PDF、DRM EPUB 和密码归档会被明确拒绝。
 - 7z/RAR/CBR 需要本地 7-Zip。应用依次查找 `bin/7zip/7z.exe`、`bin/7z.exe`、`PATH`、Windows 标准安装目录，也可通过 `CHARAPICKER_7ZIP_PATH` 指定；应用不自动下载该工具。
 - 嵌套容器不会递归展开，只记录 warning；原容器保留在 `raw/`，派生素材和来源映射分别进入 `materials/derived_inputs/` 与预处理 manifest。
+- 通用 ZIP/7z/RAR 内的视频不会被展开；视频必须作为独立素材显式导入。CBZ/CBR 继续只接纳漫画图片页。
+- 非原始处理方案只在选中了直接视频时需要 FFmpeg。缺少 FFmpeg 时可取消、忽略全部视频并继续处理其它素材，或下载 FFmpeg 后自动执行。
 
 ## 安装
 
