@@ -40,6 +40,17 @@ should be updated before publishing.
 | --- | --- | --- | --- |
 | PyInstaller | Windows one-folder packaging | GPL-2.0-or-later with PyInstaller bootloader exception | https://www.pyinstaller.org/ |
 
+## Optional External Runtime Tools
+
+| Component | Use | License noted by upstream | Upstream |
+| --- | --- | --- | --- |
+| 7-Zip | Optional local backend for listing, testing, and extracting 7z/RAR-family project inputs | GNU LGPL for the executable; 7z.dll also includes LGPL code with the unRAR restriction and BSD-licensed code | https://www.7-zip.org/ |
+
+CharaPicker discovers a user-installed or project-local 7-Zip runtime and does
+not download it. If a release package bundles 7-Zip, it must also reproduce the
+license information shipped by that 7-Zip version and satisfy its applicable
+redistribution terms.
+
 ## Runtime Assets
 
 | Asset | Use | Notice |
@@ -52,6 +63,8 @@ should be updated before publishing.
 - Include `LICENSE` and `THIRD_PARTY_NOTICES.md` in every release zip.
 - Re-check the licenses of bundled dependencies when upgrading PyQt6,
   PyQt6-Fluent-Widgets, Qt, PyInstaller, or any runtime package.
+- When bundling 7-Zip, include its version-matched `License.txt` and re-check
+  the LGPL, unRAR restriction, and bundled codec notices.
 - For binary distribution with GPL components, make corresponding source and
   license information available in a way that satisfies the applicable GPL
   obligations.

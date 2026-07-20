@@ -18,6 +18,7 @@ from utils.media_types import InputPreprocessorKey
 
 
 if TYPE_CHECKING:
+    from utils.archive_backend import ArchiveBackend
     from utils.pdf_backend import PdfBackend
 
 
@@ -200,6 +201,7 @@ class PreprocessingCancelledError(RuntimeError):
 def preprocess_material(
     request: PreprocessingRequest,
     *,
+    archive_backend: ArchiveBackend | None = None,
     pdf_backend: PdfBackend | None = None,
 ) -> PreprocessingResult:
     """Preprocess one source without exposing partial output or manifest files."""
@@ -260,6 +262,14 @@ def preprocess_material(
                 request,
                 staged_output,
                 backend=pdf_backend,
+            )
+        elif request.preprocessor_key == "archive":
+            from utils.archive_material_preprocessor import extract_archive_materials
+
+            extraction = extract_archive_materials(
+                request,
+                staged_output,
+                backend=archive_backend,
             )
         else:
             return _failed_result(

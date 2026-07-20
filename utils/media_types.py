@@ -107,9 +107,9 @@ INPUT_FORMAT_PROFILES = (
     InputFormatProfile(
         suffix=".7z",
         toolchain="archive",
-        state=InputFormatSupportState.BLOCKED,
+        state=InputFormatSupportState.ENABLED,
         preprocessor_key="archive",
-        reason="archive_backend_not_selected",
+        display_name_key="project.inputFormat.7z",
     ),
     InputFormatProfile(
         suffix=".rar",

@@ -17,12 +17,14 @@
 
 - `i18n.py`：管理语言偏好、系统语言归一化、文案加载和 `t()` 翻译函数。
 - `app_metadata.py`：集中保存应用名、组织名、当前运行时版本/阶段和 HTTP User-Agent。
-- `media_types.py`：集中保存视频、图片、音频、文本后缀，以及直接素材和容器输入格式的独立支持档位；容器 profile 不新增顶层媒体类型，也不进入直接素材后缀集合。当前 `.zip`、`.cbz`、`.epub`、`.pdf` 已启用，后续格式仍受各自里程碑门禁控制。
+- `media_types.py`：集中保存视频、图片、音频、文本后缀，以及直接素材和容器输入格式的独立支持档位；容器 profile 不新增顶层媒体类型，也不进入直接素材后缀集合。当前 `.zip`、`.cbz`、`.epub`、`.pdf`、`.7z` 已启用，后续格式仍受各自里程碑门禁控制。
 - `material_preprocessing.py`：定义容器输入预处理请求、结果、warning、派生材料记录、容器 entry 摘要和 manifest 协议，统一负责安全路径校验、取消检查、临时目录、原子落盘、稳定派生路径、manifest 索引、完整性/复用判断和生命周期清理，不依赖 `core` 或 `gui`。
 - `zip_material_preprocessor.py`：在预处理边界内使用标准库列举和流式展开 ZIP entry，提供 ZIP/CBZ/EPUB 共用的数量、大小、压缩比、加密和路径安全校验；通用 ZIP 保留白名单叶子路径，CBZ 只接纳图片并按自然顺序派生为单一页目录；不负责项目导入或 UI 状态。
 - `epub_material_preprocessor.py`：复用 ZIP 安全列举结果解析 EPUB container.xml、OPF manifest/spine 和 XHTML，按阅读顺序派生章节 TXT；对缺失元数据和损坏 XHTML 采用受控降级，拒绝 DRM/加密内容，内嵌图片只进入 manifest 摘要而不落入 `materials/`。
 - `pdf_backend.py`：定义 PDF capability、文档/页文本结果和可注入 backend 协议，并提供延迟导入的 `pypdf` 6.x 生产适配器；不处理项目路径、manifest 或 warning 策略。
 - `pdf_material_preprocessor.py`：通过 PDF backend 按页提取文本，验证 backend 页序协议和公共大小上限，派生带页码来源的 TXT；加密、损坏、空文本或 backend 缺失均转为结构化 warning，不执行 OCR。
+- `archive_backend.py`：定义 Archive capability、entry/listing 和可注入 backend 协议，并提供唯一的 7-Zip CLI 生产适配器；只发现受信名称的项目内、环境变量、PATH 或系统安装路径，通过 `7z i` 校验身份与格式能力，所有 list/test/extract 调用使用参数列表、关闭 stdin、设置超时并支持取消，不记录命令、绝对路径或原始输出。
+- `archive_material_preprocessor.py`：复用 Archive backend 对 7z/RAR 容器执行先列举、再完整性测试、后展开和落盘后二次清单校验；统一拒绝加密、链接、路径逃逸、规范化冲突和超过数量/大小/压缩比限制的容器，只把白名单叶子复制到预处理输出。当前只由已启用的 `.7z` profile 进入，RAR/CBR 仍受独立里程碑闸门控制。
 - `material_processing_events.py`：集中保存素材处理取消消息和 FFmpeg 进度事件前缀等跨层协议常量。
 - `paths.py`：定义应用根目录、项目根目录和单个项目的标准目录结构。
 - `global_store.py`：提供全局用户数据和配置选项的读写中间件，默认使用根目录 `config.yaml`。
