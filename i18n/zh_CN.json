@@ -222,6 +222,7 @@
   "project.fileDialog.supportedFilter": "支持的素材（{patterns}）",
   "project.inputFormat.zip": "ZIP 压缩包",
   "project.inputFormat.cbz": "CBZ 漫画包",
+  "project.inputFormat.epub": "EPUB 电子书",
   "project.fileDialog.folder": "选择素材文件夹",
   "cards.title": "角色卡",
   "cards.noProject": "请选择或新建一个项目后管理角色卡。",

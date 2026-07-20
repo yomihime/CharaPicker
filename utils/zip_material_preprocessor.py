@@ -12,6 +12,7 @@ from pathlib import Path, PurePosixPath
 from utils.material_preprocessing import (
     DerivedMaterialRecord,
     PreprocessingCancelledError,
+    PreprocessingExtractionSummary,
     PreprocessingRequest,
     PreprocessingWarning,
     _raise_if_cancelled,
@@ -38,13 +39,10 @@ _MEDIA_OUTPUT_DIRECTORIES = {
 
 
 @dataclass(frozen=True)
-class ZipExtractionSummary:
-    derived_materials: tuple[DerivedMaterialRecord, ...] = ()
-    warnings: tuple[PreprocessingWarning, ...] = ()
-    failed_entries: tuple[str, ...] = ()
-    entry_count: int = 0
-    expanded_size_bytes: int = 0
-    fatal: bool = False
+class SafeZipEntry:
+    info: zipfile.ZipInfo
+    source_path: str
+    relative_path: PurePosixPath
 
 
 @dataclass(frozen=True)
@@ -60,7 +58,7 @@ class _ValidatedZipEntry:
 def extract_zip_materials(
     request: PreprocessingRequest,
     staged_output: Path,
-) -> ZipExtractionSummary:
+) -> PreprocessingExtractionSummary:
     warnings: list[PreprocessingWarning] = []
     failed_entries: list[str] = []
 
@@ -73,7 +71,7 @@ def extract_zip_materials(
                 failed_entries,
             )
             if fatal:
-                return ZipExtractionSummary(
+                return PreprocessingExtractionSummary(
                     warnings=tuple(warnings),
                     failed_entries=tuple(failed_entries),
                     entry_count=entry_count,
@@ -95,7 +93,7 @@ def extract_zip_materials(
                 context={"error_type": type(exc).__name__},
             )
         )
-        return ZipExtractionSummary(
+        return PreprocessingExtractionSummary(
             warnings=tuple(warnings),
             failed_entries=tuple(failed_entries),
             fatal=True,
@@ -108,7 +106,7 @@ def extract_zip_materials(
                 message="The container did not contain supported material entries.",
             )
         )
-    return ZipExtractionSummary(
+    return PreprocessingExtractionSummary(
         derived_materials=tuple(derived),
         warnings=tuple(warnings),
         failed_entries=tuple(failed_entries),
@@ -117,12 +115,12 @@ def extract_zip_materials(
     )
 
 
-def _validate_entries(
+def validate_zip_container_entries(
     infos: list[zipfile.ZipInfo],
     request: PreprocessingRequest,
     warnings: list[PreprocessingWarning],
     failed_entries: list[str],
-) -> tuple[list[_ValidatedZipEntry], int, bool]:
+) -> tuple[list[SafeZipEntry], int, bool]:
     entry_count = len(infos)
     if entry_count > request.limits.max_entries:
         warnings.append(
@@ -151,25 +149,13 @@ def _validate_entries(
         )
         return [], entry_count, True
 
-    validated: list[_ValidatedZipEntry] = []
-    output_keys: set[str] = set()
+    safe_entries: list[SafeZipEntry] = []
+    source_keys: set[str] = set()
     for info in infos:
         _raise_if_cancelled(request.cancelled)
-        if info.is_dir():
-            directory_name = info.filename.rstrip("/\\")
-            path_validation = validate_archive_entry_path(directory_name)
-            if path_validation.relative_path is None:
-                _reject_entry(
-                    warnings,
-                    failed_entries,
-                    info.filename,
-                    path_validation.warning_code,
-                    path_validation.warning_message,
-                )
-            continue
         entry_name = info.filename
-
-        path_validation = validate_archive_entry_path(entry_name)
+        candidate_name = entry_name.rstrip("/\\") if info.is_dir() else entry_name
+        path_validation = validate_archive_entry_path(candidate_name)
         if path_validation.relative_path is None:
             _reject_entry(
                 warnings,
@@ -179,8 +165,9 @@ def _validate_entries(
                 path_validation.warning_message,
             )
             continue
+        if info.is_dir():
+            continue
         relative_entry = path_validation.relative_path
-
         if _is_unsupported_file_type(info):
             _reject_entry(
                 warnings,
@@ -210,7 +197,6 @@ def _validate_entries(
                 limit=request.limits.max_entry_size_bytes,
             )
             continue
-
         compression_ratio = info.file_size / max(info.compress_size, 1)
         if compression_ratio > request.limits.max_compression_ratio:
             _reject_entry(
@@ -223,7 +209,47 @@ def _validate_entries(
                 limit=request.limits.max_compression_ratio,
             )
             continue
+        source_key = normalized_path_key(relative_entry)
+        if _collides_with_output(source_key, source_keys):
+            _reject_entry(
+                warnings,
+                failed_entries,
+                entry_name,
+                "entry_path_collision",
+                "The archive entry collides with another normalized entry path.",
+            )
+            continue
+        source_keys.add(source_key)
+        safe_entries.append(
+            SafeZipEntry(
+                info=info,
+                source_path=entry_name,
+                relative_path=relative_entry,
+            )
+        )
+    return safe_entries, entry_count, False
 
+
+def _validate_entries(
+    infos: list[zipfile.ZipInfo],
+    request: PreprocessingRequest,
+    warnings: list[PreprocessingWarning],
+    failed_entries: list[str],
+) -> tuple[list[_ValidatedZipEntry], int, bool]:
+    safe_entries, entry_count, fatal = validate_zip_container_entries(
+        infos,
+        request,
+        warnings,
+        failed_entries,
+    )
+    if fatal:
+        return [], entry_count, True
+    validated: list[_ValidatedZipEntry] = []
+    output_keys: set[str] = set()
+    for safe_entry in safe_entries:
+        info = safe_entry.info
+        entry_name = safe_entry.source_path
+        relative_entry = safe_entry.relative_path
         suffix = relative_entry.suffix.lower()
         if suffix in INPUT_FORMAT_SUFFIXES:
             _reject_entry(

@@ -103,6 +103,41 @@ class DerivedMaterialRecord:
 
 
 @dataclass(frozen=True)
+class PreprocessingEntrySummary:
+    source_entry_path: str
+    role: str
+    media_type: str = ""
+    media_subtype: str = ""
+    spine_index: int | None = None
+    title: str = ""
+    size_bytes: int = 0
+    status: str = "observed"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "source_entry_path": self.source_entry_path,
+            "role": self.role,
+            "media_type": self.media_type,
+            "media_subtype": self.media_subtype,
+            "spine_index": self.spine_index,
+            "title": self.title,
+            "size_bytes": self.size_bytes,
+            "status": self.status,
+        }
+
+
+@dataclass(frozen=True)
+class PreprocessingExtractionSummary:
+    derived_materials: tuple[DerivedMaterialRecord, ...] = ()
+    entry_summaries: tuple[PreprocessingEntrySummary, ...] = ()
+    warnings: tuple[PreprocessingWarning, ...] = ()
+    failed_entries: tuple[str, ...] = ()
+    entry_count: int = 0
+    expanded_size_bytes: int = 0
+    fatal: bool = False
+
+
+@dataclass(frozen=True)
 class PreprocessingRequest:
     source_path: Path
     source_raw_path: str
@@ -123,6 +158,7 @@ class PreprocessingResult:
     output_root: Path
     manifest_path: Path
     derived_materials: tuple[DerivedMaterialRecord, ...] = ()
+    entry_summaries: tuple[PreprocessingEntrySummary, ...] = ()
     warnings: tuple[PreprocessingWarning, ...] = ()
     failed_entries: tuple[str, ...] = ()
     entry_count: int = 0
@@ -203,6 +239,10 @@ def preprocess_material(request: PreprocessingRequest) -> PreprocessingResult:
             from utils.zip_material_preprocessor import extract_zip_materials
 
             extraction = extract_zip_materials(request, staged_output)
+        elif request.preprocessor_key == "epub":
+            from utils.epub_material_preprocessor import extract_epub_materials
+
+            extraction = extract_epub_materials(request, staged_output)
         else:
             return _failed_result(
                 request,
@@ -223,6 +263,7 @@ def preprocess_material(request: PreprocessingRequest) -> PreprocessingResult:
                 output_root=request.output_root,
                 manifest_path=request.manifest_path,
                 warnings=extraction.warnings,
+                entry_summaries=extraction.entry_summaries,
                 failed_entries=extraction.failed_entries,
                 entry_count=extraction.entry_count,
                 input_size_bytes=input_size,
@@ -234,6 +275,7 @@ def preprocess_material(request: PreprocessingRequest) -> PreprocessingResult:
             source_hash=source_hash,
             input_size_bytes=input_size,
             derived_materials=extraction.derived_materials,
+            entry_summaries=extraction.entry_summaries,
             warnings=extraction.warnings,
             failed_entries=extraction.failed_entries,
             entry_count=extraction.entry_count,
@@ -257,6 +299,7 @@ def preprocess_material(request: PreprocessingRequest) -> PreprocessingResult:
             output_root=request.output_root,
             manifest_path=request.manifest_path,
             derived_materials=extraction.derived_materials,
+            entry_summaries=extraction.entry_summaries,
             warnings=extraction.warnings,
             failed_entries=extraction.failed_entries,
             entry_count=extraction.entry_count,
@@ -755,6 +798,27 @@ def _result_from_manifest(
                 )
             )
 
+    entry_summaries: list[PreprocessingEntrySummary] = []
+    summary_records = manifest.get("entry_summaries")
+    if isinstance(summary_records, list):
+        for summary in summary_records:
+            if not isinstance(summary, dict):
+                continue
+            entry_summaries.append(
+                PreprocessingEntrySummary(
+                    source_entry_path=_manifest_string(
+                        summary.get("source_entry_path")
+                    ),
+                    role=_manifest_string(summary.get("role")),
+                    media_type=_manifest_string(summary.get("media_type")),
+                    media_subtype=_manifest_string(summary.get("media_subtype")),
+                    spine_index=_manifest_optional_int(summary.get("spine_index")),
+                    title=_manifest_string(summary.get("title")),
+                    size_bytes=_manifest_int(summary.get("size_bytes")),
+                    status=_manifest_string(summary.get("status")) or "observed",
+                )
+            )
+
     warnings: list[PreprocessingWarning] = []
     warning_records = manifest.get("warnings")
     if isinstance(warning_records, list):
@@ -785,6 +849,7 @@ def _result_from_manifest(
         output_root=request.output_root,
         manifest_path=request.manifest_path,
         derived_materials=tuple(derived_materials),
+        entry_summaries=tuple(entry_summaries),
         warnings=tuple(warnings),
         failed_entries=(
             tuple(value for value in failed_entries if isinstance(value, str))
@@ -936,6 +1001,7 @@ def _build_manifest(
     source_hash: str,
     input_size_bytes: int,
     derived_materials: tuple[DerivedMaterialRecord, ...],
+    entry_summaries: tuple[PreprocessingEntrySummary, ...],
     warnings: tuple[PreprocessingWarning, ...],
     failed_entries: tuple[str, ...],
     entry_count: int,
@@ -954,6 +1020,7 @@ def _build_manifest(
             request.output_root_reference.replace("\\", "/")
         ).as_posix(),
         "derived_materials": [record.to_dict() for record in derived_materials],
+        "entry_summaries": [summary.to_dict() for summary in entry_summaries],
         "entry_count": entry_count,
         "input_size_bytes": input_size_bytes,
         "source_mtime_ns": _safe_file_mtime_ns(request.source_path),

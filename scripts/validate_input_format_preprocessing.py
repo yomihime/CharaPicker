@@ -33,6 +33,7 @@ from utils.media_types import (  # noqa: E402
     project_input_file_patterns,
 )
 from core.source_scanner import scan_formal_materials  # noqa: E402
+from core.extraction_plan import FormalExtractionRunPlan  # noqa: E402
 from core.models import ProjectConfig  # noqa: E402
 from utils.material_processing_middleware import process_source_request  # noqa: E402
 from utils.source_importer import (  # noqa: E402
@@ -48,6 +49,7 @@ def _request(
     root: Path,
     source: Path,
     *,
+    preprocessor_key: InputPreprocessorKey = "zip",
     limits: PreprocessingLimits | None = None,
     cancelled=None,
 ) -> PreprocessingRequest:
@@ -57,7 +59,7 @@ def _request(
         output_root=root / "materials" / "derived_inputs" / "fixture_abc123",
         output_root_reference="materials/derived_inputs/fixture_abc123",
         manifest_path=root / "cache" / "material_preprocessing" / "abc123.json",
-        preprocessor_key="zip",
+        preprocessor_key=preprocessor_key,
         limits=limits or PreprocessingLimits(),
         cancelled=cancelled,
         staging_root=root / "cache" / "material_preprocessing" / "tmp",
@@ -73,6 +75,38 @@ def _write_zip(path: Path, entries: list[tuple[str, bytes]]) -> None:
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, content in entries:
             archive.writestr(name, content)
+
+
+def _write_epub(
+    path: Path,
+    entries: list[tuple[str, bytes]],
+    *,
+    include_mimetype: bool = True,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as archive:
+        if include_mimetype:
+            archive.writestr(
+                "mimetype",
+                b"application/epub+zip",
+                compress_type=zipfile.ZIP_STORED,
+            )
+        for name, content in entries:
+            archive.writestr(name, content, compress_type=zipfile.ZIP_DEFLATED)
+
+
+def _mark_first_zip_entry_encrypted(path: Path) -> None:
+    archive_bytes = bytearray(path.read_bytes())
+    for signature, flag_offset in ((b"PK\x03\x04", 6), (b"PK\x01\x02", 8)):
+        header = archive_bytes.find(signature)
+        assert header >= 0
+        flag_position = header + flag_offset
+        flags = int.from_bytes(archive_bytes[flag_position : flag_position + 2], "little")
+        archive_bytes[flag_position : flag_position + 2] = (flags | 0x1).to_bytes(
+            2,
+            "little",
+        )
+    path.write_bytes(archive_bytes)
 
 
 def _assert_valid_extract_and_manifest(root: Path) -> None:
@@ -171,14 +205,7 @@ def _assert_special_file_and_encryption_rejected(root: Path) -> None:
 
     encrypted_source = root / "encrypted.zip"
     _write_zip(encrypted_source, [("secret.txt", b"secret")])
-    archive_bytes = bytearray(encrypted_source.read_bytes())
-    for signature, flag_offset in ((b"PK\x03\x04", 6), (b"PK\x01\x02", 8)):
-        header = archive_bytes.find(signature)
-        assert header >= 0
-        flag_position = header + flag_offset
-        flags = int.from_bytes(archive_bytes[flag_position : flag_position + 2], "little")
-        archive_bytes[flag_position : flag_position + 2] = (flags | 0x1).to_bytes(2, "little")
-    encrypted_source.write_bytes(archive_bytes)
+    _mark_first_zip_entry_encrypted(encrypted_source)
 
     encrypted_result = preprocess_material(_request(root, encrypted_source))
     assert encrypted_result.succeeded
@@ -256,14 +283,14 @@ def _assert_corrupt_and_cancelled_leave_no_partial_output(root: Path) -> None:
 
 
 def _assert_zip_profiles_enabled_without_opening_later_formats() -> None:
-    for suffix in (".zip", ".cbz"):
+    for suffix in (".zip", ".cbz", ".epub"):
         profile = input_format_profile(f"fixture{suffix}")
         assert profile is not None
         assert profile.state == InputFormatSupportState.ENABLED
         assert is_preprocessable_source(f"fixture{suffix}") is True
         assert is_import_supported_source(f"fixture{suffix}") is False
         assert f"*{suffix}" in project_input_file_patterns()
-    for suffix in (".epub", ".pdf", ".7z", ".rar", ".cbr"):
+    for suffix in (".pdf", ".7z", ".rar", ".cbr"):
         assert is_preprocessable_source(f"fixture{suffix}") is False
         assert f"*{suffix}" not in project_input_file_patterns()
 
@@ -641,6 +668,256 @@ def _assert_cbz_profile_end_to_end(root: Path) -> None:
         path_utils.PROJECTS_ROOT = previous_projects_root
 
 
+def _epub_container_xml(opf_path: str = "OPS/package.opf") -> bytes:
+    return (
+        "<?xml version='1.0' encoding='UTF-8'?>"
+        "<container xmlns='urn:oasis:names:tc:opendocument:xmlns:container' "
+        "version='1.0'><rootfiles><rootfile full-path='"
+        f"{opf_path}' media-type='application/oebps-package+xml'/>"
+        "</rootfiles></container>"
+    ).encode("utf-8")
+
+
+def _assert_epub_profile_end_to_end(root: Path) -> None:
+    projects_root = root / "projects"
+    external_source = root / "external" / "novel.epub"
+    package = b"""<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+  <manifest>
+    <item id="chapter-one" href="Text/chapter1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="cover" href="Images/cover.jpg" media-type="image/jpeg"/>
+    <item id="chapter-two" href="Text/chapter2.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="chapter-two"/>
+    <itemref idref="missing-chapter"/>
+    <itemref idref="chapter-one"/>
+  </spine>
+</package>"""
+    chapter_two = b"""<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+  <head><title>Second chapter</title><style>ignored</style></head>
+  <body><section><h1>Second</h1><p><ruby>&#28450;&#23383;<rt>&#12363;&#12435;&#12376;</rt></ruby>
+  <a epub:type="noteref" href="#note">footnote</a></p>
+  <img src="../Images/cover.jpg" alt="character portrait"/>
+  <script>ignored script</script></section></body>
+</html>"""
+    damaged_chapter_one = b"""<html><head><title>First chapter</title></head>
+<body><h1>First</h1><p>Recovered malformed chapter</body></html>"""
+    _write_epub(
+        external_source,
+        [
+            ("META-INF/container.xml", _epub_container_xml()),
+            ("OPS/package.opf", package),
+            ("OPS/Text/chapter1.xhtml", damaged_chapter_one),
+            ("OPS/Text/chapter2.xhtml", chapter_two),
+            ("OPS/Images/cover.jpg", b"embedded-image"),
+        ],
+    )
+    project_id = "epub-profile-e2e"
+    config = ProjectConfig(
+        project_id=project_id,
+        name="EPUB profile validation",
+        source_paths=[str(external_source)],
+    )
+
+    previous_projects_root = path_utils.PROJECTS_ROOT
+    path_utils.PROJECTS_ROOT = projects_root
+    try:
+        result = process_source_request(config)
+        project_root = projects_root / project_id
+        raw_source = project_root / "raw" / external_source.name
+        assert result.preprocessed_source_count == 1
+        assert result.derived_material_count == 2
+        assert result.preprocessing_warning_codes == ["epub_xhtml_malformed_fallback"]
+        assert raw_source.is_file()
+        assert not (project_root / "materials" / external_source.name).exists()
+
+        request = _project_request(project_root, raw_source, "epub")
+        manifest = json.loads(request.manifest_path.read_text(encoding="utf-8"))
+        assert manifest["source_suffix"] == ".epub"
+        assert manifest["preprocessor"] == "epub"
+        records = manifest["derived_materials"]
+        assert [record["source_entry_path"] for record in records] == [
+            "OPS/Text/chapter2.xhtml",
+            "OPS/Text/chapter1.xhtml",
+        ]
+        assert [record["chapter_index"] for record in records] == [1, 2]
+        assert all(record["content_form_hint"] == "novel" for record in records)
+        summaries = manifest["entry_summaries"]
+        assert [summary["source_entry_path"] for summary in summaries if summary["role"] == "image"] == [
+            "OPS/Images/cover.jpg"
+        ]
+        assert [summary["status"] for summary in summaries if summary["role"] == "image"] == [
+            "observed_not_materialized"
+        ]
+        assert [summary["spine_index"] for summary in summaries if summary["role"] == "chapter"] == [
+            1,
+            2,
+        ]
+
+        chapter_one = (request.output_root / "text" / "chapters" / "chapter_0001.txt").read_text(
+            encoding="utf-8"
+        )
+        assert "Second" in chapter_one
+        assert "\u6f22\u5b57" in chapter_one
+        assert "\u304b\u3093\u3058" not in chapter_one
+        assert "footnote" in chapter_one
+        assert "[Image: character portrait]" in chapter_one
+        chapter_two = (request.output_root / "text" / "chapters" / "chapter_0002.txt").read_text(
+            encoding="utf-8"
+        )
+        assert "Recovered malformed chapter" in chapter_two
+
+        episodes = scan_formal_materials(project_id)
+        units = [unit for episode in episodes for unit in episode.units]
+        assert len(units) == 2
+        assert {unit.media_type.value for unit in units} == {"text"}
+        assert {unit.content_form.value for unit in units} == {"novel"}
+        assert [unit.material_ref.metadata["source_entry_path"] for unit in units] == [
+            "OPS/Text/chapter2.xhtml",
+            "OPS/Text/chapter1.xhtml",
+        ]
+        assert [unit.material_ref.metadata["chapter_index"] for unit in units] == [1, 2]
+        assert all(
+            unit.material_ref.metadata["preprocessed_from_raw"] == "raw/novel.epub"
+            for unit in units
+        )
+        assert not any(unit.media_type.value == "image" for unit in units)
+        run_plan = FormalExtractionRunPlan(project_id=project_id, episodes=episodes)
+        assert [
+            unit.material_ref.metadata["source_entry_path"] for unit in run_plan.all_units
+        ] == ["OPS/Text/chapter2.xhtml", "OPS/Text/chapter1.xhtml"]
+        assert [
+            unit.material_ref.metadata["chapter_index"] for unit in run_plan.all_units
+        ] == [1, 2]
+
+        reused = preprocess_project_source(
+            _project_request(project_root, raw_source, "epub"),
+            raw_root=project_root / "raw",
+            materials_root=project_root / "materials",
+            cache_root=project_root / "cache",
+        )
+        assert reused.succeeded and reused.reused
+
+        assert clean_raw_sources(project_id, [raw_source]) == [external_source.name]
+        assert not raw_source.exists()
+        assert request.output_root.exists()
+        external_source.unlink()
+        assert remove_project_sources(project_id, [str(external_source)]) == 0
+        assert not request.output_root.exists()
+        assert not request.manifest_path.exists()
+    finally:
+        path_utils.PROJECTS_ROOT = previous_projects_root
+
+
+def _assert_epub_failure_and_fallback_boundaries(root: Path) -> None:
+    missing_opf = root / "missing-opf" / "missing.epub"
+    _write_epub(
+        missing_opf,
+        [
+            ("Text/02.xhtml", b"<html><body><p>Second path</p></body></html>"),
+            ("Text/01.xhtml", b"<html><body><p>First path</p></body></html>"),
+        ],
+        include_mimetype=False,
+    )
+    missing_result = preprocess_material(
+        _request(root / "missing-opf", missing_opf, preprocessor_key="epub")
+    )
+    assert missing_result.succeeded
+    assert [record.source_entry_path for record in missing_result.derived_materials] == [
+        "Text/01.xhtml",
+        "Text/02.xhtml",
+    ]
+    assert {
+        "epub_mimetype_missing",
+        "epub_opf_missing_fallback",
+        "epub_document_order_fallback",
+    } <= _warning_codes(missing_result)
+
+    missing_spine = root / "missing-spine" / "missing-spine.epub"
+    package_without_spine = b"""<package xmlns="http://www.idpf.org/2007/opf">
+<manifest>
+  <item id="second" href="../Text/02.xhtml" media-type="application/xhtml+xml"/>
+  <item id="first" href="../Text/01.xhtml" media-type="application/xhtml+xml"/>
+  <item id="unsafe" href="../../escape.xhtml" media-type="application/xhtml+xml"/>
+</manifest></package>"""
+    _write_epub(
+        missing_spine,
+        [
+            ("META-INF/container.xml", _epub_container_xml()),
+            ("OPS/package.opf", package_without_spine),
+            ("Text/01.xhtml", b"<html><body>First</body></html>"),
+            ("Text/02.xhtml", b"<html><body>Second</body></html>"),
+        ],
+    )
+    spine_result = preprocess_material(
+        _request(root / "missing-spine", missing_spine, preprocessor_key="epub")
+    )
+    assert spine_result.succeeded
+    assert [record.source_entry_path for record in spine_result.derived_materials] == [
+        "Text/02.xhtml",
+        "Text/01.xhtml",
+    ]
+    assert {"epub_spine_missing_fallback", "epub_manifest_item_invalid"} <= _warning_codes(
+        spine_result
+    )
+
+    drm_source = root / "drm" / "protected.epub"
+    _write_epub(drm_source, [("META-INF/encryption.xml", b"<encryption/>")])
+    drm_result = preprocess_material(
+        _request(root / "drm", drm_source, preprocessor_key="epub")
+    )
+    assert drm_result.status == "failed"
+    assert "epub_drm_unsupported" in _warning_codes(drm_result)
+    assert not drm_result.manifest_path.exists()
+
+    encrypted_source = root / "encrypted" / "encrypted.epub"
+    _write_epub(encrypted_source, [("chapter.xhtml", b"<html>secret</html>")])
+    _mark_first_zip_entry_encrypted(encrypted_source)
+    encrypted_result = preprocess_material(
+        _request(root / "encrypted", encrypted_source, preprocessor_key="epub")
+    )
+    assert encrypted_result.status == "failed"
+    assert {"entry_encrypted", "epub_encryption_unsupported"} <= _warning_codes(
+        encrypted_result
+    )
+
+    unsafe_xhtml = root / "unsafe-xhtml" / "unsafe.epub"
+    unsafe_package = b"""<package xmlns="http://www.idpf.org/2007/opf">
+<manifest><item id="chapter" href="Text/chapter.xhtml" media-type="application/xhtml+xml"/></manifest>
+<spine><itemref idref="chapter"/></spine></package>"""
+    _write_epub(
+        unsafe_xhtml,
+        [
+            ("META-INF/container.xml", _epub_container_xml()),
+            ("OPS/package.opf", unsafe_package),
+            (
+                "OPS/Text/chapter.xhtml",
+                b"<!DOCTYPE html [<!ENTITY unsafe 'blocked'>]><html>&unsafe;</html>",
+            ),
+        ],
+    )
+    unsafe_result = preprocess_material(
+        _request(root / "unsafe-xhtml", unsafe_xhtml, preprocessor_key="epub")
+    )
+    assert unsafe_result.succeeded
+    assert unsafe_result.derived_materials == ()
+    assert {"epub_xhtml_unsafe_declaration", "epub_no_readable_chapters"} <= _warning_codes(
+        unsafe_result
+    )
+
+    corrupt_source = root / "corrupt" / "corrupt.epub"
+    corrupt_source.parent.mkdir(parents=True)
+    corrupt_source.write_bytes(b"not an EPUB")
+    corrupt_result = preprocess_material(
+        _request(root / "corrupt", corrupt_source, preprocessor_key="epub")
+    )
+    assert corrupt_result.status == "failed"
+    assert _warning_codes(corrupt_result) == {"epub_container_invalid"}
+    assert not corrupt_result.manifest_path.exists()
+
+
 def main() -> None:
     with TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
@@ -652,6 +929,8 @@ def main() -> None:
         _assert_project_lifecycle_and_source_trace(root / "lifecycle")
         _assert_zip_profile_end_to_end(root / "zip-profile")
         _assert_cbz_profile_end_to_end(root / "cbz-profile")
+        _assert_epub_profile_end_to_end(root / "epub-profile")
+        _assert_epub_failure_and_fallback_boundaries(root / "epub-boundaries")
     _assert_zip_profiles_enabled_without_opening_later_formats()
     print("input format preprocessing validation passed")
 

@@ -93,9 +93,9 @@ INPUT_FORMAT_PROFILES = (
     InputFormatProfile(
         suffix=".epub",
         toolchain="standard_library_zip",
-        state=InputFormatSupportState.CANDIDATE,
+        state=InputFormatSupportState.ENABLED,
         preprocessor_key="epub",
-        reason="preprocessing_not_implemented",
+        display_name_key="project.inputFormat.epub",
     ),
     InputFormatProfile(
         suffix=".pdf",

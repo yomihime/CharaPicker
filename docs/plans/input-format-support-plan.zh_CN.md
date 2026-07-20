@@ -4,7 +4,7 @@
 
 最近整理日期：2026-07-20。
 
-计划状态：执行中，M01-M06 已完成；下一阶段为 M07“EPUB 正文提取支持”。
+计划状态：执行中，M01-M07 已完成；下一阶段为 M08“PDF 可提取文字支持”的 backend 依赖闸门。
 
 适用阶段：在路线 01、路线 02、路线 03 已完成并归档后，补齐真实素材暴露出的输入格式与输入容器缺口。本文档只覆盖 `.zip`、`.cbz`、`.epub`、`.pdf`、`.7z`、`.rar` 和 `.cbr` 的受控导入、预处理、来源追踪和验收策略。
 
@@ -171,6 +171,7 @@ cache/
 - `entry_count`
 - `input_size_bytes`
 - `expanded_size_bytes`
+- `entry_summaries`（需保留容器内非派生成员时使用，例如 EPUB 内嵌图片）
 - `warnings`
 - `failed_entries`
 
