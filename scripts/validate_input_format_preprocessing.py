@@ -682,6 +682,12 @@ def _assert_ffmpeg_requirement_and_skip_policy(root: Path) -> None:
     defensive_error_config = skip_config.model_copy(
         update={"project_id": "ffmpeg-error-after-preprocess"}
     )
+    missing_video_config = ProjectConfig(
+        project_id="ffmpeg-missing-video",
+        name="FFmpeg missing video validation",
+        source_paths=[str(external_root / "missing.mp4")],
+        source_processing=processing_config,
+    )
 
     previous_projects_root = path_utils.PROJECTS_ROOT
     previous_has_ffmpeg_binary = processing_middleware.has_ffmpeg_binary
@@ -691,6 +697,13 @@ def _assert_ffmpeg_requirement_and_skip_policy(root: Path) -> None:
         assert source_processing_requires_ffmpeg(skip_config)
         assert not source_processing_requires_ffmpeg(container_only_config)
         assert not source_processing_requires_ffmpeg(original_config)
+        assert not source_processing_requires_ffmpeg(missing_video_config)
+        missing_raw_video = (
+            projects_root / missing_video_config.project_id / "raw" / "missing.mp4"
+        )
+        missing_raw_video.parent.mkdir(parents=True)
+        missing_raw_video.write_bytes(b"existing raw video")
+        assert source_processing_requires_ffmpeg(missing_video_config)
 
         result = process_source_request(
             skip_config,

@@ -25,7 +25,7 @@ from utils.paths import project_paths
 from utils.source_importer import (
     import_sources_to_raw,
     link_raw_sources_to_materials,
-    source_raw_targets,
+    source_raw_target_pairs,
 )
 from utils.state_manager import save_project_config
 
@@ -55,8 +55,8 @@ def source_processing_requires_ffmpeg(config: ProjectConfig) -> bool:
     if config.source_processing.preset == SourceProcessingPreset.ORIGINAL:
         return False
     return any(
-        target.suffix.lower() in VIDEO_SUFFIXES
-        for target in source_raw_targets(config.project_id, config.source_paths)
+        target.suffix.lower() in VIDEO_SUFFIXES and (source.is_file() or target.is_file())
+        for source, target in source_raw_target_pairs(config.project_id, config.source_paths)
     )
 
 
