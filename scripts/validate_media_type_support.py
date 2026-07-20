@@ -13,14 +13,19 @@ from utils.media_types import (  # noqa: E402
     AUDIO_SUFFIXES,
     DEFERRED_TIMED_TEXT_SUFFIXES,
     IMAGE_SUFFIXES,
+    INPUT_FORMAT_PROFILES,
+    INPUT_FORMAT_SUFFIXES,
     SUPPORTED_STATIC_IMAGE_SUFFIXES,
     SUPPORTED_TIMED_TEXT_SUFFIXES,
     SUPPORTED_SOURCE_SUFFIXES,
     TEXT_SUFFIXES,
     VIDEO_SUFFIXES,
+    InputFormatSupportState,
     SourceSupportLevel,
     classify_source_collection,
+    input_format_profile,
     is_import_supported_source,
+    is_preprocessable_source,
     source_media_type,
     source_support_profile,
 )
@@ -51,6 +56,45 @@ def _assert_suffix_matrix() -> None:
     assert SUPPORTED_TIMED_TEXT_SUFFIXES == {".srt", ".ass"}
     assert DEFERRED_TIMED_TEXT_SUFFIXES == {".vtt", ".lrc"}
     assert SUPPORTED_STATIC_IMAGE_SUFFIXES == {".png", ".jpg", ".jpeg", ".webp"}
+
+
+def _assert_input_format_profiles() -> None:
+    expected_suffixes = (".zip", ".cbz", ".epub", ".pdf", ".7z", ".rar", ".cbr")
+    assert tuple(profile.suffix for profile in INPUT_FORMAT_PROFILES) == expected_suffixes
+    assert INPUT_FORMAT_SUFFIXES == frozenset(expected_suffixes)
+
+    expected_states = {
+        ".zip": InputFormatSupportState.CANDIDATE,
+        ".cbz": InputFormatSupportState.CANDIDATE,
+        ".epub": InputFormatSupportState.CANDIDATE,
+        ".pdf": InputFormatSupportState.BLOCKED,
+        ".7z": InputFormatSupportState.BLOCKED,
+        ".rar": InputFormatSupportState.BLOCKED,
+        ".cbr": InputFormatSupportState.BLOCKED,
+    }
+    expected_toolchains = {
+        ".zip": "standard_library_zip",
+        ".cbz": "standard_library_zip",
+        ".epub": "standard_library_zip",
+        ".pdf": "pdf",
+        ".7z": "archive",
+        ".rar": "archive",
+        ".cbr": "archive",
+    }
+
+    for suffix in expected_suffixes:
+        profile = input_format_profile(f"material{suffix.upper()}")
+        assert profile is not None
+        assert profile.suffix == suffix
+        assert profile.state == expected_states[suffix]
+        assert profile.toolchain == expected_toolchains[suffix]
+        assert source_media_type(f"material{suffix}") is None
+        assert suffix not in SUPPORTED_SOURCE_SUFFIXES
+        assert is_import_supported_source(f"material{suffix}") is False
+        assert is_preprocessable_source(f"material{suffix}") is False
+
+    assert input_format_profile("notes.custom") is None
+    assert input_format_profile("README") is None
 
 
 def _assert_special_support_states() -> None:
@@ -136,6 +180,12 @@ def _assert_importer_uses_support_matrix() -> None:
             "dialogue.srt",
             "animation.gif",
             "chapter.cbz",
+            "novel.epub",
+            "document.pdf",
+            "archive.7z",
+            "archive.rar",
+            "manga.cbr",
+            "chapter.zip",
             "notes.custom",
         ):
             (root / name).write_bytes(b"fixture")
@@ -152,6 +202,7 @@ def _assert_importer_uses_support_matrix() -> None:
 
 def main() -> None:
     _assert_suffix_matrix()
+    _assert_input_format_profiles()
     _assert_special_support_states()
     _assert_collection_hints()
     _assert_importer_uses_support_matrix()

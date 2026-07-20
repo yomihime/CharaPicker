@@ -10,12 +10,20 @@ from typing import Iterable, Literal
 
 MediaTypeName = Literal["video", "image", "audio", "text"]
 ContentFormHint = Literal["unknown", "script", "image_set", "mixed"]
+InputFormatToolchain = Literal["standard_library_zip", "pdf", "archive"]
+InputPreprocessorKey = Literal["zip", "cbz", "epub", "pdf", "archive"]
 
 
 class SourceSupportLevel(str, Enum):
     SUPPORTED = "supported"
     PLANNED = "planned"
     UNSUPPORTED = "unsupported"
+
+
+class InputFormatSupportState(str, Enum):
+    CANDIDATE = "candidate"
+    BLOCKED = "blocked"
+    ENABLED = "enabled"
 
 
 @dataclass(frozen=True)
@@ -25,6 +33,15 @@ class SourceSupportProfile:
     import_supported: bool
     preview_support: SourceSupportLevel
     formal_support: SourceSupportLevel
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class InputFormatProfile:
+    suffix: str
+    toolchain: InputFormatToolchain
+    state: InputFormatSupportState
+    preprocessor_key: InputPreprocessorKey
     reason: str = ""
 
 
@@ -56,6 +73,60 @@ TIMED_TEXT_SUFFIXES = SUPPORTED_TIMED_TEXT_SUFFIXES | DEFERRED_TIMED_TEXT_SUFFIX
 TEXT_SUFFIXES = frozenset({".txt", ".md", ".json"}) | TIMED_TEXT_SUFFIXES
 COMIC_ARCHIVE_SUFFIXES = frozenset({".cbz", ".cbr", ".zip", ".rar", ".7z"})
 SUPPORTED_SOURCE_SUFFIXES = VIDEO_SUFFIXES | IMAGE_SUFFIXES | AUDIO_SUFFIXES | TEXT_SUFFIXES
+
+INPUT_FORMAT_PROFILES = (
+    InputFormatProfile(
+        suffix=".zip",
+        toolchain="standard_library_zip",
+        state=InputFormatSupportState.CANDIDATE,
+        preprocessor_key="zip",
+        reason="preprocessing_not_implemented",
+    ),
+    InputFormatProfile(
+        suffix=".cbz",
+        toolchain="standard_library_zip",
+        state=InputFormatSupportState.CANDIDATE,
+        preprocessor_key="cbz",
+        reason="preprocessing_not_implemented",
+    ),
+    InputFormatProfile(
+        suffix=".epub",
+        toolchain="standard_library_zip",
+        state=InputFormatSupportState.CANDIDATE,
+        preprocessor_key="epub",
+        reason="preprocessing_not_implemented",
+    ),
+    InputFormatProfile(
+        suffix=".pdf",
+        toolchain="pdf",
+        state=InputFormatSupportState.BLOCKED,
+        preprocessor_key="pdf",
+        reason="pdf_backend_not_selected",
+    ),
+    InputFormatProfile(
+        suffix=".7z",
+        toolchain="archive",
+        state=InputFormatSupportState.BLOCKED,
+        preprocessor_key="archive",
+        reason="archive_backend_not_selected",
+    ),
+    InputFormatProfile(
+        suffix=".rar",
+        toolchain="archive",
+        state=InputFormatSupportState.BLOCKED,
+        preprocessor_key="archive",
+        reason="archive_backend_not_selected",
+    ),
+    InputFormatProfile(
+        suffix=".cbr",
+        toolchain="archive",
+        state=InputFormatSupportState.BLOCKED,
+        preprocessor_key="archive",
+        reason="archive_backend_not_selected",
+    ),
+)
+INPUT_FORMAT_SUFFIXES = frozenset(profile.suffix for profile in INPUT_FORMAT_PROFILES)
+_INPUT_FORMAT_PROFILE_BY_SUFFIX = {profile.suffix: profile for profile in INPUT_FORMAT_PROFILES}
 
 
 _VIDEO_PROFILE = SourceSupportProfile(
@@ -191,6 +262,15 @@ def source_support_profile(path_or_suffix: str | Path) -> SourceSupportProfile:
 
 def source_media_type(path_or_suffix: str | Path) -> MediaTypeName | None:
     return source_support_profile(path_or_suffix).media_type
+
+
+def input_format_profile(path_or_suffix: str | Path) -> InputFormatProfile | None:
+    return _INPUT_FORMAT_PROFILE_BY_SUFFIX.get(_normalized_suffix(path_or_suffix))
+
+
+def is_preprocessable_source(path_or_suffix: str | Path) -> bool:
+    profile = input_format_profile(path_or_suffix)
+    return profile is not None and profile.state == InputFormatSupportState.ENABLED
 
 
 def is_import_supported_source(path: str | Path) -> bool:
