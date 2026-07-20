@@ -225,6 +225,7 @@
   "project.inputFormat.epub": "EPUB eBook",
   "project.inputFormat.pdf": "PDF Document",
   "project.inputFormat.7z": "7z Archive",
+  "project.inputFormat.rar": "RAR Archive",
   "project.inputFormat.7z": "7z Archive",
   "project.fileDialog.folder": "Select Source Folder",
   "cards.title": "Character Cards",

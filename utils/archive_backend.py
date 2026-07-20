@@ -473,11 +473,14 @@ def _parse_key_values(value: str, *, strict: bool) -> dict[str, str]:
         stripped = line.strip()
         if not stripped or stripped in {"--"}:
             continue
-        if " = " not in line:
+        if " = " in line:
+            key, item = line.split(" = ", maxsplit=1)
+        elif line.endswith(" ="):
+            key, item = line[:-2], ""
+        else:
             if strict:
                 raise ArchiveContainerInvalidError("ArchiveListingMalformed")
             continue
-        key, item = line.split(" = ", maxsplit=1)
         normalized_key = key.strip()
         if strict and normalized_key in parsed:
             raise ArchiveContainerInvalidError("ArchiveListingDuplicateField")
