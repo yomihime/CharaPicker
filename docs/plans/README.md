@@ -11,6 +11,7 @@
 | 文件 | 阶段 | 可用性 | 用途 |
 | --- | --- | --- | --- |
 | `TODO.zh_CN.md` | 当前队列 | 可用 | 当前剩余任务总表，按优先级组织执行入口。 |
+| `input-format-support-plan.zh_CN.md` | 当前专项计划草案 | 待确认后执行 | EPUB、ZIP/CBZ、PDF、7z 等更多输入格式的受控导入、预处理、来源追踪和验收计划。 |
 | `extraction-development-roadmap.zh_CN.md` | 长期路线基准 | 可用作验收框架，不是当前任务清单 | Extract Once、知识库和角色状态编译的长期目标与验收基准。 |
 
 ## 维护规则
