@@ -35,8 +35,17 @@ from utils.media_types import (  # noqa: E402
 )
 from core.source_scanner import scan_formal_materials  # noqa: E402
 from core.extraction_plan import FormalExtractionRunPlan  # noqa: E402
-from core.models import ProjectConfig  # noqa: E402
-from utils.material_processing_middleware import process_source_request  # noqa: E402
+from core.models import (  # noqa: E402
+    ProjectConfig,
+    SourceProcessingConfig,
+    SourceProcessingPreset,
+)
+import utils.material_processing_middleware as processing_middleware  # noqa: E402
+from utils.material_processing_middleware import (  # noqa: E402
+    MaterialProcessingError,
+    process_source_request,
+    source_processing_requires_ffmpeg,
+)
 from utils.source_importer import (  # noqa: E402
     clean_raw_sources,
     link_raw_sources_to_materials,
@@ -638,6 +647,87 @@ def _assert_zip_profile_end_to_end(root: Path) -> None:
         path_utils.PROJECTS_ROOT = previous_projects_root
 
 
+def _assert_ffmpeg_requirement_and_skip_policy(root: Path) -> None:
+    projects_root = root / "projects"
+    external_root = root / "external"
+    archive_source = external_root / "book.zip"
+    text_source = external_root / "notes.txt"
+    video_source = external_root / "episode.mp4"
+    _write_zip(archive_source, [("chapters/01.txt", b"chapter one")])
+    text_source.write_text("notes", encoding="utf-8")
+    video_source.write_bytes(b"video fixture")
+    processing_config = SourceProcessingConfig(
+        preset=SourceProcessingPreset.TRANSCODE_ONLY,
+        transcode_enabled=True,
+    )
+
+    skip_config = ProjectConfig(
+        project_id="ffmpeg-skip-policy",
+        name="FFmpeg skip policy validation",
+        source_paths=[str(archive_source), str(text_source), str(video_source)],
+        source_processing=processing_config,
+    )
+    container_only_config = ProjectConfig(
+        project_id="ffmpeg-container-only",
+        name="FFmpeg container-only validation",
+        source_paths=[str(archive_source)],
+        source_processing=processing_config,
+    )
+    original_config = skip_config.model_copy(
+        update={
+            "project_id": "ffmpeg-original",
+            "source_processing": SourceProcessingConfig(),
+        }
+    )
+    defensive_error_config = skip_config.model_copy(
+        update={"project_id": "ffmpeg-error-after-preprocess"}
+    )
+
+    previous_projects_root = path_utils.PROJECTS_ROOT
+    previous_has_ffmpeg_binary = processing_middleware.has_ffmpeg_binary
+    path_utils.PROJECTS_ROOT = projects_root
+    processing_middleware.has_ffmpeg_binary = lambda: False
+    try:
+        assert source_processing_requires_ffmpeg(skip_config)
+        assert not source_processing_requires_ffmpeg(container_only_config)
+        assert not source_processing_requires_ffmpeg(original_config)
+
+        result = process_source_request(
+            skip_config,
+            ffmpeg_unavailable_policy="skip_video",
+        )
+        project_root = projects_root / skip_config.project_id
+        assert result.linked_count == 1
+        assert result.preprocessed_source_count == 1
+        assert result.derived_material_count == 1
+        assert result.skipped_video_count == 1
+        assert result.preprocessing_warning_codes == ["ffmpeg_video_skipped"]
+        assert (project_root / "raw" / video_source.name).is_file()
+        assert (project_root / "materials" / text_source.name).is_file()
+        assert not (project_root / "materials" / video_source.name).exists()
+        assert list((project_root / "materials" / "derived_inputs").rglob("01.txt"))
+
+        container_result = process_source_request(container_only_config)
+        assert container_result.preprocessed_source_count == 1
+        assert container_result.derived_material_count == 1
+        assert container_result.skipped_video_count == 0
+
+        try:
+            process_source_request(defensive_error_config)
+        except MaterialProcessingError:
+            pass
+        else:
+            raise AssertionError("Missing FFmpeg must stop direct video processing")
+        defensive_root = projects_root / defensive_error_config.project_id
+        assert (defensive_root / "raw" / video_source.name).is_file()
+        assert (defensive_root / "materials" / text_source.name).is_file()
+        assert list((defensive_root / "materials" / "derived_inputs").rglob("01.txt"))
+        assert not (defensive_root / "materials" / video_source.name).exists()
+    finally:
+        processing_middleware.has_ffmpeg_binary = previous_has_ffmpeg_binary
+        path_utils.PROJECTS_ROOT = previous_projects_root
+
+
 def _assert_cbz_profile_end_to_end(root: Path) -> None:
     projects_root = root / "projects"
     external_source = root / "external" / "chapter.cbz"
@@ -1021,6 +1111,7 @@ def main() -> None:
         _assert_project_lifecycle_and_source_trace(root / "lifecycle")
         _assert_source_relative_artifact_isolation(root / "source-isolation")
         _assert_zip_profile_end_to_end(root / "zip-profile")
+        _assert_ffmpeg_requirement_and_skip_policy(root / "ffmpeg-policy")
         _assert_cbz_profile_end_to_end(root / "cbz-profile")
         _assert_epub_profile_end_to_end(root / "epub-profile")
         _assert_epub_failure_and_fallback_boundaries(root / "epub-boundaries")

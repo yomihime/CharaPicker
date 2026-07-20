@@ -79,11 +79,12 @@ from utils.env_manager import (
 )
 from utils.material_processing_events import FFMPEG_EVENT_PREFIX
 from utils.material_processing_middleware import (
+    FfmpegUnavailablePolicy,
     MaterialProcessingError,
     SOURCE_PROCESSING_CANCELLED_MESSAGE,
     SourceProcessingResult,
     process_source_request,
-    validate_source_processing_tools,
+    source_processing_requires_ffmpeg,
 )
 from utils.media_types import enabled_input_format_profiles, project_input_file_patterns
 from utils.source_importer import (
@@ -272,6 +273,57 @@ class FfmpegDownloadDialog(FluentDialog):
             super().reject()
             return
         self.request_cancel()
+
+
+class FfmpegRequiredDialog(FluentDialog):
+    ACTION_CANCEL = "cancel"
+    ACTION_CONTINUE = "continue"
+    ACTION_DOWNLOAD = "download"
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(
+            t("project.ffmpeg.missing.dialog.title"),
+            parent,
+            width=600,
+            height=220,
+        )
+        self.selected_action = self.ACTION_CANCEL
+
+        content_label = BodyLabel(t("project.ffmpeg.missing.dialog.content"), self.dialog_card)
+        content_label.setWordWrap(True)
+        self.content_layout.addWidget(content_label)
+        self.content_layout.addStretch(1)
+
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        cancel_button = PushButton(
+            t("project.ffmpeg.missing.dialog.cancel"),
+            self.dialog_card,
+        )
+        continue_button = PushButton(
+            t("project.ffmpeg.missing.dialog.continue"),
+            self.dialog_card,
+        )
+        download_button = PrimaryPushButton(
+            t("project.ffmpeg.missing.dialog.downloadAndRun"),
+            self.dialog_card,
+        )
+        actions.addWidget(cancel_button)
+        actions.addWidget(continue_button)
+        actions.addWidget(download_button)
+        self.content_layout.addLayout(actions)
+
+        cancel_button.clicked.connect(self.reject)
+        continue_button.clicked.connect(
+            lambda: self._select_action(self.ACTION_CONTINUE)
+        )
+        download_button.clicked.connect(
+            lambda: self._select_action(self.ACTION_DOWNLOAD)
+        )
+
+    def _select_action(self, action: str) -> None:
+        self.selected_action = action
+        self.accept()
 
 
 class WhisperDownloadWorker(QObject):
@@ -496,9 +548,14 @@ class SourceProcessingWorker(QObject):
     cancelled = pyqtSignal()
     finished = pyqtSignal()
 
-    def __init__(self, config: ProjectConfig) -> None:
+    def __init__(
+        self,
+        config: ProjectConfig,
+        ffmpeg_unavailable_policy: FfmpegUnavailablePolicy,
+    ) -> None:
         super().__init__()
         self.config = config
+        self.ffmpeg_unavailable_policy = ffmpeg_unavailable_policy
         self._cancel_requested = False
 
     def cancel(self) -> None:
@@ -512,6 +569,7 @@ class SourceProcessingWorker(QObject):
                 self.config,
                 progress=self._emit_progress,
                 cancelled=lambda: self._cancel_requested,
+                ffmpeg_unavailable_policy=self.ffmpeg_unavailable_policy,
             )
             self.succeeded.emit(result)
         except MaterialProcessingError as exc:
@@ -816,6 +874,7 @@ class ProjectPage(QWidget):
         self._ffmpeg_download_thread: QThread | None = None
         self._ffmpeg_download_worker: FfmpegDownloadWorker | None = None
         self._ffmpeg_download_dialog: FfmpegDownloadDialog | None = None
+        self._pending_ffmpeg_processing_config: ProjectConfig | None = None
         self._whisper_download_thread: QThread | None = None
         self._whisper_download_worker: WhisperDownloadWorker | None = None
         self._whisper_download_dialog: WhisperDownloadDialog | None = None
@@ -1399,7 +1458,32 @@ class ProjectPage(QWidget):
         if self._source_processing_thread is not None:
             return
         config = self.current_config()
-        if not self._uses_original_sources():
+        if source_processing_requires_ffmpeg(config) and not has_ffmpeg_binary():
+            dialog = FfmpegRequiredDialog(self.window())
+            dialog.exec()
+            if dialog.selected_action == FfmpegRequiredDialog.ACTION_CONTINUE:
+                self._begin_source_processing(
+                    config,
+                    ffmpeg_unavailable_policy="skip_video",
+                )
+            elif dialog.selected_action == FfmpegRequiredDialog.ACTION_DOWNLOAD:
+                self._download_ffmpeg(pending_config=config)
+            return
+
+        self._begin_source_processing(config, ffmpeg_unavailable_policy="error")
+
+    def _begin_source_processing(
+        self,
+        config: ProjectConfig,
+        *,
+        ffmpeg_unavailable_policy: FfmpegUnavailablePolicy,
+    ) -> None:
+        if self._source_processing_thread is not None:
+            return
+        uses_original_sources = (
+            config.source_processing.preset == SourceProcessingPreset.ORIGINAL
+        )
+        if not uses_original_sources:
             encoder = config.source_processing.encoder
             codec = config.source_processing.codec
             if encoder and not is_device_compatible_for_codec(codec, encoder):
@@ -1413,20 +1497,8 @@ class ProjectPage(QWidget):
                     duration=6500,
                 )
                 return
-        validation = validate_source_processing_tools(config.source_processing)
-        if not validation.is_valid:
-            dialog = MessageBox(
-                t("project.ffmpeg.missing.dialog.title"),
-                t("project.ffmpeg.missing.dialog.content"),
-                self.window(),
-            )
-            dialog.yesButton.setText(t("project.ffmpeg.download.button"))
-            dialog.cancelButton.setText(t("project.ffmpeg.missing.dialog.cancel"))
-            if dialog.exec():
-                self._download_ffmpeg()
-            return
 
-        if not self._uses_original_sources() and self._is_cpu_encoder_selected():
+        if not uses_original_sources and self._is_cpu_encoder_selected():
             cpu_dialog = MessageBox(
                 t("project.processing.cpuWarning.title"),
                 t("project.processing.cpuWarning.content"),
@@ -1441,7 +1513,10 @@ class ProjectPage(QWidget):
         self._source_processing_dialog.show()
         self.process_sources_button.setEnabled(False)
         self._source_processing_thread = QThread(self)
-        self._source_processing_worker = SourceProcessingWorker(config)
+        self._source_processing_worker = SourceProcessingWorker(
+            config,
+            ffmpeg_unavailable_policy,
+        )
         self._source_processing_worker.moveToThread(self._source_processing_thread)
         self._source_processing_thread.started.connect(self._source_processing_worker.run)
         self._source_processing_dialog.cancelRequested.connect(
@@ -1473,6 +1548,22 @@ class ProjectPage(QWidget):
         config = result.config
         self._upsert_project(config)
         self._refresh_project_sources(config.project_id)
+        if result.skipped_video_count:
+            InfoBar.warning(
+                title=t("project.processing.done.title"),
+                content=t(
+                    "project.processing.done.videosSkipped",
+                    direct_count=result.linked_count,
+                    container_count=result.preprocessed_source_count,
+                    derived_count=result.derived_material_count,
+                    skipped_count=result.skipped_video_count,
+                    warning_count=len(result.preprocessing_warning_codes),
+                ),
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=6500,
+            )
+            return
         if result.preprocessed_source_count or result.preprocessing_warning_codes:
             warning_count = len(result.preprocessing_warning_codes)
             message_key = (
@@ -1540,7 +1631,15 @@ class ProjectPage(QWidget):
         self._source_processing_worker = None
         self._source_processing_dialog = None
 
-    def _download_ffmpeg(self) -> None:
+    def _download_ffmpeg(
+        self,
+        _checked: bool = False,
+        *,
+        pending_config: ProjectConfig | None = None,
+    ) -> None:
+        if pending_config is not None:
+            self._pending_ffmpeg_processing_config = pending_config
+            self.process_sources_button.setEnabled(False)
         if self._ffmpeg_download_thread is not None:
             LOGGER.info("ffmpeg download ignored because a download is already running")
             return
@@ -1580,7 +1679,7 @@ class ProjectPage(QWidget):
             self._ffmpeg_download_dialog.close()
         self._ffmpeg_ready_cache = True
         self._refresh_encoder_options(force_probe=True)
-        self._refresh_ffmpeg_state()
+        self._refresh_ffmpeg_state(force_probe=True)
         InfoBar.success(
             title=t("project.ffmpeg.download.success.title"),
             content=t("project.ffmpeg.download.success.content", path=binary_path),
@@ -1590,6 +1689,7 @@ class ProjectPage(QWidget):
         )
 
     def _finish_ffmpeg_download_failure(self, error: str) -> None:
+        self._pending_ffmpeg_processing_config = None
         if self._ffmpeg_download_dialog is not None:
             self._ffmpeg_download_dialog.mark_finished()
             self._ffmpeg_download_dialog.close()
@@ -1602,6 +1702,7 @@ class ProjectPage(QWidget):
         )
 
     def _finish_ffmpeg_download_cancelled(self) -> None:
+        self._pending_ffmpeg_processing_config = None
         if self._ffmpeg_download_dialog is not None:
             self._ffmpeg_download_dialog.mark_finished()
             self._ffmpeg_download_dialog.close()
@@ -1614,11 +1715,31 @@ class ProjectPage(QWidget):
         )
 
     def _clear_ffmpeg_download_worker(self) -> None:
+        pending_config = self._pending_ffmpeg_processing_config
+        self._pending_ffmpeg_processing_config = None
         self.download_ffmpeg_button.setEnabled(True)
-        self._refresh_ffmpeg_state()
         self._ffmpeg_download_thread = None
         self._ffmpeg_download_worker = None
         self._ffmpeg_download_dialog = None
+        self._refresh_ffmpeg_state(force_probe=True)
+        self.process_sources_button.setEnabled(
+            self._has_project() and self._source_processing_thread is None
+        )
+        if pending_config is None:
+            return
+        if not self._ffmpeg_ready_cache:
+            InfoBar.warning(
+                title=t("project.ffmpeg.missing.dialog.title"),
+                content=t("project.ffmpeg.download.notDetected"),
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=7000,
+            )
+            return
+        self._begin_source_processing(
+            pending_config,
+            ffmpeg_unavailable_policy="error",
+        )
 
     def _download_default_whisper(self) -> None:
         self._download_whisper(DEFAULT_WHISPER_RUNTIME_PACKAGE_ID, DEFAULT_WHISPER_MODEL_ID)

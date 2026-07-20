@@ -3,10 +3,11 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from core.models import ProjectConfig, ProjectPaths, SourceProcessingConfig, SourceProcessingPreset
+from core.models import ProjectConfig, ProjectPaths, SourceProcessingPreset
 from utils.ffmpeg_tool import has_ffmpeg_binary, process_raw_sources_with_ffmpeg
 from utils.material_preprocessing import (
     PreprocessingCancelledError,
@@ -15,12 +16,17 @@ from utils.material_preprocessing import (
 )
 from utils.material_processing_events import SOURCE_PROCESSING_CANCELLED_MESSAGE
 from utils.media_types import (
+    VIDEO_SUFFIXES,
     input_format_profile,
     is_import_supported_source,
     is_preprocessable_source,
 )
 from utils.paths import project_paths
-from utils.source_importer import import_sources_to_raw, link_raw_sources_to_materials
+from utils.source_importer import (
+    import_sources_to_raw,
+    link_raw_sources_to_materials,
+    source_raw_targets,
+)
 from utils.state_manager import save_project_config
 
 
@@ -28,17 +34,11 @@ LOGGER = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[int, int, str], None]
 CancelledCallback = Callable[[], bool]
+FfmpegUnavailablePolicy = Literal["error", "skip_video"]
 
 
 class MaterialProcessingError(RuntimeError):
     pass
-
-
-class ToolValidationResult(BaseModel):
-    is_valid: bool
-    requires_ffmpeg: bool
-    ffmpeg_ready: bool
-    missing_tools: list[str] = Field(default_factory=list)
 
 
 class SourceProcessingResult(BaseModel):
@@ -46,21 +46,17 @@ class SourceProcessingResult(BaseModel):
     linked_count: int = 0
     preprocessed_source_count: int = 0
     derived_material_count: int = 0
+    skipped_video_count: int = 0
     preprocessing_warning_codes: list[str] = Field(default_factory=list)
     uses_original_sources: bool = True
 
 
-def validate_source_processing_tools(config: SourceProcessingConfig) -> ToolValidationResult:
-    requires_ffmpeg = config.preset != SourceProcessingPreset.ORIGINAL
-    ffmpeg_ready = has_ffmpeg_binary()
-    missing_tools: list[str] = []
-    if requires_ffmpeg and not ffmpeg_ready:
-        missing_tools.append("ffmpeg")
-    return ToolValidationResult(
-        is_valid=not missing_tools,
-        requires_ffmpeg=requires_ffmpeg,
-        ffmpeg_ready=ffmpeg_ready,
-        missing_tools=missing_tools,
+def source_processing_requires_ffmpeg(config: ProjectConfig) -> bool:
+    if config.source_processing.preset == SourceProcessingPreset.ORIGINAL:
+        return False
+    return any(
+        target.suffix.lower() in VIDEO_SUFFIXES
+        for target in source_raw_targets(config.project_id, config.source_paths)
     )
 
 
@@ -69,7 +65,10 @@ def process_source_request(
     *,
     progress: ProgressCallback | None = None,
     cancelled: CancelledCallback | None = None,
+    ffmpeg_unavailable_policy: FfmpegUnavailablePolicy = "error",
 ) -> SourceProcessingResult:
+    if ffmpeg_unavailable_policy not in {"error", "skip_video"}:
+        raise ValueError(f"Unsupported FFmpeg unavailable policy: {ffmpeg_unavailable_policy}")
     LOGGER.info(
         "Source processing request started; project_id=%s source_count=%s preset=%s "
         "trim_enabled=%s transcode_enabled=%s segment_enabled=%s segment_mode=%s "
@@ -85,18 +84,6 @@ def process_source_request(
         bool(config.source_processing.encoder),
         config.source_processing.resolution,
     )
-    validation = validate_source_processing_tools(config.source_processing)
-    if not validation.is_valid:
-        LOGGER.warning(
-            "Source processing tool validation failed; project_id=%s missing_tools=%s "
-            "requires_ffmpeg=%s ffmpeg_ready=%s",
-            config.project_id,
-            validation.missing_tools,
-            validation.requires_ffmpeg,
-            validation.ffmpeg_ready,
-        )
-        raise MaterialProcessingError("Required source processing tools are unavailable.")
-
     raw_sources = import_sources_to_raw(
         config.project_id,
         config.source_paths,
@@ -119,6 +106,12 @@ def process_source_request(
 
     uses_original_sources = config.source_processing.preset == SourceProcessingPreset.ORIGINAL
     direct_sources = [source for source in raw_sources if is_import_supported_source(source)]
+    direct_video_sources = [
+        source for source in direct_sources if source.suffix.lower() in VIDEO_SUFFIXES
+    ]
+    direct_non_video_sources = [
+        source for source in direct_sources if source.suffix.lower() not in VIDEO_SUFFIXES
+    ]
     container_sources = [source for source in raw_sources if is_preprocessable_source(source)]
     unsupported_sources = [
         source
@@ -138,6 +131,7 @@ def process_source_request(
     _raise_if_cancelled(cancelled)
 
     linked_count = 0
+    skipped_video_count = 0
     if uses_original_sources:
         linked_count = link_raw_sources_to_materials(
             config.project_id,
@@ -145,25 +139,49 @@ def process_source_request(
             progress=progress,
         )
     else:
-        linked_count = process_raw_sources_with_ffmpeg(
+        linked_count = link_raw_sources_to_materials(
             config.project_id,
-            direct_sources,
-            config.source_processing,
+            direct_non_video_sources,
             progress=progress,
-            cancelled=cancelled,
         )
+        if direct_video_sources and has_ffmpeg_binary():
+            linked_count += process_raw_sources_with_ffmpeg(
+                config.project_id,
+                direct_video_sources,
+                config.source_processing,
+                progress=progress,
+                cancelled=cancelled,
+            )
+        elif direct_video_sources and ffmpeg_unavailable_policy == "skip_video":
+            skipped_video_count = len(direct_video_sources)
+            preprocessing_warnings.append("ffmpeg_video_skipped")
+            LOGGER.warning(
+                "Direct videos skipped because FFmpeg is unavailable; project_id=%s "
+                "skipped_video_count=%s",
+                config.project_id,
+                skipped_video_count,
+            )
+        elif direct_video_sources:
+            LOGGER.warning(
+                "Direct video processing stopped because FFmpeg is unavailable; project_id=%s "
+                "video_count=%s",
+                config.project_id,
+                len(direct_video_sources),
+            )
+            raise MaterialProcessingError("FFmpeg is required to process selected videos.")
     _raise_if_cancelled(cancelled)
 
     save_project_config(updated_config)
     LOGGER.info(
         "Source processing request completed through middleware; project_id=%s raw_count=%s "
         "linked_count=%s preprocessed_source_count=%s derived_material_count=%s "
-        "preprocessing_warning_count=%s uses_original_sources=%s",
+        "skipped_video_count=%s preprocessing_warning_count=%s uses_original_sources=%s",
         config.project_id,
         len(raw_sources),
         linked_count,
         preprocessed_source_count,
         derived_material_count,
+        skipped_video_count,
         len(preprocessing_warnings),
         uses_original_sources,
     )
@@ -172,6 +190,7 @@ def process_source_request(
         linked_count=linked_count,
         preprocessed_source_count=preprocessed_source_count,
         derived_material_count=derived_material_count,
+        skipped_video_count=skipped_video_count,
         preprocessing_warning_codes=preprocessing_warnings,
         uses_original_sources=uses_original_sources,
     )
