@@ -15,6 +15,10 @@ from core.extraction_plan import (
     PageRange,
     TextRange,
 )
+from utils.material_preprocessing import (
+    material_path_is_active_preprocessed_output,
+    preprocessing_material_metadata_index,
+)
 from utils.media_types import (
     IMAGE_SUFFIXES,
     SourceSupportLevel,
@@ -31,10 +35,28 @@ GENERIC_MATERIAL_SEASON_ID = "season_materials"
 NATURAL_SORT_PATTERN = re.compile(r"\d+|\D+")
 TIMED_TEXT_ALIGNMENT_AMBIGUOUS = "timed_text_episode_alignment_ambiguous"
 TIMED_TEXT_ALIGNMENT_UNMATCHED = "timed_text_episode_alignment_unmatched"
+PREPROCESSED_TEXT_CONTENT_FORMS = {
+    ContentForm.NOVEL.value: ContentForm.NOVEL,
+    ContentForm.SCRIPT.value: ContentForm.SCRIPT,
+    ContentForm.SETTING_BOOK.value: ContentForm.SETTING_BOOK,
+}
 
 
-def extend_episode_plans(materials_root: Path, episodes: list[EpisodePlan]) -> list[EpisodePlan]:
-    material_paths = _supported_non_video_material_paths(materials_root)
+def extend_episode_plans(
+    materials_root: Path,
+    episodes: list[EpisodePlan],
+    *,
+    preprocessing_index: dict[str, dict[str, object]] | None = None,
+) -> list[EpisodePlan]:
+    source_metadata_index = (
+        preprocessing_index
+        if preprocessing_index is not None
+        else preprocessing_material_metadata_index(materials_root)
+    )
+    material_paths = _supported_non_video_material_paths(
+        materials_root,
+        source_metadata_index,
+    )
     timed_text_associations, timed_text_alignment_failures = _timed_text_associations(
         materials_root,
         episodes,
@@ -50,6 +72,7 @@ def extend_episode_plans(materials_root: Path, episodes: list[EpisodePlan]) -> l
             materials_root,
             episode,
             timed_text_associations.get((episode.season_id, episode.episode_id), []),
+            preprocessing_index=source_metadata_index,
         )
         for episode in episodes
     ]
@@ -57,17 +80,30 @@ def extend_episode_plans(materials_root: Path, episodes: list[EpisodePlan]) -> l
         materials_root,
         [path for path in material_paths if path not in associated_paths],
         timed_text_alignment_failures=timed_text_alignment_failures,
+        preprocessing_index=source_metadata_index,
     )
     return [*video_episodes, *standalone_episodes]
 
 
-def _supported_non_video_material_paths(materials_root: Path) -> list[Path]:
+def _supported_non_video_material_paths(
+    materials_root: Path,
+    preprocessing_index: dict[str, dict[str, object]],
+) -> list[Path]:
     if not materials_root.exists():
         return []
     paths: list[Path] = []
     for path in materials_root.rglob("*"):
         media_type = source_media_type(path)
-        if path.is_file() and media_type is not None and media_type != MediaType.VIDEO.value:
+        if (
+            path.is_file()
+            and media_type is not None
+            and media_type != MediaType.VIDEO.value
+            and material_path_is_active_preprocessed_output(
+                materials_root,
+                path,
+                preprocessing_index,
+            )
+        ):
             paths.append(path)
     return sorted(paths, key=lambda path: _natural_sort_key(_relative_material_path(materials_root, path)))
 
@@ -113,6 +149,8 @@ def _attach_timed_text_units(
     materials_root: Path,
     episode: EpisodePlan,
     candidates: list[tuple[Path, dict[str, Any]]],
+    *,
+    preprocessing_index: dict[str, dict[str, object]],
 ) -> EpisodePlan:
     candidates = sorted(
         candidates,
@@ -133,6 +171,7 @@ def _attach_timed_text_units(
                 "associated_video_episode": True,
                 "timed_text_association": association_metadata,
             },
+            preprocessing_index=preprocessing_index,
         )
         for path, association_metadata in candidates
     ]
@@ -221,11 +260,17 @@ def _standalone_material_episodes(
     material_paths: list[Path],
     *,
     timed_text_alignment_failures: dict[Path, dict[str, Any]] | None = None,
+    preprocessing_index: dict[str, dict[str, object]],
 ) -> list[EpisodePlan]:
     image_paths = [path for path in material_paths if path.suffix.lower() in IMAGE_SUFFIXES]
     other_paths = [path for path in material_paths if path not in image_paths]
     episodes = [
-        _image_collection_episode(materials_root, parent, paths)
+        _image_collection_episode(
+            materials_root,
+            parent,
+            paths,
+            preprocessing_index=preprocessing_index,
+        )
         for parent, paths in _group_paths_by_parent(image_paths)
     ]
     alignment_failures = timed_text_alignment_failures or {}
@@ -234,6 +279,7 @@ def _standalone_material_episodes(
             materials_root,
             path,
             timed_text_alignment_failure=alignment_failures.get(path),
+            preprocessing_index=preprocessing_index,
         )
         for path in other_paths
     )
@@ -257,6 +303,8 @@ def _image_collection_episode(
     materials_root: Path,
     parent: Path,
     paths: list[Path],
+    *,
+    preprocessing_index: dict[str, dict[str, object]],
 ) -> EpisodePlan:
     relative_parent = _relative_material_path(materials_root, parent)
     episode_id = _stable_episode_id(MediaType.IMAGE, relative_parent or ".")
@@ -288,6 +336,7 @@ def _image_collection_episode(
                 "page_sort_key": _natural_sort_key_for_metadata(path.name),
                 "supported_page_count": supported_page_count,
             },
+            preprocessing_index=preprocessing_index,
         )
         for index, path in enumerate(paths, start=1)
     ]
@@ -325,10 +374,18 @@ def _single_material_episode(
     path: Path,
     *,
     timed_text_alignment_failure: dict[str, Any] | None = None,
+    preprocessing_index: dict[str, dict[str, object]],
 ) -> EpisodePlan:
     media_type = _material_media_type(path)
-    content_form = _material_content_form(path, media_type)
     relative_path = _relative_material_path(materials_root, path)
+    preprocessing_metadata = preprocessing_index.get(relative_path, {})
+    content_form = _material_content_form(
+        path,
+        media_type,
+        preprocessed_hint=_string(
+            preprocessing_metadata.get("preprocessed_content_form_hint")
+        ),
+    )
     episode_id = _stable_episode_id(media_type, relative_path)
     unit = _material_unit(
         materials_root,
@@ -338,6 +395,7 @@ def _single_material_episode(
         content_form=content_form,
         unit_kind=_material_unit_kind(path, media_type),
         metadata=_standalone_material_metadata(timed_text_alignment_failure),
+        preprocessing_index=preprocessing_index,
     )
     collection_profile = classify_source_collection([path])
     return EpisodePlan(
@@ -378,11 +436,22 @@ def _material_unit(
     unit_kind: str,
     page_number: int | None = None,
     metadata: dict[str, Any] | None = None,
+    preprocessing_index: dict[str, dict[str, object]],
 ) -> ExtractionUnit:
     media_type = _material_media_type(path)
     relative_path = _relative_material_path(materials_root, path)
     support = source_support_profile(path)
+    preprocessing_metadata = preprocessing_index.get(relative_path, {})
+    preprocessed_page_number = preprocessing_metadata.get("page_number")
+    effective_page_number = page_number
+    if (
+        effective_page_number is None
+        and isinstance(preprocessed_page_number, int)
+        and not isinstance(preprocessed_page_number, bool)
+    ):
+        effective_page_number = preprocessed_page_number
     unit_metadata = {
+        **preprocessing_metadata,
         "display_title": path.name,
         "sort_key": relative_path.lower(),
         "support_reason": support.reason,
@@ -399,11 +468,15 @@ def _material_unit(
         content_form=content_form,
         origin=MaterialOrigin.MATERIAL,
         page_range=(
-            PageRange(start_page=page_number, end_page=page_number)
-            if page_number is not None
+            PageRange(
+                start_page=effective_page_number,
+                end_page=effective_page_number,
+            )
+            if effective_page_number is not None
             else None
         ),
         text_range=TextRange(chapter=path.stem) if media_type == MediaType.TEXT else None,
+        fingerprint=_string(preprocessing_metadata.get("preprocessed_fingerprint")),
         metadata=unit_metadata,
     )
     handler_options: dict[str, Any] = {
@@ -439,7 +512,15 @@ def _material_media_type(path: Path) -> MediaType:
     return MediaType(media_type)
 
 
-def _material_content_form(path: Path, media_type: MediaType) -> ContentForm:
+def _material_content_form(
+    path: Path,
+    media_type: MediaType,
+    *,
+    preprocessed_hint: str = "",
+) -> ContentForm:
+    controlled_hint = PREPROCESSED_TEXT_CONTENT_FORMS.get(preprocessed_hint)
+    if controlled_hint is not None and media_type == MediaType.TEXT:
+        return controlled_hint
     if media_type == MediaType.AUDIO:
         return ContentForm.AUDIO_DRAMA
     if media_type == MediaType.IMAGE:

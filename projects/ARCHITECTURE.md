@@ -19,7 +19,9 @@
 - `{project_id}/config.json`：项目配置，包含目标角色、提取模式、素材路径、素材处理配置和已清理 raw 标记等。
 - `{project_id}/raw/`：导入后的原始素材副本，用于后续重新处理。
 - `{project_id}/materials/`：当前处理管线实际读取的素材。使用原素材方案时通常指向 `raw/` 中的同名素材。
+- `{project_id}/materials/derived_inputs/{raw_relative_path}/`：容器预处理的派生素材根目录，完整镜像源文件在 `raw/` 下的相对路径（包含容器文件名），用于隔离同名容器，例如 `groupA/book.zip/` 与 `groupB/book.zip/`。
 - `{project_id}/cache/`：切片、预览和临时处理文件。
+- `{project_id}/cache/material_preprocessing/manifests/{raw_relative_parent}/{source_name}.json`：容器预处理 manifest v1；记录源、派生 entry、大小、SHA256 fingerprint、warning 和失败项，不进入素材扫描。
 - `{project_id}/knowledge_base/facts.json`：早期/兼容用客观事实记录。
 - `{project_id}/knowledge_base/targeted_insights.json`：早期/兼容用定向洞察记录。
 - `{project_id}/knowledge_base/extraction_runs/{run_id}/plan.json`：正式提取 run plan，记录本次运行的素材引用、unit、媒体类型和派生成果索引入口。
@@ -49,6 +51,7 @@
 
 - 项目目录结构应由 `utils.paths.ensure_project_tree()` 统一创建。
 - `raw/` 保存可重新处理的源副本；`materials/` 保存当前可被提取流程消费的素材入口。
+- 派生路径由 raw 相对路径稳定寻址；`source_hash` 用于判断源内容是否变化，不参与目录命名。复用或 raw 清理前必须同时核对 manifest、派生文件大小和 SHA256 fingerprint。
 - 清理 `raw/` 前必须确保 `materials/` 中已有可用素材，并在 `config.json` 中记录已清理路径。
 - 用户素材、缓存、知识库和输出结果默认不应进入版本控制。
 - 写入 JSON 时保持 UTF-8 和结构化格式。

@@ -13,6 +13,10 @@ from core.extraction_plan import (
     MediaType,
 )
 from core.material_unit_scanner import extend_episode_plans
+from utils.material_preprocessing import (
+    material_path_is_active_preprocessed_output,
+    preprocessing_material_metadata_index,
+)
 from utils.media_types import VIDEO_SUFFIXES
 from utils.paths import ensure_project_tree
 
@@ -72,6 +76,8 @@ def scan_source_directory(source_root: str) -> dict[str, Any]:
 
 
 def scan_formal_materials(project_id: str) -> list[EpisodePlan]:
+    materials_root = ensure_project_tree(project_id).materials
+    preprocessing_index = preprocessing_material_metadata_index(materials_root)
     video_scan = _scan_formal_video_materials(project_id)
     episodes: list[EpisodePlan] = []
     for season in video_scan.get("seasons", []):
@@ -83,12 +89,19 @@ def scan_formal_materials(project_id: str) -> list[EpisodePlan]:
         for episode in season.get("episodes", []):
             if not isinstance(episode, dict):
                 continue
-            episode_plan = _video_episode_plan_from_scan(season, episode)
+            episode_plan = _video_episode_plan_from_scan(
+                season,
+                episode,
+                preprocessing_index=preprocessing_index,
+            )
             if episode_plan.units:
                 episodes.append(episode_plan)
 
-    materials_root = ensure_project_tree(project_id).materials
-    return extend_episode_plans(materials_root, episodes)
+    return extend_episode_plans(
+        materials_root,
+        episodes,
+        preprocessing_index=preprocessing_index,
+    )
 
 
 def _scan_formal_video_materials(project_id: str) -> dict[str, Any]:
@@ -131,7 +144,12 @@ def _scan_formal_video_materials(project_id: str) -> dict[str, Any]:
     }
 
 
-def _video_episode_plan_from_scan(season: dict[str, Any], episode: dict[str, Any]) -> EpisodePlan:
+def _video_episode_plan_from_scan(
+    season: dict[str, Any],
+    episode: dict[str, Any],
+    *,
+    preprocessing_index: dict[str, dict[str, object]],
+) -> EpisodePlan:
     season_id = _manifest_string(season.get("season_id"))
     episode_id = _manifest_string(episode.get("episode_id"))
     units: list[ExtractionUnit] = []
@@ -142,6 +160,9 @@ def _video_episode_plan_from_scan(season: dict[str, Any], episode: dict[str, Any
         source_path = _manifest_string(chunk.get("source_path"))
         if not chunk_id or not source_path:
             continue
+        if source_path.startswith("derived_inputs/") and source_path not in preprocessing_index:
+            continue
+        preprocessing_metadata = preprocessing_index.get(source_path, {})
 
         material_ref = MaterialRef(
             material_id=_stable_material_id(MediaType.VIDEO, source_path),
@@ -149,7 +170,11 @@ def _video_episode_plan_from_scan(season: dict[str, Any], episode: dict[str, Any
             source_media_type=MediaType.VIDEO,
             content_form=ContentForm.UNKNOWN,
             origin=MaterialOrigin.MATERIAL,
+            fingerprint=_manifest_string(
+                preprocessing_metadata.get("preprocessed_fingerprint")
+            ),
             metadata={
+                **preprocessing_metadata,
                 "display_title": _manifest_string(chunk.get("display_title")),
                 "sort_key": _manifest_string(chunk.get("sort_key")),
                 "legacy_chunk_id": chunk_id,
@@ -199,11 +224,18 @@ def collect_preview_video_chunks(project_id: str, *, limit: int) -> list[Path]:
     materials_root = ensure_project_tree(project_id).materials
     if not materials_root.exists():
         return []
+    preprocessing_index = preprocessing_material_metadata_index(materials_root)
     return sorted(
         [
             path
             for path in materials_root.rglob("*")
-            if path.is_file() and path.suffix.lower() in VIDEO_SUFFIXES
+            if path.is_file()
+            and path.suffix.lower() in VIDEO_SUFFIXES
+            and material_path_is_active_preprocessed_output(
+                materials_root,
+                path,
+                preprocessing_index,
+            )
         ],
         key=lambda path: path.relative_to(materials_root).as_posix().lower(),
     )[:limit]

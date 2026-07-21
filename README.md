@@ -18,8 +18,8 @@ CharaPicker（拾卡姬）是一个面向二次元素材分析的桌面工具，
 
 ## 当前状态
 
-- 当前版本：`v0.7.0-beta`（开发中）
-- 文档更新时间：`2026-06-05`
+- 当前版本：`v0.8.0-beta`（开发中）
+- 文档更新时间：`2026-07-21`
 
 ## 已实现内容
 
@@ -27,6 +27,8 @@ CharaPicker（拾卡姬）是一个面向二次元素材分析的桌面工具，
 - 主界面骨架：项目页、角色卡页、模型页、提示词页、设置页、关于页。
 - 项目配置管理：项目配置保存/读取、最近项目列表。
 - 素材处理链路：导入 `raw/`、链接/处理到 `materials/`，支持 FFmpeg 分段与转码配置。
+- 多内容形态提取：视频、图片、音频与文本统一进入 run plan、预览/正式分派、知识库聚合和来源追踪。
+- 输入预处理：支持 ZIP、CBZ、EPUB、文本型 PDF、7z、RAR 与 CBR，派生为既有文本或图片素材后再进入提取链路。
 - 洞察流界面：InsightStreamPanel 卡片时间线展示与流式更新。
 - 云端模型接入：通过统一中间件发起 OpenAI-compatible 请求并记录 token usage。
 - 预览链路打通：`project -> extractor -> insight stream -> preview knowledge base`。
@@ -34,13 +36,13 @@ CharaPicker（拾卡姬）是一个面向二次元素材分析的桌面工具，
 
 ## 项目进展
 
-- 已完成：可运行的 UI 骨架与预览主流程。
+- 已完成：可运行的 UI、四媒体类型提取基础链路、角色卡生命周期和七种复杂输入格式的受控预处理。
 - 进行中：从真实素材生成更高质量、可复用的结构化洞察。
-- 下一阶段重点：先稳住正式提取质量与可观测性，再做多素材前解耦，最后推进文本、音频、图片、漫画等多素材支持。
+- 下一阶段重点：继续提升真实素材提取质量、知识库质量、角色卡冲突消解与质量评估。
 
 ## 未完成项
 
-- 真实素材预览已开始接入 `materials/` 中的视频 chunk 和云端模型，但文本、字幕、漫画/图片等完整真实素材消费链路仍在完善。
+- 多内容形态已进入统一预览和正式提取基础链路，但真实素材质量、跨内容关联和失败反馈仍需持续验收。
 - 角色卡编译已能从正式知识库生成 CharaPicker JSON，并具备分层证据、别名重分类、质量诊断和未出场角色失败保护。
 - 知识库文件（如 `facts.json`、`targeted_insights.json`）尚未形成稳定自动写入闭环。
 
@@ -51,6 +53,17 @@ CharaPicker（拾卡姬）是一个面向二次元素材分析的桌面工具，
   - `PyQt6>=6.6`
   - `PyQt6-Fluent-Widgets>=1.5`
   - `pydantic>=2.6`
+  - `pypdf>=6.14.2,<7`
+
+## 支持的输入
+
+- 直接素材：常见视频、静态图片、音频、TXT/Markdown/JSON、SRT/ASS 等格式。
+- 受控预处理：`.zip`、`.cbz`、`.epub`、`.pdf`、`.7z`、`.rar`、`.cbr`。
+- PDF 首版只提取已有文本，不执行 OCR；加密 PDF、DRM EPUB 和密码归档会被明确拒绝。
+- 7z/RAR/CBR 需要本地 7-Zip。应用依次查找 `bin/7zip/7z.exe`、`bin/7z.exe`、`PATH`、Windows 标准安装目录，也可通过 `CHARAPICKER_7ZIP_PATH` 指定；应用不自动下载该工具。
+- 嵌套容器不会递归展开，只记录 warning；原容器保留在 `raw/`，派生素材和来源映射分别进入 `materials/derived_inputs/` 与预处理 manifest。
+- 通用 ZIP/7z/RAR 内的视频不会被展开；视频必须作为独立素材显式导入。CBZ/CBR 继续只接纳漫画图片页。
+- 非原始处理方案只在选中了直接视频时需要 FFmpeg。缺少 FFmpeg 时可取消、忽略全部视频并继续处理其它素材，或下载 FFmpeg 后自动执行。
 
 ## 安装
 
@@ -72,8 +85,8 @@ build.bat
 
 - 产物输出到 `release/` 目录。
 - 常用参数示例：
-  - `build.bat --tag=v0.7.0-beta`
-  - `build.bat --version=0.7.0 --stage=beta`
+  - `build.bat --tag=v0.8.0-beta`
+  - `build.bat --version=0.8.0 --stage=beta`
   - `build.bat --local`
 
 ## 功能概览

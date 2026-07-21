@@ -20,8 +20,8 @@
 - `extraction_plan.py`：定义新正式提取 run plan 词汇与 Pydantic 模型，包括 `MediaType`、`ContentForm`、`MaterialRef`、`ExtractionUnit`、`EpisodePlan`、`FormalExtractionRunPlan`、`DerivedArtifact`、`EvidenceRef` 和 `SourceTrace`；不依赖 GUI，也不复用旧 `ExtractionRunPlan` 语义。
 - `character_card_constants.py`：集中保存角色卡固定文件名、预览卡保留 ID 和 stale warning reason 等跨模块共享常量。
 - `knowledge_base.py`：集中管理 `projects/{project_id}/knowledge_base/` 下常用产物的路径、JSON 读写和结构校验。
-- `source_scanner.py`：保留旧视频目录扫描、正式扫描入口、预览视频 chunk 收集和预览 chunk 标识生成，并把非视频 unit 扩展委托给 `material_unit_scanner.py`。
-- `material_unit_scanner.py`：把文本、字幕、音频、图片和 GIF 映射为正式 run plan unit，负责唯一字幕关联与失败 warning、漫画/图集页组自然排序、稳定 ID、页码/章节 metadata 和不支持状态；不执行解析或模型提取。
+- `source_scanner.py`：保留旧视频目录扫描、正式扫描入口、预览视频 chunk 收集和预览 chunk 标识生成；正式扫描一次性加载预处理来源索引，把非视频 unit 扩展委托给 `material_unit_scanner.py`。
+- `material_unit_scanner.py`：把文本、字幕、音频、图片和 GIF 映射为正式 run plan unit，负责唯一字幕关联与失败 warning、漫画/图集页组自然排序、稳定 ID、页码/章节 metadata、受控预处理 content-form/page hint、不支持状态和来源 metadata 回填；只扫描 `materials/`，不扫描 cache、解析容器或执行模型提取。
 - `preview_sampling.py`：从 `FormalExtractionRunPlan` 构建通用预览候选，按字幕/现成 transcript、普通文本、图片、需转写音频、视频的成本顺序稳定排序；负责生成单 unit 的隔离执行计划，不执行模型调用或知识库写入。
 - `formal_dispatch.py`：从 `FormalExtractionRunPlan` 构建正式提取分发表，首批覆盖 `video`、`text`、`image`、`audio -> transcript` 和补充型 `native_media` 视听线索机会；在提供当前模型 handler 时，会在分派前过滤模型级 native media 不支持状态，并把 VTT/LRC、BMP/GIF、模型不支持图片/音频等情况整理为可解释 unsupported unit；不执行模型调用或聚合。
 - `timed_text_parser.py`：使用标准库解析首批支持的 `.srt` 和 `.ass`，保留开始/结束时间、源行号、原始文本和 ASS 显式 speaker；不推断未知说话人，不把字幕当成 transcript 派生成果。

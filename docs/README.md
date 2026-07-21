@@ -1,6 +1,6 @@
 # CharaPicker 文档索引
 
-最近整理日期：2026-06-23。
+最近整理日期：2026-07-20。
 
 `docs/` 是 CharaPicker 的正式专题文档目录。根目录 `README.md` 负责项目首页说明；根目录和各主要代码目录中的 `ARCHITECTURE.md` 负责就近说明目录职责。已完成的一次性开发计划默认移入 `archive/`，稳定说明放入 `reference/`，仍有效路线和当前后续队列放入 `plans/`。
 
@@ -20,7 +20,7 @@
 
 ## 剩余项目队列
 
-路线 01 提取质量基线、路线 02 plan-first 重构、路线 03 多内容形态覆盖与真实验收已经完成并归档。当前执行入口只保留仍需跟踪的 TODO 和长期路线基准；实施前仍必须重新核对当前代码和相关架构文档。
+路线 01 提取质量基线、路线 02 plan-first 重构、路线 03 多内容形态覆盖与真实验收，以及更多输入格式专项计划已经完成并归档。当前执行入口只保留仍需跟踪的 TODO 和长期路线基准；实施前仍必须重新核对当前代码和相关架构文档。
 
 1. [当前计划与任务队列分组](plans/README.md)：仍需执行或持续跟踪的计划类文档入口。
 2. [TODO List](plans/TODO.zh_CN.md)：当前剩余任务总表，已移出完成的历史项目。
@@ -52,6 +52,7 @@
 - [多媒体平级接入前重构解耦执行计划完成记录](archive/02-multi-material-refactor-plan.completed.zh_CN.md)
 - [番剧、漫画、广播剧、小说等内容形态支持执行计划完成记录](archive/03-multi-material-coverage-plan.completed.zh_CN.md)
 - [真实预览结果后续计划完成记录](archive/preview-real-result-followup-plan.completed.zh_CN.md)
+- [更多输入格式支持执行计划完成记录](archive/input-format-support-plan.completed.zh_CN.md)
 
 ## 目录说明
 

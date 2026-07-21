@@ -14,8 +14,8 @@ CharaPicker is a desktop tool that extracts character-focused information from a
 
 ## Current Status
 
-- Version: `v0.7.0-beta` (in development)
-- Document updated: `2026-06-05`
+- Version: `v0.8.0-beta` (in development)
+- Document updated: `2026-07-21`
 
 ## Implemented
 
@@ -23,6 +23,8 @@ CharaPicker is a desktop tool that extracts character-focused information from a
 - Main UI skeleton: project, character cards, model, prompt, settings, and about pages.
 - Project config management: save/load and recent project listing.
 - Material processing flow: import into `raw/`, link/process into `materials/`, FFmpeg split/transcode options.
+- Multi-material extraction: video, image, audio, and text share the run-plan, preview/formal dispatch, knowledge-base aggregation, and source-trace foundations.
+- Input preprocessing: ZIP, CBZ, EPUB, text-based PDF, 7z, RAR, and CBR are converted into existing text or image material flows.
 - Insight UI: InsightStreamPanel card timeline with streaming updates.
 - Cloud model integration: unified OpenAI-compatible middleware with token usage logging.
 - Preview pipeline connected: `project -> extractor -> insight stream -> preview knowledge base`.
@@ -30,19 +32,28 @@ CharaPicker is a desktop tool that extracts character-focused information from a
 
 ## Progress
 
-- Done: runnable UI skeleton and preview main path.
+- Done: runnable UI, four-media extraction foundations, character-card lifecycle, and controlled preprocessing for seven complex input formats.
 - In progress: generating higher-quality reusable structured insights from real materials.
-- Next focus: stabilize formal extraction quality and observability, then decouple the multi-material architecture before adding text, audio, image, manga, and mixed-media support.
+- Next focus: improve real-material extraction quality, knowledge-base quality, character-card conflict resolution, and quality evaluation.
 
 ## Not Yet Implemented
 
-- Real-material preview has started using video chunks from `materials/` and cloud models, while text, subtitles, manga/image, and other complete real-material consumption paths are still being improved.
+- Multi-material content now enters the common preview and formal-extraction foundations, while real-material quality, cross-content association, and failure feedback still need continued validation.
 - Character card compilation can generate CharaPicker JSON from the formal knowledge base, with layered evidence, alias reclassification, quality diagnostics, and protection against compiling characters with no direct evidence.
 - Stable automatic write-back loop to `facts.json` and `targeted_insights.json` is not complete.
 
 ## Requirements
 
 - Python `>=3.10`
+- `pypdf>=6.14.2,<7` for text-based PDF preprocessing
+
+## Supported Inputs
+
+- Direct materials: common video, static image, audio, TXT/Markdown/JSON, SRT/ASS, and related formats.
+- Controlled preprocessing: `.zip`, `.cbz`, `.epub`, `.pdf`, `.7z`, `.rar`, and `.cbr`.
+- The first PDF implementation extracts existing text only and does not run OCR. Encrypted PDFs, DRM EPUB files, and password-protected archives are rejected explicitly.
+- 7z/RAR/CBR require a local 7-Zip installation. CharaPicker checks project-local `bin/` locations, `PATH`, standard Windows install locations, and `CHARAPICKER_7ZIP_PATH`; it does not download 7-Zip.
+- Nested containers are not expanded recursively. Original containers remain in `raw/`; derived materials and source mappings are stored under `materials/derived_inputs/` and preprocessing manifests.
 
 ## Install
 

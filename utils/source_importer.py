@@ -7,7 +7,17 @@ from collections.abc import Callable
 from pathlib import Path
 
 from utils.material_processing_events import SOURCE_PROCESSING_CANCELLED_MESSAGE
-from utils.media_types import is_import_supported_source
+from utils.material_preprocessing import (
+    current_preprocessing_manifest_for_raw,
+    remove_preprocessing_artifacts_for_raw,
+    remove_stale_preprocessing_artifacts,
+    source_content_hash,
+)
+from utils.media_types import (
+    input_format_profile,
+    is_import_supported_source,
+    is_project_input_supported_source,
+)
 from utils.paths import ensure_project_tree, project_paths
 
 LOGGER = logging.getLogger(__name__)
@@ -26,7 +36,8 @@ def import_sources_to_raw(
     progress: ProgressCallback | None = None,
     cancelled: CancelledCallback | None = None,
 ) -> list[Path]:
-    raw_root = ensure_project_tree(project_id).raw
+    paths = ensure_project_tree(project_id)
+    raw_root = paths.raw
     imported_paths: list[Path] = []
     existing_targets = set(_iter_existing_sources(raw_root))
     external_sources = _expand_source_paths(source_paths)
@@ -39,6 +50,21 @@ def import_sources_to_raw(
         target = raw_root / source.relative_target
         if _copy_source_file(source.path, target, cancelled=cancelled):
             imported_paths.append(target)
+            if input_format_profile(target) is not None:
+                try:
+                    source_hash = source_content_hash(target)
+                    remove_stale_preprocessing_artifacts(
+                        raw_root=raw_root,
+                        materials_root=paths.materials,
+                        cache_root=paths.cache,
+                        raw_source=target,
+                        keep_source_hash=source_hash,
+                    )
+                except OSError:
+                    LOGGER.warning(
+                        "Imported container stale artifact cleanup failed; name=%s",
+                        _path_log_name(target),
+                    )
         elif target.exists() and target in existing_targets:
             imported_paths.append(target)
         if progress is not None:
@@ -53,13 +79,31 @@ def source_raw_targets(project_id: str, source_paths: list[str]) -> list[Path]:
 
 def source_raw_target_pairs(project_id: str, source_paths: list[str]) -> list[tuple[Path, Path]]:
     raw_root = project_paths(project_id).raw
-    return [(source.path, raw_root / source.relative_target) for source in _expand_source_paths(source_paths)]
+    pairs: list[tuple[Path, Path]] = []
+    for source_path in source_paths:
+        source = Path(source_path).expanduser()
+        if not source.exists():
+            if is_project_input_supported_source(source):
+                pairs.append((source, raw_root / source.name))
+            continue
+        expanded = _expand_source_paths([source_path])
+        if expanded:
+            pairs.extend(
+                (target.path, raw_root / target.relative_target) for target in expanded
+            )
+    return pairs
 
 
 def remove_project_sources(project_id: str, source_paths: list[str]) -> int:
     paths = project_paths(project_id)
     removed_count = 0
     for raw_target in source_raw_targets(project_id, source_paths):
+        remove_preprocessing_artifacts_for_raw(
+            raw_root=paths.raw,
+            materials_root=paths.materials,
+            cache_root=paths.cache,
+            raw_source=raw_target,
+        )
         if _remove_path(raw_target):
             removed_count += 1
         material_target = _material_target_for_raw(paths.raw, paths.materials, raw_target)
@@ -84,6 +128,12 @@ def remove_raw_sources(project_id: str, raw_sources: list[Path]) -> int:
             continue
         raw_path = paths.raw / raw_target
         material_path = paths.materials / raw_target
+        remove_preprocessing_artifacts_for_raw(
+            raw_root=paths.raw,
+            materials_root=paths.materials,
+            cache_root=paths.cache,
+            raw_source=raw_path,
+        )
         if _remove_path(raw_path):
             removed_count += 1
         _remove_path(material_path)
@@ -106,11 +156,21 @@ def clean_raw_sources(project_id: str, raw_sources: list[Path]) -> list[str]:
             )
             continue
 
-        material_path = paths.materials / relative_path
         if not raw_source.exists():
             continue
-        if not _materialize_source(raw_source, material_path):
-            continue
+        if input_format_profile(raw_source) is not None:
+            manifest = current_preprocessing_manifest_for_raw(
+                raw_root=paths.raw,
+                materials_root=paths.materials,
+                cache_root=paths.cache,
+                raw_source=raw_source,
+            )
+            if manifest is None:
+                continue
+        else:
+            material_path = paths.materials / relative_path
+            if not _materialize_source(raw_source, material_path):
+                continue
         if _remove_path(raw_source):
             cleaned_paths.append(relative_path.as_posix())
             _remove_empty_parents(raw_source.parent, paths.raw)
@@ -130,7 +190,11 @@ def link_raw_sources_to_materials(
     paths = ensure_project_tree(project_id)
     raw_root = paths.raw
     materials_root = paths.materials
-    sources = raw_sources or _iter_existing_sources(raw_root)
+    sources = [
+        source
+        for source in (raw_sources or _iter_existing_sources(raw_root))
+        if is_import_supported_source(source)
+    ]
     total = len(sources)
     if progress is not None:
         progress(0, total, "")
@@ -187,7 +251,7 @@ def _iter_existing_sources(root: Path) -> list[Path]:
         [
             path
             for path in root.rglob("*")
-            if path.is_file() and is_import_supported_source(path)
+            if path.is_file() and is_project_input_supported_source(path)
         ],
         key=lambda path: path.relative_to(root).as_posix().lower(),
     )
@@ -250,17 +314,21 @@ def _copy_source_file(source: Path, target: Path, cancelled: CancelledCallback |
 
 
 def _copy_file_interruptible(source: Path, target: Path, cancelled: CancelledCallback | None = None) -> None:
-    with source.open("rb") as source_file, target.open("wb") as target_file:
-        while True:
-            if cancelled is not None and cancelled():
-                target_file.close()
-                target.unlink(missing_ok=True)
-                raise RuntimeError(SOURCE_PROCESSING_CANCELLED_MESSAGE)
-            chunk = source_file.read(COPY_BUFFER_SIZE)
-            if not chunk:
-                break
-            target_file.write(chunk)
-    shutil.copystat(source, target)
+    temporary_target = target.with_name(f".{target.name}.importing")
+    temporary_target.unlink(missing_ok=True)
+    try:
+        with source.open("rb") as source_file, temporary_target.open("xb") as target_file:
+            while True:
+                if cancelled is not None and cancelled():
+                    raise RuntimeError(SOURCE_PROCESSING_CANCELLED_MESSAGE)
+                chunk = source_file.read(COPY_BUFFER_SIZE)
+                if not chunk:
+                    break
+                target_file.write(chunk)
+        shutil.copystat(source, temporary_target)
+        os.replace(temporary_target, target)
+    finally:
+        temporary_target.unlink(missing_ok=True)
 
 
 def _ensure_symlink(source: Path, target: Path) -> bool:
@@ -353,4 +421,4 @@ def _remove_empty_parents(start: Path, stop: Path) -> None:
 
 
 def _is_supported_source(path: Path) -> bool:
-    return is_import_supported_source(path)
+    return is_project_input_supported_source(path)

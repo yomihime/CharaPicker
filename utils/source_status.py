@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.models import ProjectConfig
-from utils.media_types import is_import_supported_source
+from core.models import ProjectConfig, ProjectPaths
+from utils.material_preprocessing import (
+    complete_preprocessing_manifest_for_raw,
+    current_preprocessing_manifest_for_raw,
+)
+from utils.media_types import input_format_profile, is_project_input_supported_source
 from utils.paths import project_paths
 from utils.source_importer import (
     source_raw_target_pairs,
@@ -34,6 +38,19 @@ def source_status(config: ProjectConfig, source_path: str, source_kind: str) -> 
     paths = project_paths(config.project_id)
     if source_kind == SOURCE_KIND_PROJECT:
         raw_source = Path(source_path)
+        if input_format_profile(raw_source) is not None:
+            return (
+                SOURCE_STATUS_PROCESSED
+                if current_preprocessing_manifest_for_raw(
+                    raw_root=paths.raw,
+                    materials_root=paths.materials,
+                    cache_root=paths.cache,
+                    raw_source=raw_source,
+                    verify_fingerprints=False,
+                )
+                is not None
+                else SOURCE_STATUS_STALE
+            )
         material_target = material_target_for_raw(paths.raw, paths.materials, raw_source)
         return (
             SOURCE_STATUS_PROCESSED
@@ -48,11 +65,9 @@ def source_status(config: ProjectConfig, source_path: str, source_kind: str) -> 
     if not raw_targets:
         return SOURCE_STATUS_NEW
     if all(raw_relative_path(paths.raw, raw_target) in cleaned_paths for raw_target in raw_targets):
-        material_targets = [
-            material_target_for_raw(paths.raw, paths.materials, raw_target)
-            for raw_target in raw_targets
-        ]
-        if material_targets and all(material_target.exists() for material_target in material_targets):
+        if raw_targets and all(
+            _cleaned_source_has_material(paths, raw_target) for raw_target in raw_targets
+        ):
             return SOURCE_STATUS_RAW_CLEANED
     existing_raw_targets = [raw_target for raw_target in raw_targets if raw_target.exists()]
     if not existing_raw_targets:
@@ -61,14 +76,7 @@ def source_status(config: ProjectConfig, source_path: str, source_kind: str) -> 
         return SOURCE_STATUS_STALE
     if external_source_is_newer(source, raw_pairs):
         return SOURCE_STATUS_STALE
-    material_targets = [
-        material_target_for_raw(paths.raw, paths.materials, raw_target)
-        for raw_target in existing_raw_targets
-    ]
-    if material_targets and all(
-        material_target.exists() or material_target.is_symlink()
-        for material_target in material_targets
-    ):
+    if all(_raw_source_is_processed(paths, raw_target) for raw_target in existing_raw_targets):
         return SOURCE_STATUS_PROCESSED
     return SOURCE_STATUS_STALE
 
@@ -80,7 +88,7 @@ def project_source_paths(project_id: str) -> list[Path]:
     paths = [
         path
         for path in raw_root.rglob("*")
-        if path.is_file() and is_import_supported_source(path)
+        if path.is_file() and is_project_input_supported_source(path)
     ]
     return sorted(paths, key=lambda path: path.relative_to(raw_root).as_posix().lower())
 
@@ -127,3 +135,34 @@ def external_source_is_newer(source: Path, raw_pairs: list[tuple[Path, Path]]) -
     except OSError:
         return False
     return False
+
+
+def _raw_source_is_processed(paths: ProjectPaths, raw_source: Path) -> bool:
+    if input_format_profile(raw_source) is not None:
+        return (
+            current_preprocessing_manifest_for_raw(
+                raw_root=paths.raw,
+                materials_root=paths.materials,
+                cache_root=paths.cache,
+                raw_source=raw_source,
+                verify_fingerprints=False,
+            )
+            is not None
+        )
+    material_target = material_target_for_raw(paths.raw, paths.materials, raw_source)
+    return material_target.exists() or material_target.is_symlink()
+
+
+def _cleaned_source_has_material(paths: ProjectPaths, raw_target: Path) -> bool:
+    if input_format_profile(raw_target) is not None:
+        return (
+            complete_preprocessing_manifest_for_raw(
+                raw_root=paths.raw,
+                materials_root=paths.materials,
+                cache_root=paths.cache,
+                raw_source=raw_target,
+                verify_fingerprints=False,
+            )
+            is not None
+        )
+    return material_target_for_raw(paths.raw, paths.materials, raw_target).exists()

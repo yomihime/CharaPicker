@@ -19,7 +19,7 @@
 - `main_window.py`：主窗口。创建页面、导航项、`Extractor`，并连接预览、保存配置、项目切换、主题和语言信号。
 - `insight_metadata.py`：无 Qt 依赖的洞察 metadata 显示映射，把 `media_type`、`content_form`、unit 和素材路径整理为本地化摘要；不判断提取能力或业务状态。
 - `splash_screen.py`：启动流程和启动界面；在加载阶段通过子线程执行启动预热中间件，并在预热完成后创建主窗口。
-- `pages/project_page.py`：项目配置页。负责项目选择、提取模式、素材路径和素材处理配置；启动异步素材导入；展示素材状态和洞察流；不再编辑目标角色。
+- `pages/project_page.py`：项目配置页。负责项目选择、提取模式、素材路径和素材处理配置；文件选择器只展示直接素材与已启用输入格式，异步整理结果汇总直接素材、容器派生材料、跳过视频和 warning。非原始方案包含直接视频但缺少 FFmpeg 时，页面提供取消、忽略全部视频继续、下载后自动执行三种选择；raw 清理前的派生文件完整 SHA256 校验在专用 worker 中执行，项目页状态刷新不做内容哈希；页面不解析容器，也不再编辑目标角色。
 - `pages/character_card_page.py`：角色卡页面。负责角色卡海报墙、搜索过滤、选择、新建、删除、元数据编辑、封面裁剪、预览、编译、预览草稿、导入和导出入口。
 - `pages/model_page.py`：模型设置和连通性测试页。管理本地 llama.cpp 可用性、云模型预设、模型列表拉取，以及文本/图片/视频模型测试。
 - `pages/model_test_helpers.py`：模型连通性测试页使用的纯 helper，负责 token 用量格式化、测试素材 data URL 和响应语言提示等逻辑。
@@ -58,6 +58,7 @@
 - Qt Signal 传输的数据尽量保持为可序列化 `dict`。
 - 角色卡页面不直接拼接 `knowledge_base/character_cards/...` 路径，不直接做导出字段映射，也不自行判断 direct/mention/causal 证据；这些规则属于 core。
 - 长耗时素材处理应放在线程 worker 中执行，页面只负责进度弹窗、取消信号和完成反馈。
+- 工具缺失对话框只选择运行策略；容器/直接素材分类、视频跳过和 FFmpeg 执行点复核必须留在 `utils.material_processing_middleware`。
 - 启动阶段的耗时预加载应放在线程 worker 中执行，启动页完成前不要提前进入主窗口。
 
 ## 弹窗中间件说明

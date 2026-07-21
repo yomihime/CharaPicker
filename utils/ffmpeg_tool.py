@@ -20,7 +20,7 @@ from utils.ffmpeg_detection import (
     pick_device as _pick_device,
 )
 from utils.material_processing_events import FFMPEG_EVENT_PREFIX, SOURCE_PROCESSING_CANCELLED_MESSAGE
-from utils.media_types import VIDEO_SUFFIXES
+from utils.media_types import VIDEO_SUFFIXES, is_import_supported_source
 from utils.paths import ensure_project_tree
 
 FFMPEG_CANDIDATES = ("ffmpeg.exe", "ffmpeg")
@@ -300,6 +300,8 @@ def process_raw_sources_with_ffmpeg(
     materials_root = paths.materials
     processing_items: list[tuple[Path, Path, bool]] = []
     for source in raw_sources:
+        if not is_import_supported_source(source):
+            continue
         try:
             relative_path = source.resolve().relative_to(raw_root.resolve())
         except ValueError:

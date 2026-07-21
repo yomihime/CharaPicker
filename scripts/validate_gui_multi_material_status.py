@@ -90,6 +90,35 @@ def _validate_project_page_boundary() -> None:
     assert not forbidden, f'project page imports extraction implementation: {forbidden}'
     assert 'self.extractionRequested.emit(' in source
 
+    classes = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef)
+    }
+    raw_cleanup_worker = classes['RawCleanupWorker']
+    project_page = classes['ProjectPage']
+    worker_run = next(
+        node
+        for node in raw_cleanup_worker.body
+        if isinstance(node, ast.FunctionDef) and node.name == 'run'
+    )
+    cleanup_trigger = next(
+        node
+        for node in project_page.body
+        if isinstance(node, ast.FunctionDef) and node.name == '_clean_selected_raw_sources'
+    )
+    assert _calls_name(worker_run, 'clean_raw_sources')
+    assert not _calls_name(cleanup_trigger, 'clean_raw_sources')
+
+
+def _calls_name(node: ast.AST, name: str) -> bool:
+    return any(
+        isinstance(candidate, ast.Call)
+        and isinstance(candidate.func, ast.Name)
+        and candidate.func.id == name
+        for candidate in ast.walk(node)
+    )
+
 
 def main() -> None:
     _validate_metadata_mapping()
