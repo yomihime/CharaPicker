@@ -46,6 +46,7 @@ def source_status(config: ProjectConfig, source_path: str, source_kind: str) -> 
                     materials_root=paths.materials,
                     cache_root=paths.cache,
                     raw_source=raw_source,
+                    verify_fingerprints=False,
                 )
                 is not None
                 else SOURCE_STATUS_STALE
@@ -144,6 +145,7 @@ def _raw_source_is_processed(paths: ProjectPaths, raw_source: Path) -> bool:
                 materials_root=paths.materials,
                 cache_root=paths.cache,
                 raw_source=raw_source,
+                verify_fingerprints=False,
             )
             is not None
         )
@@ -159,6 +161,7 @@ def _cleaned_source_has_material(paths: ProjectPaths, raw_target: Path) -> bool:
                 materials_root=paths.materials,
                 cache_root=paths.cache,
                 raw_source=raw_target,
+                verify_fingerprints=False,
             )
             is not None
         )

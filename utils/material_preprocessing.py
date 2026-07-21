@@ -563,7 +563,9 @@ def preprocessing_manifest_is_complete(
     materials_root: Path,
     expected_source_hash: str = "",
     expected_source_raw_path: str = "",
+    verify_fingerprints: bool = True,
 ) -> bool:
+    """Validate manifest structure and files, optionally hashing derived content."""
     source_hash = _manifest_string(manifest.get("source_hash"))
     source_raw_path = _manifest_string(manifest.get("source_raw_path"))
     if not _SOURCE_HASH_PATTERN.fullmatch(source_hash):
@@ -599,7 +601,10 @@ def preprocessing_manifest_is_complete(
         try:
             if material_path.stat().st_size != size_bytes:
                 return False
-            if _file_sha256_fingerprint(material_path) != fingerprint:
+            if (
+                verify_fingerprints
+                and _file_sha256_fingerprint(material_path) != fingerprint
+            ):
                 return False
         except OSError:
             return False
@@ -612,6 +617,7 @@ def complete_preprocessing_manifest_for_raw(
     materials_root: Path,
     cache_root: Path,
     raw_source: Path,
+    verify_fingerprints: bool = True,
 ) -> dict[str, object] | None:
     source_reference = _raw_source_reference(raw_root, raw_source)
     if not source_reference:
@@ -621,6 +627,7 @@ def complete_preprocessing_manifest_for_raw(
             manifest,
             materials_root=materials_root,
             expected_source_raw_path=source_reference,
+            verify_fingerprints=verify_fingerprints,
         ):
             return manifest
     return None
@@ -632,6 +639,7 @@ def current_preprocessing_manifest_for_raw(
     materials_root: Path,
     cache_root: Path,
     raw_source: Path,
+    verify_fingerprints: bool = True,
 ) -> dict[str, object] | None:
     if not raw_source.is_file():
         return None
@@ -651,6 +659,7 @@ def current_preprocessing_manifest_for_raw(
             manifest,
             materials_root=materials_root,
             expected_source_raw_path=source_reference,
+            verify_fingerprints=verify_fingerprints,
         ):
             return manifest
     return None
@@ -672,22 +681,22 @@ def remove_preprocessing_artifacts_for_raw(
             removed += 1
         manifest_path.unlink(missing_ok=True)
 
-    if raw_source.is_file():
+    relative_parts = PurePosixPath(source_reference).parts[1:]
+    if not relative_parts:
+        return removed
+    fallback_output = materials_root.joinpath(
+        DERIVED_INPUTS_DIRECTORY_NAME,
+        *relative_parts,
+    )
+    if fallback_output.exists():
         try:
-            source_hash = source_content_hash(raw_source)
-            artifacts = preprocessing_artifact_paths(
-                raw_root=raw_root,
-                materials_root=materials_root,
-                cache_root=cache_root,
-                raw_source=raw_source,
-                source_hash=source_hash,
-            )
-            if artifacts.output_root.exists():
-                shutil.rmtree(artifacts.output_root)
-                removed += 1
-            artifacts.manifest_path.unlink(missing_ok=True)
-        except (OSError, ValueError):
+            shutil.rmtree(fallback_output)
+            removed += 1
+        except OSError:
             pass
+    fallback_manifest = _current_manifest_path_for_source(cache_root, source_reference)
+    if fallback_manifest is not None:
+        fallback_manifest.unlink(missing_ok=True)
     return removed
 
 
@@ -775,13 +784,38 @@ def _manifests_for_source(
     source_reference: str,
 ) -> list[tuple[Path, dict[str, object]]]:
     matches: list[tuple[Path, dict[str, object]]] = []
-    for manifest_path in _preprocessing_manifest_paths(cache_root):
+    current_path = _current_manifest_path_for_source(cache_root, source_reference)
+    directory = cache_root / PREPROCESSING_CACHE_DIRECTORY_NAME
+    candidate_paths = [current_path] if current_path is not None else []
+    if directory.is_dir():
+        candidate_paths.extend(directory.glob("*.json"))
+    for manifest_path in sorted({path for path in candidate_paths if path.is_file()}):
         manifest = load_preprocessing_manifest(manifest_path)
         if manifest is None:
             continue
         if _manifest_string(manifest.get("source_raw_path")) == source_reference:
             matches.append((manifest_path, manifest))
     return matches
+
+
+def _current_manifest_path_for_source(
+    cache_root: Path,
+    source_reference: str,
+) -> Path | None:
+    normalized = _normalized_reference(source_reference)
+    if not _is_safe_project_reference(normalized):
+        return None
+    parts = PurePosixPath(normalized).parts
+    if len(parts) < 2 or parts[0] != "raw":
+        return None
+    relative = Path(*parts[1:])
+    return (
+        cache_root
+        / PREPROCESSING_CACHE_DIRECTORY_NAME
+        / PREPROCESSING_MANIFEST_DIRECTORY_NAME
+        / relative.parent
+        / f"{relative.name}.json"
+    )
 
 
 def _preprocessing_manifest_paths(cache_root: Path) -> list[Path]:

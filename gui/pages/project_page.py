@@ -595,6 +595,28 @@ class SourceProcessingWorker(QObject):
         self.progressChanged.emit(done, total, name)
 
 
+class RawCleanupWorker(QObject):
+    succeeded = pyqtSignal(object)
+    failed = pyqtSignal(str)
+    finished = pyqtSignal()
+
+    def __init__(self, project_id: str, raw_sources: list[Path]) -> None:
+        super().__init__()
+        self.project_id = project_id
+        self.raw_sources = list(raw_sources)
+
+    def run(self) -> None:
+        LOGGER.info("raw cleanup worker started; project_id=%s", self.project_id)
+        try:
+            cleaned_paths = clean_raw_sources(self.project_id, self.raw_sources)
+            self.succeeded.emit(cleaned_paths)
+        except Exception as exc:
+            LOGGER.error("Raw cleanup failed", exc_info=True)
+            self.failed.emit(str(exc))
+        finally:
+            self.finished.emit()
+
+
 class SourceProcessingDialog(FluentDialog):
     cancelRequested = pyqtSignal()
 
@@ -882,6 +904,9 @@ class ProjectPage(QWidget):
         self._source_processing_thread: QThread | None = None
         self._source_processing_worker: SourceProcessingWorker | None = None
         self._source_processing_dialog: SourceProcessingDialog | None = None
+        self._raw_cleanup_thread: QThread | None = None
+        self._raw_cleanup_worker: RawCleanupWorker | None = None
+        self._raw_cleanup_config: ProjectConfig | None = None
         self._encoder_options: list[DeviceOption] = list(initial_encoder_options) if initial_encoder_options else []
         self._ffmpeg_ready_cache = initial_ffmpeg_ready
         self._whisper_status_cache = initial_whisper_status
@@ -1424,7 +1449,7 @@ class ProjectPage(QWidget):
 
     def _sync_processing_options(self) -> None:
         uses_original = self._uses_original_sources()
-        has_project = self._has_project()
+        has_project = self._has_project() and self._raw_cleanup_thread is None
         self.processing_preset_combo.setEnabled(has_project)
         for widget in (
             self.trim_check,
@@ -2026,25 +2051,30 @@ class ProjectPage(QWidget):
 
     def _sync_project_actions(self) -> None:
         has_project = self._has_project()
-        self.project_combo.setEnabled(has_project)
-        self.delete_project_button.setEnabled(has_project)
-        extraction_controls_enabled = has_project and not self._extraction_running
+        raw_cleanup_running = self._raw_cleanup_thread is not None
+        source_controls_enabled = has_project and not raw_cleanup_running
+        self.project_combo.setEnabled(source_controls_enabled)
+        self.new_project_button.setEnabled(not raw_cleanup_running)
+        self.delete_project_button.setEnabled(source_controls_enabled)
+        extraction_controls_enabled = (
+            has_project and not self._extraction_running and not raw_cleanup_running
+        )
         self.mode_combo.setEnabled(extraction_controls_enabled)
         self.skip_provider_rejected_chunk_check.setEnabled(extraction_controls_enabled)
-        self.add_file_button.setEnabled(has_project)
-        self.add_folder_button.setEnabled(has_project)
-        self.remove_source_button.setEnabled(has_project)
-        self.clean_raw_button.setEnabled(has_project)
-        self.sources_list.setEnabled(has_project)
-        self.processing_preset_combo.setEnabled(has_project)
-        self.trim_check.setEnabled(has_project)
-        self.transcode_check.setEnabled(has_project)
-        self.segment_check.setEnabled(has_project)
-        self.process_sources_button.setEnabled(has_project)
+        self.add_file_button.setEnabled(source_controls_enabled)
+        self.add_folder_button.setEnabled(source_controls_enabled)
+        self.remove_source_button.setEnabled(source_controls_enabled)
+        self.clean_raw_button.setEnabled(source_controls_enabled)
+        self.sources_list.setEnabled(source_controls_enabled)
+        self.processing_preset_combo.setEnabled(source_controls_enabled)
+        self.trim_check.setEnabled(source_controls_enabled)
+        self.transcode_check.setEnabled(source_controls_enabled)
+        self.segment_check.setEnabled(source_controls_enabled)
+        self.process_sources_button.setEnabled(source_controls_enabled)
         self.download_whisper_button.setEnabled(self._whisper_download_thread is None)
         self.whisper_advanced_button.setEnabled(self._whisper_download_thread is None)
-        self.save_button.setEnabled(has_project)
-        self.preview_button.setEnabled(has_project and not self._extraction_running)
+        self.save_button.setEnabled(source_controls_enabled)
+        self.preview_button.setEnabled(extraction_controls_enabled)
         self._sync_processing_options()
 
     def _load_selected_project(self) -> None:
@@ -2213,6 +2243,8 @@ class ProjectPage(QWidget):
             self.sources_list.setItemWidget(item, SourceListRow(display_text, status, self.sources_list))
 
     def _clean_selected_raw_sources(self) -> None:
+        if self._raw_cleanup_thread is not None:
+            return
         project = self._selected_project()
         if project is None:
             return
@@ -2230,14 +2262,32 @@ class ProjectPage(QWidget):
         if not dialog.exec():
             return
 
-        cleaned_paths = clean_raw_sources(project.project_id, raw_sources)
+        self._raw_cleanup_config = self.current_config()
+        self.clean_raw_button.setText(t("project.source.cleanRaw.verifying"))
+        self._raw_cleanup_thread = QThread(self)
+        self._raw_cleanup_worker = RawCleanupWorker(project.project_id, raw_sources)
+        self._raw_cleanup_worker.moveToThread(self._raw_cleanup_thread)
+        self._raw_cleanup_thread.started.connect(self._raw_cleanup_worker.run)
+        self._raw_cleanup_worker.succeeded.connect(self._finish_raw_cleanup_success)
+        self._raw_cleanup_worker.failed.connect(self._finish_raw_cleanup_failure)
+        self._raw_cleanup_worker.finished.connect(self._raw_cleanup_thread.quit)
+        self._raw_cleanup_worker.finished.connect(self._raw_cleanup_worker.deleteLater)
+        self._raw_cleanup_thread.finished.connect(self._raw_cleanup_thread.deleteLater)
+        self._raw_cleanup_thread.finished.connect(self._clear_raw_cleanup_worker)
+        self._sync_project_actions()
+        self._raw_cleanup_thread.start()
+
+    def _finish_raw_cleanup_success(self, cleaned_paths: list[str]) -> None:
+        config = self._raw_cleanup_config
+        if config is None:
+            return
         if not cleaned_paths:
             return
-        merged_paths = sorted(set(project.raw_cleaned_paths).union(cleaned_paths))
-        updated_project = project.model_copy(update={"raw_cleaned_paths": merged_paths})
+        merged_paths = sorted(set(config.raw_cleaned_paths).union(cleaned_paths))
+        updated_project = config.model_copy(update={"raw_cleaned_paths": merged_paths})
         self._upsert_project(updated_project)
-        save_project_config(self.current_config())
-        self._refresh_project_sources(project.project_id)
+        save_project_config(updated_project)
+        self._refresh_project_sources(updated_project.project_id)
         InfoBar.success(
             title=t("project.source.cleanRaw.success.title"),
             content=t("project.source.cleanRaw.success.content", count=len(cleaned_paths)),
@@ -2245,6 +2295,25 @@ class ProjectPage(QWidget):
             position=InfoBarPosition.TOP_RIGHT,
             duration=4000,
         )
+
+    def _finish_raw_cleanup_failure(self, error: str) -> None:
+        InfoBar.warning(
+            title=t("project.source.cleanRaw.failure.title"),
+            content=t(
+                "project.source.cleanRaw.failure.content",
+                error=self._short_error(error),
+            ),
+            parent=self.window(),
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=7000,
+        )
+
+    def _clear_raw_cleanup_worker(self) -> None:
+        self._raw_cleanup_thread = None
+        self._raw_cleanup_worker = None
+        self._raw_cleanup_config = None
+        self.clean_raw_button.setText(t("project.source.cleanRaw"))
+        self._sync_project_actions()
 
     def _selected_raw_sources(self, project_id: str) -> list[Path]:
         raw_sources: list[Path] = []

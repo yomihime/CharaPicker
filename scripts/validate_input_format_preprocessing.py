@@ -52,6 +52,11 @@ from utils.source_importer import (  # noqa: E402
     remove_project_sources,
     remove_raw_sources,
 )
+from utils.source_status import (  # noqa: E402
+    SOURCE_KIND_PROJECT,
+    SOURCE_STATUS_PROCESSED,
+    source_status,
+)
 import utils.paths as path_utils  # noqa: E402
 
 
@@ -403,6 +408,23 @@ def _assert_project_lifecycle_and_source_trace(root: Path) -> None:
     )
     text_material = materials_root / text_record.material_relative_path
     text_material.write_bytes(b"CHAPTER")
+    assert current_preprocessing_manifest_for_raw(
+        raw_root=raw_root,
+        materials_root=materials_root,
+        cache_root=cache_root,
+        raw_source=raw_source,
+        verify_fingerprints=False,
+    ) is not None
+    previous_projects_root = path_utils.PROJECTS_ROOT
+    path_utils.PROJECTS_ROOT = projects_root
+    try:
+        assert source_status(
+            ProjectConfig(project_id=project_id, name="Input format lifecycle"),
+            str(raw_source),
+            SOURCE_KIND_PROJECT,
+        ) == SOURCE_STATUS_PROCESSED
+    finally:
+        path_utils.PROJECTS_ROOT = previous_projects_root
     assert current_preprocessing_manifest_for_raw(
         raw_root=raw_root,
         materials_root=materials_root,

@@ -18,7 +18,7 @@
 - `i18n.py`：管理语言偏好、系统语言归一化、文案加载和 `t()` 翻译函数。
 - `app_metadata.py`：集中保存应用名、组织名、当前运行时版本/阶段和 HTTP User-Agent。
 - `media_types.py`：集中保存视频、图片、音频、文本后缀，以及直接素材和容器输入格式的独立支持档位；容器 profile 不新增顶层媒体类型，也不进入直接素材后缀集合。当前 `.zip`、`.cbz`、`.epub`、`.pdf`、`.7z`、`.rar`、`.cbr` 均已启用。
-- `material_preprocessing.py`：定义容器输入预处理请求、结果、warning、派生材料记录、容器 entry 摘要和 manifest v1 协议，统一负责安全路径校验、取消检查、临时目录、原子落盘、按 raw 相对路径隔离的稳定派生路径、manifest 索引、派生文件大小/SHA256 完整性检查、复用判断和生命周期清理，不依赖 `core` 或 `gui`。
+- `material_preprocessing.py`：定义容器输入预处理请求、结果、warning、派生材料记录、容器 entry 摘要和 manifest v1 协议，统一负责安全路径校验、取消检查、临时目录、原子落盘、按 raw 相对路径隔离的稳定派生路径、manifest 索引、派生文件大小/SHA256 完整性检查、复用判断和生命周期清理，不依赖 `core` 或 `gui`。高频只读状态查询通过稳定 manifest 路径执行文件存在/大小轻量校验；复用、正式扫描和 raw 清理等强一致性决策继续执行 SHA256 校验。
 - `zip_material_preprocessor.py`：在预处理边界内使用标准库列举和流式展开 ZIP entry，提供 ZIP/CBZ/EPUB 共用的数量、大小、压缩比、加密和路径安全校验；通用 ZIP 只保留图片、音频和文本白名单叶子，容器内视频返回 `container_video_requires_explicit_import`，CBZ 只接纳图片并按自然顺序派生为单一页目录；不负责项目导入或 UI 状态。
 - `epub_material_preprocessor.py`：复用 ZIP 安全列举结果解析 EPUB container.xml、OPF manifest/spine 和 XHTML，按阅读顺序派生章节 TXT；对缺失元数据和损坏 XHTML 采用受控降级，拒绝 DRM/加密内容，内嵌图片只进入 manifest 摘要而不落入 `materials/`。
 - `pdf_backend.py`：定义 PDF capability、文档/页文本结果和可注入 backend 协议，并提供延迟导入的 `pypdf` 6.x 生产适配器；不处理项目路径、manifest 或 warning 策略。
@@ -43,7 +43,7 @@
 - `audio_transcription.py`：封装本地 whisper.cpp episode 转写、音频/视频输入准备、缓存命中判断和 `episode_transcript.json` 写入；缓存键覆盖素材指纹、运行时、模型和语言，日志不记录完整转写文本。
 - `ffmpeg_downloader.py`：下载并安装 ffmpeg 运行时到 `bin/`。
 - `source_importer.py`：把直接素材或已启用容器按项目目录规则原子复制到 `projects/{project_id}/raw`，计算 raw 目标，并通过预处理 manifest 协调 raw 清理、素材移除和 stale 派生产物清理；容器不得进入普通 materials link 分支。
-- `source_status.py`：计算项目页需要的素材显示名、raw/materials 或预处理 manifest 映射、项目内素材列表和素材状态。
+- `source_status.py`：计算项目页需要的素材显示名、raw/materials 或预处理 manifest 映射、项目内素材列表和素材状态；状态刷新只执行 manifest 结构、文件存在和大小检查，不在 GUI 主线程计算派生文件 SHA256。
 - `material_processing_middleware.py`：统一接收上层的素材处理请求，把 raw 拆成直接视频、直接非视频、已启用容器和 unsupported 四类；容器先预处理，直接非视频走 source importer，只有非原始方案中的直接视频进入 FFmpeg。FFmpeg 缺失策略由调用方显式选择 `error` 或 `skip_video`，并由 middleware 在执行点再次校验。
 - `startup_middleware.py`：启动阶段预加载中间件，集中探测 FFmpeg/llama.cpp/whisper.cpp、预取项目配置和云模型预设，供启动页线程复用。
 - `logging_preferences.py`：管理日志等级偏好。
