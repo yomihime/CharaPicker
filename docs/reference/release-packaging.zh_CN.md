@@ -13,8 +13,8 @@ build.bat
 常用参数：
 
 ```powershell
-build.bat --tag=v0.7.0-beta
-build.bat --version=0.7.0 --stage=beta
+build.bat --tag=v0.8.0-beta
+build.bat --version=0.8.0 --stage=beta
 build.bat --local
 ```
 
@@ -67,7 +67,7 @@ release/
 
 允许通过 Git tag 指示版本与阶段：
 
-- `v0.7.0-beta` -> `version=0.7.0`，`stage=beta`
+- `v0.8.0-beta` -> `version=0.8.0`，`stage=beta`
 - `v0.6.0-beta.1` -> `version=0.6.0`，`stage=beta.1`
 - `v1.0.0` -> `version=1.0.0`，`stage=release`
 
@@ -94,7 +94,7 @@ CharaPicker-v<version>-<stage>-<platform>-<arch>.zip
 示例：
 
 ```text
-CharaPicker-v0.7.0-beta-windows-x64.zip
+CharaPicker-v0.8.0-beta-windows-x64.zip
 CharaPicker-v1.0.0-release-windows-x64.zip
 ```
 
