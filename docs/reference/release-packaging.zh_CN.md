@@ -35,7 +35,7 @@ build.bat --local
 
 ```text
 release/
-└── CharaPicker-v<version>-<stage>-<platform>-<arch>.zip
+└── CharaPicker-v<version>[-<stage>]-<platform>-<arch>.zip
     └── CharaPicker/
         ├── CharaPicker.exe
         ├── README.md
@@ -85,17 +85,19 @@ release/
 
 ## 5. 文件命名
 
-发布 zip 文件名必须包含版本号、阶段、平台和架构：
+发布 zip 文件名必须包含版本号、平台和架构。预发布与本地构建还应包含阶段；
+正式版使用无后缀版本标签，不写入 `release`：
 
 ```text
-CharaPicker-v<version>-<stage>-<platform>-<arch>.zip
+预发布/本地：CharaPicker-v<version>-<stage>-<platform>-<arch>.zip
+正式版：CharaPicker-v<version>-<platform>-<arch>.zip
 ```
 
 示例：
 
 ```text
 CharaPicker-v0.8.0-beta-windows-x64.zip
-CharaPicker-v1.0.0-release-windows-x64.zip
+CharaPicker-v1.0.0-windows-x64.zip
 ```
 
 ## 6. 发布内容与排除项

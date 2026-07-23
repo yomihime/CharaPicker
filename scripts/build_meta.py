@@ -13,7 +13,12 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from utils.app_metadata import APP_RELEASE_STAGE, APP_VERSION  # noqa: E402
+from utils.app_metadata import (  # noqa: E402
+    APP_NAME,
+    APP_RELEASE_STAGE,
+    APP_VERSION,
+    format_version_tag,
+)
 
 
 DEFAULT_VERSION = APP_VERSION
@@ -32,6 +37,16 @@ class Meta:
     local_build: int
     raw_tag: str
     tag_source: str
+
+    @property
+    def version_tag(self) -> str:
+        return format_version_tag(self.version, self.stage)
+
+    @property
+    def zip_name(self) -> str:
+        return (
+            f"{APP_NAME}-v{self.version_tag}-{self.platform_tag}-{self.arch_tag}.zip"
+        )
 
 
 def _normalize_platform(system_name: str) -> str:
@@ -74,7 +89,7 @@ def _parse_tag(tag: str) -> tuple[str, str]:
     if tag_value.lower().startswith("v"):
         tag_value = tag_value[1:]
     if "-" not in tag_value:
-        return tag_value, DEFAULT_STAGE
+        return tag_value, "release"
     version, stage = tag_value.split("-", 1)
     return version, stage
 
@@ -160,8 +175,10 @@ def main(argv: list[str]) -> int:
 
     print(f"VERSION={meta.version}")
     print(f"STAGE={meta.stage}")
+    print(f"VERSION_TAG={meta.version_tag}")
     print(f"PLATFORM_TAG={meta.platform_tag}")
     print(f"ARCH_TAG={meta.arch_tag}")
+    print(f"ZIP_NAME={meta.zip_name}")
     print(f"LOCAL_BUILD={meta.local_build}")
     print(f"RAW_TAG={meta.raw_tag}")
     print(f"TAG_SOURCE={meta.tag_source}")

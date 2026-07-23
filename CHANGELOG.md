@@ -6,7 +6,12 @@
 
 ## 未发布
 
-暂无。
+### 构建
+
+- 修复无后缀正式版 tag 继承当前默认开发阶段的问题；`v1.0.0` 现在固定解析为
+  `version=1.0.0`、`stage=release`。
+- 正式版版本标签和发布 zip 文件名不再包含 `release` 后缀，例如
+  `CharaPicker-v1.0.0-windows-x64.zip`。
 
 ## v0.8.0-beta - 2026-07-21
 
