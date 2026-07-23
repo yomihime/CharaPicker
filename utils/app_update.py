@@ -40,7 +40,6 @@ GITHUB_RELEASES_API_URL = "https://api.github.com/repos/yomihime/CharaPicker/rel
 UPDATE_PRERELEASES_KEY = "updates/include_prereleases"
 UPDATE_ACK_ENV = "CHARAPICKER_UPDATE_ACK_PATH"
 UPDATE_RUNNER_NAME = "CharaPickerUpdater.exe"
-UPDATE_ARCHIVE_ROOT = APP_NAME
 UPDATE_ASSET_SUFFIX = "windows-x64.zip"
 PRESERVED_RUNTIME_PATHS = ("projects", "config.yaml", "log", "bin", "models")
 MAX_UPDATE_ARCHIVE_MEMBERS = 100_000
@@ -262,12 +261,8 @@ def prepare_update(
         emit(84, "extract")
         extract_dir.mkdir()
         _extract_update_archive(archive_path, extract_dir, cancelled=cancelled)
-        payload_dir = extract_dir / UPDATE_ARCHIVE_ROOT
-        if not (payload_dir / f"{APP_NAME}.exe").is_file():
-            raise UpdateDownloadError(f"The update package does not contain {APP_NAME}.exe.")
+        payload_dir = _resolve_update_payload_dir(extract_dir)
         updater_path = payload_dir / UPDATE_RUNNER_NAME
-        if not updater_path.is_file():
-            raise UpdateDownloadError(f"The update package does not contain {UPDATE_RUNNER_NAME}.")
         emit(100, "ready")
         return PreparedUpdate(
             version_tag=release.version.public_tag,
@@ -467,7 +462,6 @@ def _extract_update_archive(
             if (
                 member_path.is_absolute()
                 or not member_path.parts
-                or member_path.parts[0] != UPDATE_ARCHIVE_ROOT
                 or ".." in member_path.parts
             ):
                 raise UpdateDownloadError("The update package contains unsafe paths.")
@@ -480,3 +474,37 @@ def _extract_update_archive(
         for member in members:
             _check_cancelled(cancelled)
             archive.extract(member, extract_dir)
+
+
+def _resolve_update_payload_dir(extract_dir: Path) -> Path:
+    extract_root = extract_dir.resolve()
+    required_files = (f"{APP_NAME}.exe", UPDATE_RUNNER_NAME)
+    candidates = [
+        candidate
+        for candidate in (extract_root, *_direct_child_directories(extract_root))
+        if all((candidate / file_name).is_file() for file_name in required_files)
+    ]
+    if not candidates:
+        raise UpdateDownloadError(
+            f"The update package does not contain {APP_NAME}.exe and {UPDATE_RUNNER_NAME} "
+            "in a supported payload directory."
+        )
+    if len(candidates) > 1:
+        raise UpdateDownloadError("The update package contains multiple application payloads.")
+
+    payload_dir = candidates[0]
+    if payload_dir != extract_root:
+        top_level_entries = list(extract_root.iterdir())
+        if len(top_level_entries) != 1 or top_level_entries[0].resolve() != payload_dir:
+            raise UpdateDownloadError(
+                "The update package contains files outside the application payload."
+            )
+    return payload_dir
+
+
+def _direct_child_directories(root: Path) -> tuple[Path, ...]:
+    return tuple(
+        child.resolve()
+        for child in root.iterdir()
+        if child.is_dir() and not child.is_symlink() and child.resolve().is_relative_to(root)
+    )

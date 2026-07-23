@@ -13,6 +13,7 @@ from utils.app_update import (
     UpdatePackageUnavailableError,
     _extract_update_archive,
     _read_expected_checksum,
+    _resolve_update_payload_dir,
     check_for_update,
 )
 
@@ -116,7 +117,7 @@ class UpdateCheckTests(unittest.TestCase):
 
 
 class UpdateArchiveTests(unittest.TestCase):
-    def test_extract_update_archive_accepts_expected_root(self) -> None:
+    def test_payload_resolver_accepts_official_wrapper_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_name:
             root = Path(temp_name)
             archive_path = root / "update.zip"
@@ -127,11 +128,98 @@ class UpdateArchiveTests(unittest.TestCase):
                 archive.writestr("CharaPicker/CharaPickerUpdater.exe", b"updater")
 
             _extract_update_archive(archive_path, extract_dir)
+            payload_dir = _resolve_update_payload_dir(extract_dir)
 
+            self.assertEqual(payload_dir, extract_dir / "CharaPicker")
             self.assertEqual(
-                (extract_dir / "CharaPicker" / "CharaPicker.exe").read_bytes(),
+                (payload_dir / "CharaPicker.exe").read_bytes(),
                 b"new",
             )
+
+    def test_payload_resolver_accepts_flat_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            archive_path = root / "update.zip"
+            extract_dir = root / "extract"
+            extract_dir.mkdir()
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("CharaPicker.exe", b"new")
+                archive.writestr("CharaPickerUpdater.exe", b"updater")
+                archive.writestr("_internal/runtime.dll", b"runtime")
+
+            _extract_update_archive(archive_path, extract_dir)
+
+            self.assertEqual(_resolve_update_payload_dir(extract_dir), extract_dir)
+
+    def test_payload_resolver_accepts_arbitrary_wrapper_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            archive_path = root / "update.zip"
+            extract_dir = root / "extract"
+            extract_dir.mkdir()
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("portable-build/CharaPicker.exe", b"new")
+                archive.writestr("portable-build/CharaPickerUpdater.exe", b"updater")
+
+            _extract_update_archive(archive_path, extract_dir)
+
+            self.assertEqual(
+                _resolve_update_payload_dir(extract_dir),
+                extract_dir / "portable-build",
+            )
+
+    def test_payload_resolver_rejects_files_outside_wrapper(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            extract_dir = root / "extract"
+            payload_dir = extract_dir / "portable-build"
+            payload_dir.mkdir(parents=True)
+            (payload_dir / "CharaPicker.exe").write_bytes(b"new")
+            (payload_dir / "CharaPickerUpdater.exe").write_bytes(b"updater")
+            (extract_dir / "unexpected.txt").write_text("unexpected", encoding="utf-8")
+
+            with self.assertRaises(UpdateDownloadError):
+                _resolve_update_payload_dir(extract_dir)
+
+    def test_payload_resolver_rejects_multiple_wrappers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            extract_dir = Path(temp_name) / "extract"
+            for directory_name in ("first", "second"):
+                payload_dir = extract_dir / directory_name
+                payload_dir.mkdir(parents=True)
+                (payload_dir / "CharaPicker.exe").write_bytes(b"new")
+                (payload_dir / "CharaPickerUpdater.exe").write_bytes(b"updater")
+
+            with self.assertRaises(UpdateDownloadError):
+                _resolve_update_payload_dir(extract_dir)
+
+    def test_payload_resolver_rejects_nested_wrapper(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            payload_dir = Path(temp_name) / "extract" / "outer" / "inner"
+            payload_dir.mkdir(parents=True)
+            (payload_dir / "CharaPicker.exe").write_bytes(b"new")
+            (payload_dir / "CharaPickerUpdater.exe").write_bytes(b"updater")
+
+            with self.assertRaises(UpdateDownloadError):
+                _resolve_update_payload_dir(Path(temp_name) / "extract")
+
+    def test_payload_resolver_requires_main_executable(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            extract_dir = Path(temp_name) / "extract"
+            extract_dir.mkdir()
+            (extract_dir / "CharaPickerUpdater.exe").write_bytes(b"updater")
+
+            with self.assertRaises(UpdateDownloadError):
+                _resolve_update_payload_dir(extract_dir)
+
+    def test_payload_resolver_requires_update_helper(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            extract_dir = Path(temp_name) / "extract"
+            extract_dir.mkdir()
+            (extract_dir / "CharaPicker.exe").write_bytes(b"new")
+
+            with self.assertRaises(UpdateDownloadError):
+                _resolve_update_payload_dir(extract_dir)
 
     def test_extract_update_archive_rejects_traversal(self) -> None:
         with tempfile.TemporaryDirectory() as temp_name:
