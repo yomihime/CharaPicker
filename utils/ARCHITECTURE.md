@@ -38,6 +38,7 @@
 - `cloud_model_presets.py`：保存和读取云端模型配置预设，维护云端服务类型到模型调用后端的映射，提供视频输出 Token / 分钟到单次请求上限的换算工具，以及 GUI/core 共用的具体模型音频理解能力判断。
 - `cloud_models.py`：按云端服务类型路由并拉取模型列表，当前底层复用 OpenAI-compatible 模型列表接口。
 - `network_middleware.py`：统一应用内 HTTP(S) 请求、代理读取、连通性测试、URL/错误脱敏和 DashScope 临时代理环境。
+- `app_update.py`：应用更新协议入口；负责 GitHub Release 版本与 Windows x64 资产筛选、测试版偏好、代理感知下载、SHA-256 与 ZIP 安全校验、更新请求准备和新版启动确认。实际安装目录替换由独立更新器执行。
 - `llamacpp_downloader.py`：下载并安装 llama.cpp 运行时到 `bin/`。
 - `whispercpp_downloader.py`：下载并安装 whisper.cpp 运行时到 `bin/whisper.cpp/`，下载 Whisper 模型到 `models/whisper/`。
 - `audio_transcription.py`：封装本地 whisper.cpp episode 转写、音频/视频输入准备、缓存命中判断和 `episode_transcript.json` 写入；缓存键覆盖素材指纹、运行时、模型和语言，日志不记录完整转写文本。

@@ -24,7 +24,9 @@ build.bat --local
 
 - 打包必须使用 PyInstaller。
 - 使用文件夹形式的 one-folder 产物，不使用单文件 exe 作为正式发布形态。
+- 主程序继续使用 one-folder；为在主程序退出后替换安装目录，允许把无第三方运行时依赖的 `CharaPickerUpdater.exe` 构建为独立 one-file 辅助程序，并随主程序目录发布。该辅助程序不是应用的独立分发形态。
 - `main.spec` 负责收集 `i18n/`、`res/` 和 qfluentwidgets 资源。
+- `updater.spec` 只构建独立更新辅助程序，不收集 PyQt6 或 qfluentwidgets。
 - 发布前应清理旧的 `build/`、`dist/CharaPicker/`、`release/CharaPicker/` 和目标 zip。
 
 ## 3. 发布包结构
@@ -38,6 +40,7 @@ release/
 └── CharaPicker-v<version>[-<stage>]-<platform>-<arch>.zip
     └── CharaPicker/
         ├── CharaPicker.exe
+        ├── CharaPickerUpdater.exe
         ├── README.md
         ├── ...
         └── _internal/
@@ -105,6 +108,7 @@ CharaPicker-v1.0.0-windows-x64.zip
 发布包应包含：
 
 - 运行所需程序文件。
+- 用于退出后替换安装目录和失败回滚的 `CharaPickerUpdater.exe`。
 - `i18n/`、`res/` 和 qfluentwidgets 运行资源。
 - 必要说明文件：`README.md`、`LICENSE` 和 `THIRD_PARTY_NOTICES.md`。
 
@@ -129,6 +133,13 @@ CharaPicker-v1.0.0-windows-x64.zip
 
 ## 7. CI 关系
 
-GitHub Actions 只负责编排构建，不承载应用运行逻辑。当前 Windows workflow 会安装依赖和 PyInstaller，运行 `build.bat`，上传 `release/*.zip`，并在 tag 触发时发布 Release 附件。
+GitHub Actions 只负责编排构建，不承载应用运行逻辑。当前 Windows workflow 会安装依赖和 PyInstaller，运行 `build.bat`，为每个 `release/*.zip` 生成同名 `.sha256`，上传两类产物，并在 tag 触发时发布 Release 附件。自动更新只接受 ZIP 与同名 SHA-256 文件同时存在的 Windows x64 Release。
+
+自动更新流程还必须满足以下约束：
+
+- 未启用“更新测试版”时，只选择无预发布后缀且未标记为 prerelease 的正式 Release；启用后允许 alpha、beta 和 rc，但始终只升级到高于当前版本的最高版本，不允许降级。
+- 更新资产必须精确匹配 `CharaPicker-v<version>[-<stage>]-windows-x64.zip` 及其同名 `.sha256`；不使用模糊匹配或任意 Release 附件。
+- 主程序通过统一网络中间件下载并校验更新包，确认 ZIP 顶层为 `CharaPicker/` 且包含主程序和更新器后，才允许启动独立更新器。
+- 更新器先等待当前主程序退出，再备份并替换安装目录；`projects/`、`config.yaml`、`log/`、`bin/` 和 `models/` 必须跨版本保留。新版未在限定时间内完成启动确认时，更新器应恢复旧版并重新启动。
 
 tag 构建会显式把当前 tag 传给 `build.bat`，让构建产物版本、阶段与发布 tag 对齐；若 tag 与 `utils.app_metadata.py` 不一致，构建必须失败。发布 GitHub Release 前必须先在 `CHANGELOG.md` 中准备同名版本小节；workflow 会抽取该小节作为 Release 正文开头，找不到对应小节时应失败，以避免发布缺少版本说明的二进制包。同时 workflow 必须开启 GitHub 自动 release notes，让 Release 页面保留 `What's Changed`、完整 changelog 链接和 contributors 区域。

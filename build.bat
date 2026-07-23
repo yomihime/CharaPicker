@@ -44,10 +44,11 @@ if errorlevel 1 (
 if exist "%BUILD_DIR%" rmdir /s /q "%BUILD_DIR%"
 if exist "%DIST_DIR%\%APP_NAME%" rmdir /s /q "%DIST_DIR%\%APP_NAME%"
 if exist "%DIST_DIR%\%APP_NAME%.exe" del /q "%DIST_DIR%\%APP_NAME%.exe"
+if exist "%DIST_DIR%\%APP_NAME%Updater.exe" del /q "%DIST_DIR%\%APP_NAME%Updater.exe"
 if exist "%STAGE_DIR%" rmdir /s /q "%STAGE_DIR%"
 if exist "%ZIP_PATH%" del /q "%ZIP_PATH%"
 
-echo [1/4] Building one-folder package with main.spec...
+echo [1/5] Building one-folder package with main.spec...
 echo Version: v%VERSION_TAG%
 echo Stage: %STAGE%
 echo Platform: %PLATFORM_TAG%
@@ -57,7 +58,14 @@ if "%LOCAL_BUILD%"=="1" echo Build mode: local
 %PYTHON_CMD% -m PyInstaller --noconfirm --clean main.spec
 if errorlevel 1 goto :error
 
-echo [2/4] Preparing release folder...
+echo [2/5] Building standalone update helper with updater.spec...
+%PYTHON_CMD% -m PyInstaller --noconfirm --clean updater.spec
+if errorlevel 1 goto :error
+if not exist "%DIST_DIR%\%APP_NAME%Updater.exe" goto :error
+copy /y "%DIST_DIR%\%APP_NAME%Updater.exe" "%DIST_DIR%\%APP_NAME%\%APP_NAME%Updater.exe" >nul
+if errorlevel 1 goto :error
+
+echo [3/5] Preparing release folder...
 mkdir "%STAGE_DIR%"
 xcopy /e /i /y "%DIST_DIR%\%APP_NAME%\*" "%STAGE_DIR%\" >nul
 if errorlevel 1 goto :error
@@ -66,7 +74,7 @@ for %%F in (README.md LICENSE THIRD_PARTY_NOTICES.md) do (
   if exist "%ROOT_DIR%%%F" copy /y "%ROOT_DIR%%%F" "%STAGE_DIR%\%%F" >nul
 )
 
-echo [3/4] Compressing release zip...
+echo [4/5] Compressing release zip...
 set "ZIP_OK=0"
 for /l %%I in (1,1,5) do (
   powershell -NoProfile -Command "$ErrorActionPreference='Stop'; Compress-Archive -Path '%STAGE_DIR%' -DestinationPath '%ZIP_PATH%' -Force" >nul
@@ -80,7 +88,7 @@ for /l %%I in (1,1,5) do (
 :zip_done
 if "%ZIP_OK%"=="0" goto :error
 
-echo [4/4] Done.
+echo [5/5] Done.
 echo Output: %ZIP_PATH%
 popd >nul
 exit /b 0

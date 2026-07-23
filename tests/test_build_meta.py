@@ -89,6 +89,24 @@ class BuildMetadataTests(unittest.TestCase):
         )
         self.assertNotIn('set "ZIP_NAME=CharaPicker-', batch)
 
+    def test_build_packages_standalone_update_helper(self) -> None:
+        batch = (ROOT_DIR / "build.bat").read_text(encoding="utf-8")
+
+        self.assertIn("PyInstaller --noconfirm --clean updater.spec", batch)
+        self.assertIn(
+            '"%DIST_DIR%\\%APP_NAME%Updater.exe" '
+            '"%DIST_DIR%\\%APP_NAME%\\%APP_NAME%Updater.exe"',
+            batch,
+        )
+
+    def test_release_workflow_publishes_checksums(self) -> None:
+        workflow = (ROOT_DIR / ".github" / "workflows" / "build.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("Get-FileHash", workflow)
+        self.assertIn("release/*.sha256", workflow)
+
     def test_about_version_messages_use_runtime_placeholder(self) -> None:
         for locale in ("zh_CN", "zh_TW", "en_US", "ja_JP"):
             payload = json.loads(

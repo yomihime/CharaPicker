@@ -20,7 +20,8 @@
 - `pyproject.toml`：项目和工具配置。
 - `config.yaml`：本地全局配置文件，由 `utils/global_store.py` 读写，包含用户偏好和模型预设等私有配置，默认不提交。
 - `main.spec`：PyInstaller 文件夹式打包配置，收集 `i18n/`、`res/` 和 qfluentwidgets 资源。
-- `build.bat`：Windows 打包入口。调用 `scripts/build_meta.py`，执行 PyInstaller，整理 `release/CharaPicker/` 并压缩 zip。
+- `app_updater.py` / `updater.spec`：独立更新辅助程序及其 one-file 打包配置；主程序退出后执行目录替换、用户运行时数据保留、启动确认和失败回滚。
+- `build.bat`：Windows 打包入口。调用 `scripts/build_meta.py`，分别构建主程序与更新辅助程序，整理 `release/CharaPicker/` 并压缩 zip。
 - `README.md`：GitHub 首页说明，要求使用简体中文。
 - `CHANGELOG.md`：版本更新日志。tag 发布前维护对应版本小节，GitHub Release 正文从这里抽取。
 - `AGENTS.md`：Codex 默认自动加载的长期项目指导文件，不依赖 `.codex/`。

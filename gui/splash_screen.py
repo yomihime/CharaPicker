@@ -331,6 +331,9 @@ class StartupController(QObject):
         self._center_main_window()
         QApplication.instance().setQuitOnLastWindowClosed(True)
         self.window.showNormal()
+        from utils.app_update import acknowledge_update_startup
+
+        acknowledge_update_startup()
         LOGGER.info("Main window shown")
 
     def _center_main_window(self) -> None:
