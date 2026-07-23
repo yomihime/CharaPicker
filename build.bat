@@ -7,6 +7,7 @@ pushd "%ROOT_DIR%" >nul
 set "APP_NAME=CharaPicker"
 set "VERSION=0.8.0"
 set "STAGE=beta"
+set "VERSION_TAG=0.8.0-beta"
 set "PLATFORM_TAG=windows"
 set "ARCH_TAG=x64"
 set "LOCAL_BUILD=0"
@@ -24,11 +25,11 @@ for /f "usebackq tokens=1,* delims==" %%A in (`%PYTHON_CMD% scripts\build_meta.p
 
 if errorlevel 1 goto :error
 
+set "ZIP_NAME=%APP_NAME%-v%VERSION_TAG%-%PLATFORM_TAG%-%ARCH_TAG%.zip"
 set "DIST_DIR=%ROOT_DIR%dist"
 set "BUILD_DIR=%ROOT_DIR%build"
 set "RELEASE_DIR=%ROOT_DIR%release"
 set "STAGE_DIR=%RELEASE_DIR%\%APP_NAME%"
-set "ZIP_NAME=%APP_NAME%-v%VERSION%-%STAGE%-%PLATFORM_TAG%-%ARCH_TAG%.zip"
 set "ZIP_PATH=%RELEASE_DIR%\%ZIP_NAME%"
 
 if not exist "%RELEASE_DIR%" mkdir "%RELEASE_DIR%"
@@ -47,7 +48,7 @@ if exist "%STAGE_DIR%" rmdir /s /q "%STAGE_DIR%"
 if exist "%ZIP_PATH%" del /q "%ZIP_PATH%"
 
 echo [1/4] Building one-folder package with main.spec...
-echo Version: v%VERSION%
+echo Version: v%VERSION_TAG%
 echo Stage: %STAGE%
 echo Platform: %PLATFORM_TAG%
 echo Arch: %ARCH_TAG%

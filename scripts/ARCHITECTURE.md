@@ -13,7 +13,7 @@
 
 ## 关键文件
 
-- `build_meta.py`：解析命令行参数、Git tag、平台和架构，输出 `VERSION`、`STAGE`、`PLATFORM_TAG`、`ARCH_TAG` 等构建变量；默认版本和阶段来自 `utils.app_metadata`。
+- `build_meta.py`：解析命令行参数、Git tag、平台和架构，输出 `VERSION`、`STAGE`、`VERSION_TAG`、`PLATFORM_TAG`、`ARCH_TAG` 等构建变量；默认版本和阶段来自 `utils.app_metadata`。非本地构建必须与应用源码版本、阶段一致，正式版 `VERSION_TAG` 不包含 `release` 后缀。
 - `validate_extraction_plan_models.py`：验证四媒体类型、内容形态、素材引用、unit、派生成果、evidence、source trace 和正式 run plan 的模型边界。
 - `validate_extraction_plan_builder.py`：验证旧视频扫描结果进入 `FormalExtractionRunPlan`、稳定 ID、run 持久化和旧 manifest 观察索引边界。
 - `validate_video_unit_handler.py`：验证视频 unit 时长预算、模型请求变量和正式视频 handler 边界。
@@ -35,7 +35,7 @@
 
 ## 与其他目录的关系
 
-- `build.bat` 调用 `scripts/build_meta.py` 生成 zip 文件名所需的版本和阶段信息。
+- `build.bat` 调用 `scripts/build_meta.py` 获取版本标签、平台和架构，再动态拼接 zip 文件名。
 - `utils/app_metadata.py` 提供构建元数据默认版本和运行时 User-Agent 使用的同一份版本/阶段来源。
 - `.github/workflows/build.yml` 间接通过 `build.bat` 使用该脚本。
 - 发布产物仍写入根目录 `release/`，不写入 `scripts/`。

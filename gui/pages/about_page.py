@@ -14,6 +14,7 @@ from qfluentwidgets import (
 )
 
 from gui.widgets.dialog_middleware import FluentDialog
+from utils.app_metadata import APP_VERSION_TAG
 from utils.i18n import t
 from utils.paths import APP_ROOT
 
@@ -105,7 +106,9 @@ class AboutPage(QWidget):
         )
         description.setWordWrap(True)
         product_layout.addWidget(description)
-        product_layout.addWidget(BodyLabel(t("about.version"), product_card))
+        product_layout.addWidget(
+            BodyLabel(t("about.version", version=APP_VERSION_TAG), product_card)
+        )
         root.addWidget(product_card)
 
         notice_card = CardWidget(self)
