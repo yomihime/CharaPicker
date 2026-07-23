@@ -14,7 +14,6 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from utils.app_metadata import (  # noqa: E402
-    APP_NAME,
     APP_RELEASE_STAGE,
     APP_VERSION,
     format_version_tag,
@@ -41,12 +40,6 @@ class Meta:
     @property
     def version_tag(self) -> str:
         return format_version_tag(self.version, self.stage)
-
-    @property
-    def zip_name(self) -> str:
-        return (
-            f"{APP_NAME}-v{self.version_tag}-{self.platform_tag}-{self.arch_tag}.zip"
-        )
 
 
 def _normalize_platform(system_name: str) -> str:
@@ -161,6 +154,17 @@ def _validate(meta: Meta) -> list[str]:
             "STAGE must be one of alpha/beta/rc/release/local "
             f"or alpha.N/beta.N/rc.N, got: {meta.stage}"
         )
+    if not meta.local_build:
+        if meta.version != APP_VERSION:
+            errors.append(
+                "VERSION does not match source application metadata: "
+                f"build={meta.version}, APP_VERSION={APP_VERSION}"
+            )
+        if stage != APP_RELEASE_STAGE.lower():
+            errors.append(
+                "STAGE does not match source application metadata: "
+                f"build={meta.stage}, APP_RELEASE_STAGE={APP_RELEASE_STAGE}"
+            )
     return errors
 
 
@@ -178,7 +182,6 @@ def main(argv: list[str]) -> int:
     print(f"VERSION_TAG={meta.version_tag}")
     print(f"PLATFORM_TAG={meta.platform_tag}")
     print(f"ARCH_TAG={meta.arch_tag}")
-    print(f"ZIP_NAME={meta.zip_name}")
     print(f"LOCAL_BUILD={meta.local_build}")
     print(f"RAW_TAG={meta.raw_tag}")
     print(f"TAG_SOURCE={meta.tag_source}")

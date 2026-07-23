@@ -18,7 +18,7 @@ build.bat --version=0.8.0 --stage=beta
 build.bat --local
 ```
 
-打包脚本通过 `scripts/build_meta.py` 解析版本、阶段、平台和架构，并调用 PyInstaller。未显式传入版本或 tag 时，默认版本和阶段来自 `utils/app_metadata.py`，与运行时 HTTP User-Agent 使用同一份应用元数据。
+打包脚本通过 `scripts/build_meta.py` 解析版本、阶段、平台和架构，并调用 PyInstaller。未显式传入版本或 tag 时，默认版本和阶段来自 `utils/app_metadata.py`，与运行时 HTTP User-Agent 使用同一份应用元数据。除本地构建外，解析结果必须与应用源码版本、阶段一致，否则应在进入 PyInstaller 前失败。
 
 ## 2. PyInstaller 约束
 
@@ -79,8 +79,8 @@ release/
 
 - `utils/app_metadata.py`：运行时应用名、版本阶段和 HTTP User-Agent。
 - `pyproject.toml`：Python 项目元数据版本。
-- `build.bat`：批处理脚本回退默认值和发布文件名默认变量。
-- `README.md`、`docs/readme/README.*.md` 和 `i18n/*`：用户可见版本文案。
+- `build.bat`：批处理脚本回退默认值和发布文件名拼接规则。
+- `README.md` 和 `docs/readme/README.*.md`：用户可见版本文案；关于页版本由 `utils.app_metadata.py` 动态提供。
 - `scripts/build_meta.py`：确认默认值仍从 `utils.app_metadata` 读取，命令行、tag 和 `--local` 覆盖逻辑保持有效。
 
 ## 5. 文件命名
@@ -131,4 +131,4 @@ CharaPicker-v1.0.0-windows-x64.zip
 
 GitHub Actions 只负责编排构建，不承载应用运行逻辑。当前 Windows workflow 会安装依赖和 PyInstaller，运行 `build.bat`，上传 `release/*.zip`，并在 tag 触发时发布 Release 附件。
 
-tag 构建会显式把当前 tag 传给 `build.bat`，让构建产物版本、阶段与发布 tag 对齐。发布 GitHub Release 前必须先在 `CHANGELOG.md` 中准备同名版本小节；workflow 会抽取该小节作为 Release 正文开头，找不到对应小节时应失败，以避免发布缺少版本说明的二进制包。同时 workflow 必须开启 GitHub 自动 release notes，让 Release 页面保留 `What's Changed`、完整 changelog 链接和 contributors 区域。
+tag 构建会显式把当前 tag 传给 `build.bat`，让构建产物版本、阶段与发布 tag 对齐；若 tag 与 `utils.app_metadata.py` 不一致，构建必须失败。发布 GitHub Release 前必须先在 `CHANGELOG.md` 中准备同名版本小节；workflow 会抽取该小节作为 Release 正文开头，找不到对应小节时应失败，以避免发布缺少版本说明的二进制包。同时 workflow 必须开启 GitHub 自动 release notes，让 Release 页面保留 `What's Changed`、完整 changelog 链接和 contributors 区域。

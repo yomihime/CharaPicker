@@ -10,7 +10,6 @@ set "STAGE=beta"
 set "VERSION_TAG=0.8.0-beta"
 set "PLATFORM_TAG=windows"
 set "ARCH_TAG=x64"
-set "ZIP_NAME=CharaPicker-v0.8.0-beta-windows-x64.zip"
 set "LOCAL_BUILD=0"
 set "TAG_SOURCE="
 set "RAW_TAG="
@@ -26,6 +25,7 @@ for /f "usebackq tokens=1,* delims==" %%A in (`%PYTHON_CMD% scripts\build_meta.p
 
 if errorlevel 1 goto :error
 
+set "ZIP_NAME=%APP_NAME%-v%VERSION_TAG%-%PLATFORM_TAG%-%ARCH_TAG%.zip"
 set "DIST_DIR=%ROOT_DIR%dist"
 set "BUILD_DIR=%ROOT_DIR%build"
 set "RELEASE_DIR=%ROOT_DIR%release"
