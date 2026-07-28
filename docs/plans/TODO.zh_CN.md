@@ -1,6 +1,6 @@
 # TODO List（zh_CN）
 
-最近整理日期：2026-07-20。
+最近整理日期：2026-07-28。
 
 本文只收录仍需执行或持续跟踪的任务。已完成的角色卡最终编译、角色卡页面、角色卡质量调优、正式视频提取基础链路、多供应商首版、日志治理和内置 proxy 设置计划已移入完成区或 `docs/archive/`；历史里程碑不再占用当前执行队列。
 
@@ -10,10 +10,15 @@
 
 1. 持续运行统一离线回归，保持四媒体类型、预览/正式隔离、来源追踪和旧视频链路不回退。
 2. 根据真实验收结果继续调整供应商拒绝、证据质量、进度和 UI 反馈，不提前扩展新的媒体类型或大范围插件架构。
+3. 发布候选打包路径修复已完成；进入发布前继续按发布规范执行打包验收。
 
 ## P0：Extract Once 覆盖缺口
 
 路线 03 的扫描、handler、预览、正式聚合、角色卡证据、失败记录、GUI 状态和统一离线回归已经落地；ZIP、CBZ、EPUB、PDF、7z、RAR 与 CBR 的受控输入预处理也已完成并归档。当前没有独立 P0 覆盖缺口；后续如真实素材暴露新的阻断问题，应先核对 [多内容形态完成记录](../archive/03-multi-material-coverage-plan.completed.zh_CN.md) 和 [更多输入格式完成记录](../archive/input-format-support-plan.completed.zh_CN.md)，再建立专项任务。
+
+## 发布候选阻断项
+
+当前没有已确认的未完成发布候选阻断项。打包运行根目录修复已完成，完成记录见 [打包运行根目录修复计划与完成记录](release-runtime-root-fix.zh_CN.md)。
 
 ## P1：提取质量与可观测性
 
@@ -32,8 +37,16 @@
 | 4 | 继续扩展首版以外的 API 规范 | 低 | 大 | 在多供应商首版稳定后，按优先级继续评估 OpenAI Responses、Gemini GenerateContent、Anthropic Messages 等 schema；每个 schema 需通过中间件路由和模型页测试验证后再开放。 |
 | 5 | 增强 transcript 后处理能力 | 低 | 中 | 在 episode transcript 基础上按需增加说话人识别、置信度、字幕导入合并或人工校正流程，不影响首版 Whisper 接入。 |
 
+## 发布审查记录（本轮不执行）
+
+- `rc.0` 视为 `rc` 的等价别名：当没有小修订 build 序号时，公开发布优先使用无 `.0` 的规范形式，例如 `v1.0.0-rc`；不把 `v1.0.0-rc` 与 `v1.0.0-rc.0` 作为两个独立候选版本处理。
+- 自更新下载压缩包大小上限已记录为后续加固点；当前仍依赖 HTTPS、精确资产名、SHA-256 校验、成员数量上限和解压后体积上限。
+- 原生音频理解的大文件请求体保护已记录为后续加固点；当前首选 transcript 路径，native audio 仍应保持补充型能力。
+- 目录导入递归深度策略已记录为后续产品取舍；当前仍按既有导入规则处理。
+
 ## 已完成并移出队列
 
+- 打包运行根目录修复完成：frozen/packaged Windows one-folder 运行时以 `CharaPicker.exe` 所在目录作为 `APP_ROOT`，自更新 relaunch cwd 同步使用安装目录；相关单测、Ruff 和统一离线回归已通过。
 - 路线 01 提取质量与可观测性基础实施完成，正式提取回归、失败策略和可观察状态已建立。
 - 路线 02 多媒体平级接入前重构完成：正式提取以 `FormalExtractionRunPlan` 为主索引，顶层媒体类型固定为 `video`、`image`、`audio`、`text`，transcript 作为 text 型派生成果处理。
 - 路线 03 离线实现完成：普通文本、SRT/ASS、音频 transcript、PNG/JPEG/WEBP、漫画页组、视频 + 字幕关联和原生视听补充 handler 已进入统一扫描、预览、正式分派、聚合、角色卡证据和失败记录链路；`scripts/validate_multi_material_regression.py` 提供统一离线回归。

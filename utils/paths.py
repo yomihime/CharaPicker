@@ -7,10 +7,10 @@ from core.models import ProjectPaths
 
 
 def _resolve_app_root() -> Path:
-    # In frozen/packaged runtime, __file__ may resolve into a temp extraction
-    # directory; use the launch working directory as app root instead.
+    # Packaged one-folder builds must resolve runtime data next to the executable,
+    # regardless of the working directory used by shortcuts or launchers.
     if getattr(sys, "frozen", False):
-        return Path.cwd().resolve()
+        return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[1]
 
 

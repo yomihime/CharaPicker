@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 import tempfile
 import unittest
 import zipfile
@@ -9,12 +11,14 @@ from unittest.mock import patch
 from utils.app_update import (
     APP_NAME,
     AppVersion,
+    PreparedUpdate,
     UpdateDownloadError,
     UpdatePackageUnavailableError,
     _extract_update_archive,
     _read_expected_checksum,
     _resolve_update_payload_dir,
     check_for_update,
+    launch_prepared_update,
 )
 
 
@@ -240,6 +244,49 @@ class UpdateArchiveTests(unittest.TestCase):
 
             with self.assertRaises(UpdateDownloadError):
                 _read_expected_checksum(checksum_path, "expected.zip")
+
+
+class UpdateLaunchTests(unittest.TestCase):
+    def test_launch_request_relaunch_cwd_uses_install_dir_not_current_cwd(self) -> None:
+        original_cwd = Path.cwd()
+        with tempfile.TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            install_dir = root / "install" / "CharaPicker"
+            workspace = root / "workspace"
+            payload_dir = root / "payload"
+            external_cwd = root / "external-cwd"
+            updater_path = payload_dir / "CharaPickerUpdater.exe"
+            for directory in (install_dir, workspace, payload_dir, external_cwd):
+                directory.mkdir(parents=True)
+            updater_path.write_bytes(b"updater")
+
+            prepared = PreparedUpdate(
+                version_tag="1.0.0",
+                workspace=workspace,
+                payload_dir=payload_dir,
+                updater_path=updater_path,
+            )
+
+            try:
+                os.chdir(external_cwd)
+                with (
+                    patch("utils.app_update.packaged_install_dir", return_value=install_dir),
+                    patch("utils.app_update.shutil.copy2"),
+                    patch("utils.app_update.subprocess.Popen"),
+                ):
+                    launch_prepared_update(
+                        prepared,
+                        current_pid=1234,
+                        failure_title="Update failed",
+                        failure_message="Rollback required",
+                    )
+            finally:
+                os.chdir(original_cwd)
+
+            request = json.loads((workspace / "update-request.json").read_text(encoding="utf-8"))
+            self.assertEqual(request["install_dir"], str(install_dir))
+            self.assertEqual(request["relaunch_cwd"], str(install_dir))
+            self.assertNotEqual(request["relaunch_cwd"], str(external_cwd.resolve()))
 
 
 if __name__ == "__main__":

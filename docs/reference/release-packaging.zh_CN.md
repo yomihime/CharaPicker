@@ -25,6 +25,7 @@ build.bat --local
 - 打包必须使用 PyInstaller。
 - 使用文件夹形式的 one-folder 产物，不使用单文件 exe 作为正式发布形态。
 - 主程序继续使用 one-folder；为在主程序退出后替换安装目录，允许把无第三方运行时依赖的 `CharaPickerUpdater.exe` 构建为独立 one-file 辅助程序，并随主程序目录发布。该辅助程序不是应用的独立分发形态。
+- 打包后的主程序运行根目录必须以 `CharaPicker.exe` 所在目录为准，不能依赖启动进程的当前工作目录。快捷方式、终端、文件管理器和自更新 relaunch 都可能提供不同 cwd；`config.yaml`、`projects/`、`log/`、`bin/`、`models/` 和运行资源路径不得因此漂移。
 - `main.spec` 负责收集 `i18n/`、`res/` 和 qfluentwidgets 资源。
 - `updater.spec` 只构建独立更新辅助程序，不收集 PyQt6 或 qfluentwidgets。
 - 发布前应清理旧的 `build/`、`dist/CharaPicker/`、`release/CharaPicker/` 和目标 zip。
@@ -66,7 +67,7 @@ release/
 - `release`
 - `local`
 
-当前构建脚本也支持 `alpha.N`、`beta.N`、`rc.N` 形式。这里的 `N` 是 build 版本号，用于同一 `x.y.z` 与同一阶段下的 rebuild；它可以包含不影响主要功能的 bug 修正或构建修正，但主旨是重新构建，不表达新的功能阶段。
+当前构建脚本也支持 `alpha.N`、`beta.N`、`rc.N` 形式。这里的 `N` 是 build 版本号，用于同一 `x.y.z` 与同一阶段下的 rebuild；它可以包含不影响主要功能的 bug 修正或构建修正，但主旨是重新构建，不表达新的功能阶段。`N=0` 表示没有额外小修订，与无序号阶段等价；公开发布优先使用 `alpha`、`beta`、`rc` 这种无 `.0` 的规范形式，不把 `rc` 与 `rc.0` 作为两个独立候选版本。
 
 在 `1.0.0` 之前，公开构建必须使用 `alpha` 或 `beta` 阶段；不要把 `0.x.y` 标记为 `release` 或 `rc`。当一次开发带来明确功能阶段推进时，应提升 `y`，例如从 `0.2.0-alpha.N` 进入 `0.3.0-alpha`；bug 修正集或极小补充可以提升 `z`；只为同一版本重新打包、修正构建元数据或补很小的非核心问题时，优先提升 `alpha.N` / `beta.N` 的 build 版本号。
 
@@ -74,6 +75,7 @@ release/
 
 - `v0.8.0-beta` -> `version=0.8.0`，`stage=beta`
 - `v0.6.0-beta.1` -> `version=0.6.0`，`stage=beta.1`
+- `v1.0.0-rc` -> `version=1.0.0`，`stage=rc`
 - `v1.0.0` -> `version=1.0.0`，`stage=release`
 
 构建脚本只读取显式 `--tag` 或当前提交上的精确 Git tag；历史最近 tag 不应覆盖当前默认版本。
