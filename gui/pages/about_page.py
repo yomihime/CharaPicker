@@ -1,19 +1,34 @@
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+import os
+
+from PyQt6.QtCore import QThread, QTimer, Qt, pyqtSignal
 from PyQt6.QtWidgets import QApplication, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel,
     CaptionLabel,
     CardWidget,
+    CheckBox,
+    FluentIcon as FIF,
     HyperlinkButton,
+    MessageBox,
     PlainTextEdit,
+    ProgressBar,
     PushButton,
     SubtitleLabel,
     TitleLabel,
 )
 
+from gui.workers.app_update_workers import UpdateCheckWorker, UpdateDownloadWorker
 from gui.widgets.dialog_middleware import FluentDialog
+from utils.app_update import (
+    PreparedUpdate,
+    UpdateRelease,
+    discard_prepared_update,
+    include_prereleases_preference,
+    launch_prepared_update,
+    set_include_prereleases_preference,
+)
 from utils.app_metadata import APP_VERSION_TAG
 from utils.i18n import t
 from utils.paths import APP_ROOT
@@ -53,6 +68,64 @@ class LicenseDialog(FluentDialog):
 
     def _copy_license_text(self) -> None:
         QApplication.clipboard().setText(self.license_text)
+
+
+class UpdateDownloadDialog(FluentDialog):
+    cancelRequested = pyqtSignal()
+
+    def __init__(self, version_tag: str, parent: QWidget | None = None) -> None:
+        super().__init__(
+            t("about.update.download.title"),
+            parent,
+            width=540,
+            height=230,
+            close_rejects=False,
+        )
+        self._cancel_requested = False
+        self._finished = False
+
+        self.status_label = BodyLabel(
+            t("about.update.download.starting", version=version_tag),
+            self.dialog_card,
+        )
+        self.status_label.setWordWrap(True)
+        self.content_layout.addWidget(self.status_label)
+
+        self.progress_bar = ProgressBar(self.dialog_card)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.content_layout.addWidget(self.progress_bar)
+
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        self.cancel_button = PushButton(t("about.update.download.cancel"), self.dialog_card)
+        actions.addWidget(self.cancel_button)
+        self.content_layout.addLayout(actions)
+
+        self.cancel_button.clicked.connect(self.request_cancel)
+        self.close_button.clicked.connect(self.request_cancel)
+
+    def set_progress(self, value: int, message: str) -> None:
+        self.progress_bar.setValue(value)
+        self.status_label.setText(message)
+
+    def request_cancel(self) -> None:
+        if self._cancel_requested or self._finished:
+            return
+        self._cancel_requested = True
+        self.cancel_button.setEnabled(False)
+        self.close_button.setEnabled(False)
+        self.status_label.setText(t("about.update.download.canceling"))
+        self.cancelRequested.emit()
+
+    def mark_finished(self) -> None:
+        self._finished = True
+
+    def reject(self) -> None:
+        if self._finished:
+            super().reject()
+            return
+        self.request_cancel()
 
 
 def _build_license_text() -> str:
@@ -109,6 +182,25 @@ class AboutPage(QWidget):
         product_layout.addWidget(
             BodyLabel(t("about.version", version=APP_VERSION_TAG), product_card)
         )
+
+        update_row = QHBoxLayout()
+        update_row.setContentsMargins(0, 0, 0, 0)
+        update_row.setSpacing(16)
+        self.update_button = PushButton(t("about.update.check"), product_card)
+        self.update_button.setIcon(FIF.SYNC)
+        self.update_button.setFixedHeight(32)
+        self.update_button.clicked.connect(self._start_update_check)
+        update_row.addWidget(self.update_button)
+
+        self.prerelease_checkbox = CheckBox(
+            t("about.update.includePrereleases"),
+            product_card,
+        )
+        self.prerelease_checkbox.setChecked(include_prereleases_preference())
+        self.prerelease_checkbox.toggled.connect(set_include_prereleases_preference)
+        update_row.addWidget(self.prerelease_checkbox)
+        update_row.addStretch(1)
+        product_layout.addLayout(update_row)
         root.addWidget(product_card)
 
         notice_card = CardWidget(self)
@@ -170,5 +262,204 @@ class AboutPage(QWidget):
 
         root.addStretch(1)
 
+        self._check_thread: QThread | None = None
+        self._check_worker: UpdateCheckWorker | None = None
+        self._download_thread: QThread | None = None
+        self._download_worker: UpdateDownloadWorker | None = None
+        self._download_dialog: UpdateDownloadDialog | None = None
+        self._prepared_update: PreparedUpdate | None = None
+
     def _show_license_dialog(self) -> None:
         LicenseDialog(self).exec()
+
+    def _start_update_check(self, _checked: bool = False) -> None:
+        if self._check_thread is not None or self._download_thread is not None:
+            return
+        set_include_prereleases_preference(self.prerelease_checkbox.isChecked())
+        self._set_update_controls_running(True)
+        self.update_button.setText(t("about.update.checking"))
+
+        thread = QThread(self)
+        worker = UpdateCheckWorker(
+            include_prereleases=self.prerelease_checkbox.isChecked(),
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.succeeded.connect(self._handle_update_check_success)
+        worker.packageUnavailable.connect(self._show_update_package_unavailable)
+        worker.failed.connect(self._show_update_error)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._clear_update_check_worker)
+        self._check_thread = thread
+        self._check_worker = worker
+        thread.start()
+
+    def _handle_update_check_success(self, release: UpdateRelease | None) -> None:
+        if release is None:
+            self._show_message(
+                t("about.update.latest.title"),
+                t("about.update.latest.content", version=APP_VERSION_TAG),
+            )
+            return
+
+        dialog = MessageBox(
+            t("about.update.available.title"),
+            t(
+                "about.update.available.content",
+                version=release.version.public_tag,
+                size=_format_size(release.archive.size),
+            ),
+            self,
+        )
+        dialog.yesButton.setText(t("about.update.available.confirm"))
+        dialog.cancelButton.setText(t("about.update.available.cancel"))
+        if dialog.exec():
+            QTimer.singleShot(0, lambda: self._start_update_download(release))
+
+    def _start_update_download(self, release: UpdateRelease) -> None:
+        if self._download_thread is not None:
+            return
+        if self._has_other_background_tasks(exclude=(self._check_thread,)):
+            self._show_update_busy()
+            return
+        self._set_update_controls_running(True)
+        self._download_dialog = UpdateDownloadDialog(release.version.public_tag, self)
+        self._download_dialog.show()
+
+        thread = QThread(self)
+        worker = UpdateDownloadWorker(release)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        self._download_dialog.cancelRequested.connect(
+            worker.cancel,
+            Qt.ConnectionType.DirectConnection,
+        )
+        worker.progressChanged.connect(self._update_download_progress)
+        worker.succeeded.connect(self._handle_update_download_success)
+        worker.failed.connect(self._handle_update_download_failure)
+        worker.cancelled.connect(self._handle_update_download_cancelled)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._clear_update_download_worker)
+        self._download_thread = thread
+        self._download_worker = worker
+        thread.start()
+
+    def _update_download_progress(self, value: int, step: str) -> None:
+        if self._download_dialog is None:
+            return
+        self._download_dialog.set_progress(
+            value,
+            t(f"about.update.download.progress.{step}"),
+        )
+
+    def _handle_update_download_success(self, prepared: PreparedUpdate) -> None:
+        self._prepared_update = prepared
+        if self._download_dialog is not None:
+            self._download_dialog.mark_finished()
+            self._download_dialog.set_progress(100, t("about.update.download.progress.ready"))
+            self._download_dialog.close()
+
+    def _handle_update_download_failure(self, error: str) -> None:
+        self._close_update_download_dialog()
+        self._show_update_error(error)
+
+    def _handle_update_download_cancelled(self) -> None:
+        self._close_update_download_dialog()
+        self._show_message(
+            t("about.update.cancelled.title"),
+            t("about.update.cancelled.content"),
+        )
+
+    def _close_update_download_dialog(self) -> None:
+        if self._download_dialog is None:
+            return
+        self._download_dialog.mark_finished()
+        self._download_dialog.close()
+
+    def _clear_update_check_worker(self) -> None:
+        self._check_thread = None
+        self._check_worker = None
+        if self._download_thread is None:
+            self._set_update_controls_running(False)
+
+    def _clear_update_download_worker(self) -> None:
+        prepared = self._prepared_update
+        self._prepared_update = None
+        self._download_thread = None
+        self._download_worker = None
+        self._download_dialog = None
+        if prepared is None:
+            self._set_update_controls_running(False)
+            return
+        QTimer.singleShot(0, lambda: self._launch_update(prepared))
+
+    def _launch_update(self, prepared: PreparedUpdate) -> None:
+        if self._has_other_background_tasks():
+            discard_prepared_update(prepared)
+            self._set_update_controls_running(False)
+            self._show_update_busy()
+            return
+        try:
+            launch_prepared_update(
+                prepared,
+                current_pid=os.getpid(),
+                failure_title=t("about.update.apply.failure.title"),
+                failure_message=t("about.update.apply.failure.content"),
+            )
+        except Exception as exc:  # noqa: BLE001
+            discard_prepared_update(prepared)
+            self._set_update_controls_running(False)
+            self._show_update_error(str(exc))
+            return
+        QApplication.instance().quit()
+
+    def _show_update_package_unavailable(self, tag_name: str) -> None:
+        self._show_message(
+            t("about.update.unavailable.title"),
+            t("about.update.unavailable.content", version=tag_name),
+        )
+
+    def _show_update_error(self, error: str) -> None:
+        self._show_message(
+            t("about.update.failure.title"),
+            t("about.update.failure.content", error=error),
+        )
+
+    def _show_update_busy(self) -> None:
+        self._show_message(
+            t("about.update.busy.title"),
+            t("about.update.busy.content"),
+        )
+
+    def _show_message(self, title: str, content: str) -> None:
+        dialog = MessageBox(title, content, self)
+        dialog.yesButton.setText(t("about.update.dialog.close"))
+        dialog.cancelButton.hide()
+        dialog.exec()
+
+    def _set_update_controls_running(self, running: bool) -> None:
+        self.update_button.setEnabled(not running)
+        self.prerelease_checkbox.setEnabled(not running)
+        if not running:
+            self.update_button.setText(t("about.update.check"))
+
+    def _has_other_background_tasks(
+        self,
+        *,
+        exclude: tuple[QThread | None, ...] = (),
+    ) -> bool:
+        excluded = {thread for thread in exclude if thread is not None}
+        return any(
+            thread not in excluded and thread.isRunning()
+            for thread in self.window().findChildren(QThread)
+        )
+
+
+def _format_size(size: int) -> str:
+    if size <= 0:
+        return t("about.update.size.unknown")
+    return f"{size / (1024 * 1024):.1f} MB"

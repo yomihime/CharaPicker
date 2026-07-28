@@ -40,6 +40,14 @@ jobs:
           }
           & .\build.bat @buildArgs
 
+      - name: Generate release checksums
+        shell: pwsh
+        run: |
+          Get-ChildItem -LiteralPath release -Filter *.zip | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)" | Set-Content -LiteralPath "$($_.FullName).sha256" -Encoding ascii
+          }
+
       - name: Prepare release notes
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
@@ -89,7 +97,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: charapicker-windows-build
-          path: release/*.zip
+          path: |
+            release/*.zip
+            release/*.sha256
           if-no-files-found: error
 
       - name: Publish GitHub Release Assets
@@ -97,7 +107,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
-          files: release/*.zip
+          files: |
+            release/*.zip
+            release/*.sha256
           body_path: release_notes.md
           generate_release_notes: true
           fail_on_unmatched_files: true
