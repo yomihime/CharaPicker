@@ -2,45 +2,39 @@
 
 [简体中文](../../README.md) | [繁體中文](README.zh_TW.md) | [日本語](README.ja_JP.md)
 
-## Overview
+## What This Is
 
-CharaPicker is a desktop tool that extracts character-focused information from anime, manga, video, image, or text materials, then compiles structured character profiles and insights.
+CharaPicker is a personal experimental desktop tool. It tries to pull character-related information out of anime, manga, video, image, audio, and text materials, then turn that information into a traceable knowledge base and character profiles.
 
-## Core Goals
+It is not mature commercial software, and it is not something I would treat as a production-grade tool for important data. The project is largely pure vibe coding: trying ideas, writing the thing, reshaping it, and using AI to move quickly from an idea to working code. The docs try to be explicit about what works, what is still shaky, and where you should use your own judgment.
 
-- Extract Once: process source materials once and build a reusable knowledge base.
-- Targeted Insight: generate focused insights for target characters or world settings.
-- Visible Thinking: show key insight flow in UI, not just debug logs.
+## What I Am Trying to Solve
+
+- Materials should not be analyzed from scratch every time. Once processed, useful results should land in a reusable knowledge base.
+- Character cards should not depend on a single free-form model response. Later generation should prefer structured results and evidence.
+- Long-running jobs should not be a black box. Extraction, skips, failures, and aggregation should be visible in the UI.
 
 ## Current Status
 
 - Version: `v0.8.0-beta` (in development)
-- Document updated: `2026-07-21`
+- Document updated: `2026-07-28`
 
-## Implemented
+## What Works Now
 
-- Startup and warmup flow: splash, theme apply, basic environment checks.
-- Main UI skeleton: project, character cards, model, prompt, settings, and about pages.
-- Project config management: save/load and recent project listing.
-- Material processing flow: import into `raw/`, link/process into `materials/`, FFmpeg split/transcode options.
-- Multi-material extraction: video, image, audio, and text share the run-plan, preview/formal dispatch, knowledge-base aggregation, and source-trace foundations.
-- Input preprocessing: ZIP, CBZ, EPUB, text-based PDF, 7z, RAR, and CBR are converted into existing text or image material flows.
-- Insight UI: InsightStreamPanel card timeline with streaming updates.
-- Cloud model integration: unified OpenAI-compatible middleware with token usage logging.
-- Preview pipeline connected: `project -> extractor -> insight stream -> preview knowledge base`.
-- Character card page: project-scoped card gallery, search, create, edit, cover crop, preview, compile, import, and export.
+- Create projects, import materials, keep original files under `raw/`, and process working entries into `materials/`.
+- Scan video, image, audio, and text materials into preview or formal extraction run plans.
+- Preprocess ZIP, CBZ, EPUB, text-based PDF, 7z, RAR, and CBR into existing text or image flows.
+- Call OpenAI-compatible model backends through shared middleware and record token usage.
+- Show important extraction events in the insight stream instead of leaving everything in logs.
+- Manage project-scoped character cards: create, edit, crop covers, preview, compile, import, and export.
+- Compile CharaPicker JSON from the formal knowledge base and export Markdown, HTML, Character Card V2 JSON, and AstrBot copy lists.
 
-## Progress
+## Still Shaky
 
-- Done: runnable UI, four-media extraction foundations, character-card lifecycle, and controlled preprocessing for seven complex input formats.
-- In progress: generating higher-quality reusable structured insights from real materials.
-- Next focus: improve real-material extraction quality, knowledge-base quality, character-card conflict resolution, and quality evaluation.
-
-## Not Yet Implemented
-
-- Multi-material content now enters the common preview and formal-extraction foundations, while real-material quality, cross-content association, and failure feedback still need continued validation.
-- Character card compilation can generate CharaPicker JSON from the formal knowledge base, with layered evidence, alias reclassification, quality diagnostics, and protection against compiling characters with no direct evidence.
-- Stable automatic write-back loop to `facts.json` and `targeted_insights.json` is not complete.
+- Real-material extraction quality still needs work, especially across episodes, media types, and long text context.
+- Character-card conflict resolution, quality evaluation, and evidence selection need more sample coverage.
+- Early knowledge-base files such as `facts.json` and `targeted_insights.json` do not yet have a stable automatic write-back loop.
+- Model output has cost, failure, and hallucination risks. Important results need human review.
 
 ## Requirements
 
@@ -54,6 +48,7 @@ CharaPicker is a desktop tool that extracts character-focused information from a
 - The first PDF implementation extracts existing text only and does not run OCR. Encrypted PDFs, DRM EPUB files, and password-protected archives are rejected explicitly.
 - 7z/RAR/CBR require a local 7-Zip installation. CharaPicker checks project-local `bin/` locations, `PATH`, standard Windows install locations, and `CHARAPICKER_7ZIP_PATH`; it does not download 7-Zip.
 - Nested containers are not expanded recursively. Original containers remain in `raw/`; derived materials and source mappings are stored under `materials/derived_inputs/` and preprocessing manifests.
+- Videos inside generic ZIP/7z/RAR archives are not expanded. Import videos as direct materials. CBZ/CBR continue to accept comic image pages only.
 
 ## Install
 
@@ -67,7 +62,7 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
-## Feature Overview
+## Main Features
 
 - Project-scoped material management (`projects/{project_id}`)
 - Character card management with CharaPicker JSON as the source of truth
