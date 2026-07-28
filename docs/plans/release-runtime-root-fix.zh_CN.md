@@ -1,6 +1,6 @@
-# 打包运行根目录修复计划
+# 打包运行根目录修复计划与完成记录
 
-> 本文档是执行计划，不代表实现状态。实现前需由用户确认修复计划。
+> 本文档原为执行计划；截至 2026-07-28，M01-M03 已按计划完成。
 
 ## 1. 范围
 
@@ -23,14 +23,14 @@
 - 自更新 relaunch 的工作目录应与安装目录对齐，避免修复后仍由外部 cwd 影响启动行为。
 - 本轮只做路径根修复和对应测试，不扩大到发布包结构或更新协议重构。
 
-## 4. 当前状态
+## 4. 修复前状态
 
 - `utils.paths._resolve_app_root()` 在 frozen 环境返回 `Path.cwd().resolve()`。
 - `APP_ROOT` 派生出 `PROJECTS_ROOT` 与 `LOGS_ROOT`。
 - `utils.global_store`、`utils.env_manager`、`utils.logging_middleware`、关于页、模型页测试媒体路径等模块依赖 `APP_ROOT`。
 - `utils.app_update.packaged_install_dir()` 已经用 `sys.executable` 定位安装目录，但 `launch_prepared_update()` 写入的 `relaunch_cwd` 仍来自当前工作目录。
 
-## 5. 目标状态
+## 5. 完成状态
 
 - frozen/packaged 环境中，`APP_ROOT`、`PROJECTS_ROOT`、`LOGS_ROOT` 与安装目录稳定绑定。
 - 从快捷方式、任意终端目录或自更新 relaunch 启动时，不会把配置、日志、项目数据或工具目录写到外部 cwd。
@@ -39,7 +39,7 @@
 
 ## 6. 实施里程碑
 
-### M01：修复运行根目录
+### M01：修复运行根目录（已完成）
 
 交付：
 - 将 frozen/packaged 环境下的 `utils.paths._resolve_app_root()` 改为使用 `sys.executable` 所在目录。
@@ -53,7 +53,7 @@
 - 不迁移已有错误 cwd 下的用户数据。
 - 不改变项目目录结构。
 
-### M02：修复自更新 relaunch cwd
+### M02：修复自更新 relaunch cwd（已完成）
 
 交付：
 - `utils.app_update.launch_prepared_update()` 写入请求时，将 `relaunch_cwd` 设置为安装目录。
@@ -66,7 +66,7 @@
 - 不改 `app_updater.py` 的整体替换流程。
 - 不调整保留目录列表。
 
-### M03：回归验证
+### M03：回归验证（已完成）
 
 交付：
 - 新增或更新针对路径解析与自更新请求的单测。
@@ -74,7 +74,7 @@
 
 验收命令：
 - `conda run -n CharaPicker python -m ruff check .`
-- `conda run -n CharaPicker python -m unittest tests.test_app_update tests.test_build_meta`
+- `conda run -n CharaPicker python -m unittest tests.test_paths tests.test_app_update tests.test_build_meta`
 - `conda run -n CharaPicker python scripts\validate_multi_material_regression.py`
 
 边界：
@@ -87,13 +87,20 @@
 - 检查自更新请求 JSON 中路径均位于安装目录、安装目录父目录或系统临时目录的预期边界内。
 - 检查测试没有依赖本机固定路径。
 
-## 8. 提交分组
+## 8. 已完成提交分组
 
-建议本轮实现只保留一个代码提交：
+本轮实现按两个问题分开提交：
 
-- `fix: resolve packaged app root from executable`
+- `e6e19d3 fix: resolve packaged app root from executable`
+- `815fa88 fix: relaunch updater from install directory`
 
-提交前检查：
-- 工作区只包含路径修复、相关测试和必要文档同步。
-- 所有验证命令通过，或明确说明无法运行的命令和原因。
+文档状态收尾单独提交。
 
+## 9. 验证记录
+
+2026-07-28 已通过：
+
+- `conda run -n CharaPicker python -m ruff check .`
+- `conda run -n CharaPicker python -m unittest tests.test_paths tests.test_app_update tests.test_build_meta`
+- `conda run -n CharaPicker python scripts\validate_multi_material_regression.py`
+- `git diff --check`

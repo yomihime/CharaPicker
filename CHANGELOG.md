@@ -14,6 +14,8 @@
   动态拼接文件名，例如 `CharaPicker-v1.0.0-windows-x64.zip`。
 - 非本地构建新增 tag、应用版本与阶段一致性校验；关于页改为从统一应用元数据动态展示版本，
   避免发布包文件名与包内版本不一致。
+- 修复打包态运行根目录依赖启动工作目录的问题；frozen one-folder 环境现在以
+  `CharaPicker.exe` 所在目录作为 `APP_ROOT`，自更新 relaunch cwd 同步使用安装目录。
 
 ### 文档
 

@@ -10,7 +10,7 @@
 
 1. 持续运行统一离线回归，保持四媒体类型、预览/正式隔离、来源追踪和旧视频链路不回退。
 2. 根据真实验收结果继续调整供应商拒绝、证据质量、进度和 UI 反馈，不提前扩展新的媒体类型或大范围插件架构。
-3. 在进入正式发布前收敛打包运行时路径边界，优先完成 [打包运行根目录修复计划](release-runtime-root-fix.zh_CN.md)。
+3. 发布候选打包路径修复已完成；进入发布前继续按发布规范执行打包验收。
 
 ## P0：Extract Once 覆盖缺口
 
@@ -18,9 +18,7 @@
 
 ## 发布候选阻断项
 
-| 顺序 | 待办 | 优先级 | 规模 | 主要验收点 |
-| --- | --- | --- | --- | --- |
-| 1 | 修复打包运行时根目录解析 | 高 | 小 | frozen/packaged Windows one-folder 运行时以 `CharaPicker.exe` 所在目录作为 `APP_ROOT`，而不是启动工作目录；`config.yaml`、`projects/`、`log/`、`bin/`、`models/`、`res/` 与许可证读取不因快捷方式或更新器 relaunch 的 cwd 改变而漂移。 |
+当前没有已确认的未完成发布候选阻断项。打包运行根目录修复已完成，完成记录见 [打包运行根目录修复计划与完成记录](release-runtime-root-fix.zh_CN.md)。
 
 ## P1：提取质量与可观测性
 
@@ -48,6 +46,7 @@
 
 ## 已完成并移出队列
 
+- 打包运行根目录修复完成：frozen/packaged Windows one-folder 运行时以 `CharaPicker.exe` 所在目录作为 `APP_ROOT`，自更新 relaunch cwd 同步使用安装目录；相关单测、Ruff 和统一离线回归已通过。
 - 路线 01 提取质量与可观测性基础实施完成，正式提取回归、失败策略和可观察状态已建立。
 - 路线 02 多媒体平级接入前重构完成：正式提取以 `FormalExtractionRunPlan` 为主索引，顶层媒体类型固定为 `video`、`image`、`audio`、`text`，transcript 作为 text 型派生成果处理。
 - 路线 03 离线实现完成：普通文本、SRT/ASS、音频 transcript、PNG/JPEG/WEBP、漫画页组、视频 + 字幕关联和原生视听补充 handler 已进入统一扫描、预览、正式分派、聚合、角色卡证据和失败记录链路；`scripts/validate_multi_material_regression.py` 提供统一离线回归。
