@@ -314,7 +314,7 @@ def launch_prepared_update(
         "ack_path": str(ack_path),
         "log_path": str(log_path),
         "executable_name": f"{APP_NAME}.exe",
-        "relaunch_cwd": str(Path.cwd().resolve()),
+        "relaunch_cwd": str(install_dir),
         "preserve": list(PRESERVED_RUNTIME_PATHS),
         "failure_title": failure_title,
         "failure_message": failure_message,
