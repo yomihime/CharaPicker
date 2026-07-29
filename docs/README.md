@@ -1,7 +1,5 @@
 # CharaPicker 文档索引
 
-最近整理日期：2026-07-20。
-
 `docs/` 是 CharaPicker 的正式专题文档目录。根目录 `README.md` 负责项目首页说明；根目录和各主要代码目录中的 `ARCHITECTURE.md` 负责就近说明目录职责。已完成的一次性开发计划默认移入 `archive/`，稳定说明放入 `reference/`，仍有效路线和当前后续队列放入 `plans/`。
 
 ## 入口与多语言
@@ -10,6 +8,7 @@
 - [繁體中文 README](readme/README.zh_TW.md)
 - [日本語 README](readme/README.ja_JP.md)
 - [English README](readme/README.en_US.md)
+- README 的写作规则见 [文档维护规范](reference/documentation-maintenance.zh_CN.md)，应保留个人实验性质和当前成熟度说明。
 
 ## 稳定说明
 
@@ -53,6 +52,8 @@
 - [番剧、漫画、广播剧、小说等内容形态支持执行计划完成记录](archive/03-multi-material-coverage-plan.completed.zh_CN.md)
 - [真实预览结果后续计划完成记录](archive/preview-real-result-followup-plan.completed.zh_CN.md)
 - [更多输入格式支持执行计划完成记录](archive/input-format-support-plan.completed.zh_CN.md)
+- [更新包 Payload 识别修正完成记录](archive/update-archive-payload-resolution.completed.zh_CN.md)
+- [打包运行根目录修复完成记录](archive/release-runtime-root-fix.completed.zh_CN.md)
 
 ## 目录说明
 
