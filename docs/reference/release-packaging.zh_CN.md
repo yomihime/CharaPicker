@@ -13,8 +13,8 @@ build.bat
 常用参数：
 
 ```powershell
-build.bat --tag=v0.8.0-beta
-build.bat --version=0.8.0 --stage=beta
+build.bat --tag=vX.Y.Z-beta
+build.bat --version=X.Y.Z --stage=beta
 build.bat --local
 ```
 
@@ -73,8 +73,8 @@ release/
 
 允许通过 Git tag 指示版本与阶段：
 
-- `v0.8.0-beta` -> `version=0.8.0`，`stage=beta`
-- `v0.6.0-beta.1` -> `version=0.6.0`，`stage=beta.1`
+- `v1.2.3-beta` -> `version=1.2.3`，`stage=beta`
+- `v1.2.3-beta.1` -> `version=1.2.3`，`stage=beta.1`
 - `v1.0.0-rc` -> `version=1.0.0`，`stage=rc`
 - `v1.0.0` -> `version=1.0.0`，`stage=release`
 
@@ -87,7 +87,7 @@ release/
 - `utils/app_metadata.py`：运行时应用名、版本阶段和 HTTP User-Agent。
 - `pyproject.toml`：Python 项目元数据版本。
 - `build.bat`：批处理脚本回退默认值和发布文件名拼接规则。
-- `README.md` 和 `docs/readme/README.*.md`：用户可见版本文案；关于页版本由 `utils.app_metadata.py` 动态提供。
+- `README.md` 和 `docs/readme/README.*.md`：用户可见阶段、发布入口和构建入口文案；README 不维护精确当前版本号，关于页版本由 `utils.app_metadata.py` 动态提供。
 - `scripts/build_meta.py`：确认默认值仍从 `utils.app_metadata` 读取，命令行、tag 和 `--local` 覆盖逻辑保持有效。
 
 ## 5. 文件命名
@@ -103,7 +103,7 @@ release/
 示例：
 
 ```text
-CharaPicker-v0.8.0-beta-windows-x64.zip
+CharaPicker-v<version>-beta-windows-x64.zip
 CharaPicker-v1.0.0-windows-x64.zip
 ```
 

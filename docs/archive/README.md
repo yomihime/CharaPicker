@@ -19,3 +19,5 @@
 - [番剧、漫画、广播剧、小说等内容形态支持执行计划完成记录](03-multi-material-coverage-plan.completed.zh_CN.md)：路线 03 已完成 M19 收尾，多内容形态扫描、预览、正式分派、知识库证据、真实验收和文档同步均已落地。
 - [真实预览结果后续计划完成记录](preview-real-result-followup-plan.completed.zh_CN.md)：原文本、字幕、音频转写、图片/漫画和视频+字幕预览覆盖计划已被路线 03 吸收；当时遗留的容器导入缺口已由更多输入格式计划完成。
 - [更多输入格式支持执行计划完成记录](input-format-support-plan.completed.zh_CN.md)：ZIP、CBZ、EPUB、文本型 PDF、7z、RAR 与 CBR 的受控预处理、来源追踪、安全边界和全量回归已完成。
+- [更新包 Payload 识别修正完成记录](update-archive-payload-resolution.completed.zh_CN.md)：自更新已解除对 ZIP 顶层目录名 `CharaPicker/` 的协议耦合，改为按 payload 结构识别并拒绝混合、多层或多候选结构。
+- [打包运行根目录修复完成记录](release-runtime-root-fix.completed.zh_CN.md)：打包态运行根目录已改为 `CharaPicker.exe` 所在目录，自更新 relaunch cwd 同步使用安装目录。

@@ -16,8 +16,8 @@ CharaPicker（拾卡姬）是一個個人實驗性質的桌面工具。它嘗試
 
 ## 目前狀態
 
-- 版本：`v0.8.0-beta`（開發中）
-- 文件更新時間：`2026-07-28`
+- 仍處在 beta 階段，功能、資料結構和提取效果還會繼續調整。
+- 最新發布包與每個版本的變更請看 [GitHub Releases](https://github.com/yomihime/CharaPicker/releases) 和 [更新日誌](../../CHANGELOG.md)。
 
 ## 現在能做什麼
 
@@ -39,7 +39,11 @@ CharaPicker（拾卡姬）是一個個人實驗性質的桌面工具。它嘗試
 ## 環境需求
 
 - Python `>=3.10`
-- 文字型 PDF 預處理需要 `pypdf>=6.14.2,<7`
+- 主要依賴：
+  - `PyQt6>=6.6`
+  - `PyQt6-Fluent-Widgets>=1.5`
+  - `pydantic>=2.6`
+  - `pypdf>=6.14.2,<7`
 
 ## 支援的輸入
 
@@ -62,6 +66,18 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
+## 建置
+
+```powershell
+build.bat
+```
+
+- 產物輸出到 `release/` 目錄。
+- 常用參數範例：
+  - `build.bat --tag=vX.Y.Z-beta`
+  - `build.bat --version=X.Y.Z --stage=beta`
+  - `build.bat --local`
+
 ## 主要功能
 
 - 專案化素材管理（`projects/{project_id}`）
@@ -79,6 +95,7 @@ python main.py
 - [日本語 README](README.ja_JP.md)
 - [English README](README.en_US.md)
 - [更新日誌](../../CHANGELOG.md)
+- [GitHub Releases](https://github.com/yomihime/CharaPicker/releases)
 - [docs 架構說明](../ARCHITECTURE.md)
 - [根目錄架構說明](../../ARCHITECTURE.md)
 

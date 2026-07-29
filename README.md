@@ -20,8 +20,8 @@ CharaPicker（拾卡姬）是一个个人实验性质的桌面工具。它尝试
 
 ## 当前状态
 
-- 当前版本：`v0.8.0-beta`（开发中）
-- 文档更新时间：`2026-07-28`
+- 仍处在 beta 阶段，功能、数据结构和提取效果还会继续调整。
+- 最新发布包和每个版本的变化请看 [GitHub Releases](https://github.com/yomihime/CharaPicker/releases) 与 [更新日志](CHANGELOG.md)。
 
 ## 现在能做什么
 
@@ -79,8 +79,8 @@ build.bat
 
 - 产物输出到 `release/` 目录。
 - 常用参数示例：
-  - `build.bat --tag=v0.8.0-beta`
-  - `build.bat --version=0.8.0 --stage=beta`
+  - `build.bat --tag=vX.Y.Z-beta`
+  - `build.bat --version=X.Y.Z --stage=beta`
   - `build.bat --local`
 
 ## 主要功能
@@ -101,7 +101,7 @@ build.bat
 - [日本語 README](docs/readme/README.ja_JP.md)
 - [English README](docs/readme/README.en_US.md)
 - [更新日志](CHANGELOG.md)
-- [Codex 长期项目指导](AGENTS.md)
+- [GitHub Releases](https://github.com/yomihime/CharaPicker/releases)
 - [根目录架构说明](ARCHITECTURE.md)
 - [项目文档索引](docs/README.md)
 - [docs 架构说明](docs/ARCHITECTURE.md)

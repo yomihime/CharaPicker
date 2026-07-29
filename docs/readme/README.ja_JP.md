@@ -16,8 +16,8 @@ CharaPicker は、個人実験として作っているデスクトップツー�
 
 ## 現在の状態
 
-- バージョン：`v0.8.0-beta`（開発中）
-- ドキュメント更新日：`2026-07-28`
+- まだ beta 段階です。機能、データ構造、抽出品質は今後も変わります。
+- 最新の配布物と各バージョンの変更点は [GitHub Releases](https://github.com/yomihime/CharaPicker/releases) と [更新ログ](../../CHANGELOG.md) を参照してください。
 
 ## 今できること
 
@@ -39,7 +39,11 @@ CharaPicker は、個人実験として作っているデスクトップツー�
 ## 要件
 
 - Python `>=3.10`
-- テキスト PDF の前処理には `pypdf>=6.14.2,<7` が必要
+- 主な依存関係：
+  - `PyQt6>=6.6`
+  - `PyQt6-Fluent-Widgets>=1.5`
+  - `pydantic>=2.6`
+  - `pypdf>=6.14.2,<7`
 
 ## 対応入力
 
@@ -62,6 +66,18 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
+## ビルド
+
+```powershell
+build.bat
+```
+
+- 出力は `release/` ディレクトリに作成されます。
+- よく使う例：
+  - `build.bat --tag=vX.Y.Z-beta`
+  - `build.bat --version=X.Y.Z --stage=beta`
+  - `build.bat --local`
+
 ## 主な機能
 
 - プロジェクト単位の素材管理（`projects/{project_id}`）
@@ -79,6 +95,7 @@ python main.py
 - [繁體中文 README](README.zh_TW.md)
 - [English README](README.en_US.md)
 - [更新ログ](../../CHANGELOG.md)
+- [GitHub Releases](https://github.com/yomihime/CharaPicker/releases)
 - [docs アーキテクチャ](../ARCHITECTURE.md)
 - [ルート アーキテクチャ](../../ARCHITECTURE.md)
 

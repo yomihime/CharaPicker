@@ -16,8 +16,8 @@ It is not mature commercial software, and it is not something I would treat as a
 
 ## Current Status
 
-- Version: `v0.8.0-beta` (in development)
-- Document updated: `2026-07-28`
+- Still in beta. Features, data structures, and extraction quality will continue to change.
+- For the latest build and version notes, see [GitHub Releases](https://github.com/yomihime/CharaPicker/releases) and the [Changelog](../../CHANGELOG.md).
 
 ## What Works Now
 
@@ -39,7 +39,11 @@ It is not mature commercial software, and it is not something I would treat as a
 ## Requirements
 
 - Python `>=3.10`
-- `pypdf>=6.14.2,<7` for text-based PDF preprocessing
+- Main dependencies:
+  - `PyQt6>=6.6`
+  - `PyQt6-Fluent-Widgets>=1.5`
+  - `pydantic>=2.6`
+  - `pypdf>=6.14.2,<7`
 
 ## Supported Inputs
 
@@ -62,6 +66,18 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
+## Build
+
+```powershell
+build.bat
+```
+
+- Outputs are written to `release/`.
+- Common examples:
+  - `build.bat --tag=vX.Y.Z-beta`
+  - `build.bat --version=X.Y.Z --stage=beta`
+  - `build.bat --local`
+
 ## Main Features
 
 - Project-scoped material management (`projects/{project_id}`)
@@ -79,6 +95,7 @@ python main.py
 - [繁體中文 README](README.zh_TW.md)
 - [日本語 README](README.ja_JP.md)
 - [Changelog](../../CHANGELOG.md)
+- [GitHub Releases](https://github.com/yomihime/CharaPicker/releases)
 - [docs Architecture](../ARCHITECTURE.md)
 - [Root Architecture](../../ARCHITECTURE.md)
 
