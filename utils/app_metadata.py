@@ -11,8 +11,8 @@ def format_version_tag(version: str, release_stage: str) -> str:
 
 APP_NAME = "CharaPicker"
 APP_ORGANIZATION_NAME = APP_NAME
-APP_VERSION = "0.8.0"
-APP_RELEASE_STAGE = "beta"
+APP_VERSION = "1.0.0"
+APP_RELEASE_STAGE = "rc"
 APP_VERSION_TAG = format_version_tag(APP_VERSION, APP_RELEASE_STAGE)
 
 HTTP_USER_AGENT = f"{APP_NAME}/{APP_VERSION_TAG}"

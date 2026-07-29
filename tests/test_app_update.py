@@ -80,31 +80,31 @@ class UpdateCheckTests(unittest.TestCase):
     @patch("utils.app_update.read_json")
     def test_stable_channel_excludes_prereleases(self, read_json) -> None:
         read_json.return_value = [
-            _release_payload("v0.9.0-beta", prerelease=True),
-            _release_payload("v0.8.1", prerelease=False),
+            _release_payload("v1.1.0-beta", prerelease=True),
+            _release_payload("v1.0.0", prerelease=False),
         ]
 
         release = check_for_update(include_prereleases=False)
 
         self.assertIsNotNone(release)
-        self.assertEqual(release.version.public_tag, "0.8.1")
+        self.assertEqual(release.version.public_tag, "1.0.0")
 
     @patch("utils.app_update.read_json")
     def test_test_channel_includes_prereleases(self, read_json) -> None:
         read_json.return_value = [
-            _release_payload("v0.9.0-beta", prerelease=True),
-            _release_payload("v0.8.1", prerelease=False),
+            _release_payload("v1.1.0-beta", prerelease=True),
+            _release_payload("v1.0.0", prerelease=False),
         ]
 
         release = check_for_update(include_prereleases=True)
 
         self.assertIsNotNone(release)
-        self.assertEqual(release.version.public_tag, "0.9.0-beta")
+        self.assertEqual(release.version.public_tag, "1.1.0-beta")
 
     @patch("utils.app_update.read_json")
     def test_newer_release_requires_archive_and_checksum(self, read_json) -> None:
         read_json.return_value = [
-            _release_payload("v0.9.0-beta", prerelease=True, with_checksum=False)
+            _release_payload("v1.1.0-beta", prerelease=True, with_checksum=False)
         ]
 
         with self.assertRaises(UpdatePackageUnavailableError):
@@ -113,8 +113,8 @@ class UpdateCheckTests(unittest.TestCase):
     @patch("utils.app_update.read_json")
     def test_current_or_older_release_is_not_an_update(self, read_json) -> None:
         read_json.return_value = [
-            _release_payload("v0.8.0-beta", prerelease=True),
-            _release_payload("v0.7.0", prerelease=False),
+            _release_payload("v1.0.0-rc", prerelease=True),
+            _release_payload("v0.9.0", prerelease=False),
         ]
 
         self.assertIsNone(check_for_update(include_prereleases=True))
