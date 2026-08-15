@@ -14,6 +14,7 @@ from core.models import (
     CharacterCardExportStatus,
     CharacterCardExportTarget,
 )
+from utils.atomic_io import write_text_atomically
 from utils.paths import ensure_project_tree
 
 
@@ -148,8 +149,7 @@ def _write_text_target(
             output_path=str(path),
             error="output file already exists",
         )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    write_text_atomically(path, content)
     return CharacterCardExportResult(
         target=target,
         status=CharacterCardExportStatus.SUCCESS,
