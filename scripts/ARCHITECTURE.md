@@ -14,6 +14,7 @@
 ## 关键文件
 
 - `build_meta.py`：解析命令行参数、Git tag、平台和架构，输出 `VERSION`、`STAGE`、`VERSION_TAG`、`PLATFORM_TAG`、`ARCH_TAG` 等构建变量；默认版本和阶段来自 `utils.app_metadata`。非本地构建必须与应用源码版本、阶段一致，正式版 `VERSION_TAG` 不包含 `release` 后缀。
+- `package_release.py`：按 `SOURCE_DATE_EPOCH` 规范化 ZIP 成员顺序与时间，生成同名 SHA-256 和无绝对路径、无环境变量值的 `build-info.json`；正式构建还会核对实际安装版本与 Release 锁文件。
 - `validate_extraction_plan_models.py`：验证四媒体类型、内容形态、素材引用、unit、派生成果、evidence、source trace 和正式 run plan 的模型边界。
 - `validate_extraction_plan_builder.py`：验证旧视频扫描结果进入 `FormalExtractionRunPlan`、稳定 ID、run 持久化和旧 manifest 观察索引边界。
 - `validate_video_unit_handler.py`：验证视频 unit 时长预算、模型请求变量和正式视频 handler 边界。
@@ -30,6 +31,10 @@
 - `validate_formal_dispatch.py`：执行不联网的正式提取分发验证，覆盖分发表 handler 选择、audio transcript 物化后转入文本 handler、unsupported unit 洞察事件、模型不支持图片时不调用图片 handler、文本继续成功，以及视频旧提取路径回归。
 - `validate_gui_multi_material_status.py`：验证项目页素材状态映射、主窗口 worker 信号边界和 GUI 不直接承担正式提取实现。
 - `validate_i18n_keys.py`：验证四份 i18n JSON 的 key 集合一致。
+- `validate_markdown_links.py`：扫描已跟踪 Markdown 文件中代码围栏外的相对链接和图片路径，拒绝缺失目标或逃逸仓库根目录的链接。
+- `validate_release_readiness.py`：只读校验 tag、源码/构建版本、CHANGELOG、发布目标、Action 固定引用、CI 权限链、更新资产命名和禁止跟踪的运行时/私钥路径；正式版额外检查四语 README 状态标记。
+- `validate_release_artifact.py`：构建后校验 ZIP 单根目录、必需文件与资源、禁止路径、规范化成员、SHA-256、`build-info.json` 和锁文件，并可在含空格及非 ASCII 的隔离路径运行打包态健康检查。
+- `validate_release_dependencies.py`：校验开发依赖声明、Windows Release 锁、机器可读依赖/许可证库存、实际安装版本和第三方声明覆盖；也可从锁定环境重新生成库存供审查。
 - `validate_multi_material_regression.py`：统一运行除自身外的全部 `validate_*.py`，随后执行 `tests/` 的 unittest discovery；不调用真实模型，也不把用户项目作为固定输入。
 - `preflight_real_multi_material_acceptance.py`：对用户明确指定的单个项目执行只读真实验收预检，只输出媒体类型、内容形态、handler、unit 和 unsupported reason 计数；可通过 `--preset-name` 加载已配置预设并执行具体模型能力过滤，但不输出密钥/endpoint、不写知识库、不调用模型、不打印素材路径。
 

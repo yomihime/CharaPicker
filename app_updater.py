@@ -59,6 +59,7 @@ def _load_request(path: Path) -> dict[str, Any]:
 
 
 def _apply_update(request: dict[str, Any], request_path: Path, log_path: Path) -> None:
+    request_path = request_path.resolve()
     current_pid = _required_positive_int(request, "current_pid")
     install_dir = _required_path(request, "install_dir")
     payload_dir = _required_path(request, "payload_dir")

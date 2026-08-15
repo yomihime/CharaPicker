@@ -71,5 +71,13 @@ def _qt_message_handler(message_type: QtMsgType, _context, message: str) -> None
     log_qt_message(message_type, message)
 
 
+def _entrypoint() -> int:
+    if "--health-check" in sys.argv[1:]:
+        from utils.runtime_health import run_runtime_health_check
+
+        return run_runtime_health_check()
+    return main()
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(_entrypoint())

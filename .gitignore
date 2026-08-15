@@ -23,6 +23,7 @@ projects/*
 # Local notes and logs
 *.txt
 !requirements.txt
+!requirements-release-*.txt
 *.log
 log/*
 

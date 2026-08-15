@@ -17,6 +17,8 @@
 
 - `i18n.py`：管理语言偏好、系统语言归一化、文案加载和 `t()` 翻译函数。
 - `app_metadata.py`：集中保存应用名、组织名、当前运行时版本/阶段和 HTTP User-Agent。
+- `runtime_health.py`：提供无网络、无用户数据写入的启动健康检查；验证 Qt、核心模块、四语资源、默认 prompt、图标和版本元数据，供源码与打包产物共同调用。
+- `progress_guard.py`：为 worker 信号提供单调进度守卫，把 100% 保留到业务成功已确认之后；失败或取消进入终态后不再发出完成进度。
 - `media_types.py`：集中保存视频、图片、音频、文本后缀，以及直接素材和容器输入格式的独立支持档位；容器 profile 不新增顶层媒体类型，也不进入直接素材后缀集合。当前 `.zip`、`.cbz`、`.epub`、`.pdf`、`.7z`、`.rar`、`.cbr` 均已启用。
 - `material_preprocessing.py`：定义容器输入预处理请求、结果、warning、派生材料记录、容器 entry 摘要和 manifest v1 协议，统一负责安全路径校验、取消检查、临时目录、原子落盘、按 raw 相对路径隔离的稳定派生路径、manifest 索引、派生文件大小/SHA256 完整性检查、复用判断和生命周期清理，不依赖 `core` 或 `gui`。高频只读状态查询通过稳定 manifest 路径执行文件存在/大小轻量校验；复用、正式扫描和 raw 清理等强一致性决策继续执行 SHA256 校验。
 - `zip_material_preprocessor.py`：在预处理边界内使用标准库列举和流式展开 ZIP entry，提供 ZIP/CBZ/EPUB 共用的数量、大小、压缩比、加密和路径安全校验；通用 ZIP 只保留图片、音频和文本白名单叶子，容器内视频返回 `container_video_requires_explicit_import`，CBZ 只接纳图片并按自然顺序派生为单一页目录；不负责项目导入或 UI 状态。

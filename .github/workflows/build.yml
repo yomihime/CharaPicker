@@ -1,35 +1,101 @@
 name: Build
 
 on:
-  workflow_dispatch:
+  pull_request:
   push:
+    branches:
+      - main
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONHASHSEED: "0"
 
 jobs:
-  windows-build:
-    name: Windows Build
-    runs-on: windows-latest
+  quality:
+    name: Quality Gates
+    runs-on: windows-2022
+    timeout-minutes: 30
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.10"
+          cache: pip
+          cache-dependency-path: requirements-release-windows-py312.txt
 
-      - name: Install dependencies
+      - name: Install locked release environment
+        run: python -m pip install -r requirements-release-windows-py312.txt
+
+      - name: Validate dependency graph
+        run: python -m pip check
+
+      - name: Audit locked dependency inventory
+        run: python scripts/validate_release_dependencies.py --verify-installed
+
+      - name: Run Ruff
+        run: python -m ruff check .
+
+      - name: Run unified offline regression
+        run: python scripts/validate_multi_material_regression.py
+
+      - name: Compile Python sources
+        run: >-
+          python -m compileall -q core gui utils scripts tests main.py app_updater.py
+
+      - name: Validate release metadata
+        run: python scripts/validate_release_readiness.py
+
+  windows-build:
+    name: Windows Build
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    needs: quality
+    runs-on: windows-2022
+    timeout-minutes: 60
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.10"
+          cache: pip
+          cache-dependency-path: requirements-release-windows-py312.txt
+
+      - name: Install locked release environment
+        run: python -m pip install -r requirements-release-windows-py312.txt
+
+      - name: Set reproducible build time
+        shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-          python -m pip install pyinstaller
+          $epoch = git show -s --format=%ct HEAD
+          if ($epoch -notmatch '^\d+$') {
+            throw "Unable to resolve SOURCE_DATE_EPOCH from the checked-out commit."
+          }
+          "SOURCE_DATE_EPOCH=$epoch" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build package
         shell: pwsh
@@ -39,13 +105,20 @@ jobs:
             $buildArgs += "--tag=$env:GITHUB_REF_NAME"
           }
           & .\build.bat @buildArgs
+          if ($LASTEXITCODE -ne 0) {
+            throw "build.bat failed with exit code $LASTEXITCODE."
+          }
 
-      - name: Generate release checksums
+      - name: Validate packaged release
         shell: pwsh
         run: |
-          Get-ChildItem -LiteralPath release -Filter *.zip | ForEach-Object {
-            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            "$hash  $($_.Name)" | Set-Content -LiteralPath "$($_.FullName).sha256" -Encoding ascii
+          $archives = @(Get-ChildItem -LiteralPath release -Filter *.zip)
+          if ($archives.Count -ne 1) {
+            throw "Expected exactly one release archive, found $($archives.Count)."
+          }
+          python scripts/validate_release_artifact.py --archive $archives[0].FullName --run-health-check
+          if ($LASTEXITCODE -ne 0) {
+            throw "Packaged release validation failed."
           }
 
       - name: Prepare release notes
@@ -94,23 +167,44 @@ jobs:
           Set-Content -LiteralPath release_notes.md -Value $body -Encoding UTF8
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: charapicker-windows-build
           path: |
             release/*.zip
             release/*.sha256
+            release/build-info.json
+            release/dependency-inventory.json
+            release_notes.md
           if-no-files-found: error
+          retention-days: 14
 
-      - name: Publish GitHub Release Assets
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+  publish-release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: windows-build
+    runs-on: windows-2022
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download verified build artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: charapicker-windows-build
+          path: release-assets
+
+      - name: Publish GitHub Release assets
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           name: ${{ github.ref_name }}
           files: |
-            release/*.zip
-            release/*.sha256
-          body_path: release_notes.md
+            release-assets/release/*.zip
+            release-assets/release/*.sha256
+            release-assets/release/build-info.json
+            release-assets/release/dependency-inventory.json
+          body_path: release-assets/release_notes.md
           generate_release_notes: true
           fail_on_unmatched_files: true
           prerelease: ${{ contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}

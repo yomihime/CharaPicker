@@ -26,6 +26,7 @@ from utils.app_metadata import APP_NAME
 from utils.cloud_model_presets import CloudModelPreset
 from utils.i18n import t
 from utils.logging_middleware import apply_log_level_preference
+from utils.progress_guard import ProgressGuard
 from utils.startup_middleware import StartupWarmupSnapshot
 from utils.state_manager import save_project_config
 from utils.theme import apply_theme_preference
@@ -54,22 +55,27 @@ class PreviewWorker(QObject):
         self.cloud_preset = cloud_preset
 
     def run(self) -> None:
+        progress = ProgressGuard(self.progressChanged.emit)
         try:
             content = self.extractor.run_preview_streaming(
                 self.config,
                 cloud_preset=self.cloud_preset,
                 emit_event=lambda event: self.insightGenerated.emit(event),
-                emit_progress=lambda value: self.progressChanged.emit(value),
+                emit_progress=progress.update,
                 emit_token_usage=lambda usage: self.tokenUsageChanged.emit(usage),
             )
             if not content.strip():
+                progress.fail()
                 self.failed.emit(t("extractor.chunk.noChunkJson"))
                 return
+            progress.succeed()
             self.succeeded.emit(content)
         except ExtractionStoppedError as exc:
+            progress.fail()
             LOGGER.warning("Preview worker stopped; reason=%s", exc)
             self.failed.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
+            progress.fail()
             LOGGER.error("Preview worker failed", exc_info=True)
             self.failed.emit(str(exc))
         finally:
@@ -98,20 +104,24 @@ class FullExtractionWorker(QObject):
         self.fast_concurrency = fast_concurrency
 
     def run(self) -> None:
+        progress = ProgressGuard(self.progressChanged.emit)
         try:
             chunks = self.extractor.run_full_extraction_streaming(
                 self.config,
                 cloud_preset=self.cloud_preset,
                 fast_concurrency=self.fast_concurrency,
                 emit_event=lambda event: self.insightGenerated.emit(event),
-                emit_progress=lambda value: self.progressChanged.emit(value),
+                emit_progress=progress.update,
                 emit_token_usage=lambda usage: self.tokenUsageChanged.emit(usage),
             )
+            progress.succeed()
             self.succeeded.emit(len(chunks))
         except ExtractionStoppedError as exc:
+            progress.fail()
             LOGGER.warning("Full extraction worker stopped; reason=%s", exc)
             self.failed.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
+            progress.fail()
             LOGGER.error("Full extraction worker failed", exc_info=True)
             self.failed.emit(str(exc))
         finally:
