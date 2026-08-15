@@ -86,6 +86,33 @@ class DownloadIntegrityTests(unittest.TestCase):
             error="SHA-256",
         )
 
+    def test_cancellation_removes_partially_downloaded_file(self) -> None:
+        checks = 0
+
+        def check_cancelled() -> None:
+            nonlocal checks
+            checks += 1
+            if checks == 3:
+                raise RuntimeError("synthetic cancellation")
+
+        with tempfile.TemporaryDirectory() as temp_name:
+            destination = Path(temp_name) / "asset.bin"
+            response = _Response([b"abc", b"def"], content_length="6")
+            with patch(
+                "utils.download_integrity.open_response",
+                return_value=nullcontext(response),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "synthetic cancellation"):
+                    download_staged_file(
+                        "https://example.invalid/asset.bin",
+                        destination,
+                        max_bytes=6,
+                        check_cancelled=check_cancelled,
+                    )
+
+            self.assertFalse(destination.exists())
+            self.assertEqual(checks, 3)
+
     def test_trusted_size_must_match_content_length(self) -> None:
         self._assert_download_fails_and_is_removed(
             _Response([b"abc"], content_length="3"),
