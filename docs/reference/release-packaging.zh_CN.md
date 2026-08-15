@@ -148,3 +148,38 @@ GitHub Actions 只负责编排构建，不承载应用运行逻辑。当前 Wind
 - 更新器先等待当前主程序退出，再备份并替换安装目录；`projects/`、`config.yaml`、`log/`、`bin/` 和 `models/` 必须跨版本保留。新版未在限定时间内完成启动确认时，更新器应恢复旧版并重新启动。
 
 tag 构建会显式把当前 tag 传给 `build.bat`，让构建产物版本、阶段与发布 tag 对齐；若 tag 与 `utils.app_metadata.py` 不一致，构建必须失败。发布 GitHub Release 前必须先在 `CHANGELOG.md` 中准备同名版本小节；workflow 会抽取该小节作为 Release 正文开头，找不到对应小节时应失败，以避免发布缺少版本说明的二进制包。同时 workflow 必须开启 GitHub 自动 release notes，让 Release 页面保留 `What's Changed`、完整 changelog 链接和 contributors 区域。
+
+## 8. 发布来源、签名与 provenance
+
+### 8.1 当前 v1.0.0 无证书基线
+
+当前仓库和 GitHub Actions 未配置 Authenticode 证书、私钥或时间戳服务，因此 v1.0.0 采用明确的无证书分发基线：
+
+- 构建在压缩前通过 Windows `Get-AuthenticodeSignature` 检查 `CharaPicker.exe` 和 `CharaPickerUpdater.exe`。两者都必须实际返回 `NotSigned`，才能在 `build-info.json` 中声明 unsigned；出现 `Valid`、`UnknownError`、hash 不符或检查失败都会中止构建，避免实际状态与披露不一致。
+- 不生成临时自签名证书，不把自签名结果描述为公开发布者信誉，也不在仓库、普通 artifact 或 Release 附件中保存 PFX/私钥。
+- Release 正文必须明确说明当前 Windows 二进制未使用 Authenticode，Windows 仍可能显示未知发布者或 SmartScreen 信誉提示。
+- 若后续启用正式 Authenticode，必须由维护者先确认证书主体、私钥托管、可信时间戳、续期和吊销责任；主程序与更新器都要在压缩前签名并验证。该路径需要单独实施和审查，不能仅修改披露文案。
+
+### 8.2 GitHub artifact attestation
+
+tag 构建通过独立的 `attest-release` job 生成 GitHub artifact attestation。该 job 只持有 `contents: read`、`id-token: write` 和 `attestations: write`，使用固定到完整 commit SHA 的官方 `actions/attest`：
+
+1. 对 ZIP、同名 `.sha256` 和依赖库存生成一份 SLSA build provenance attestation。
+2. 只有 attestation 成功后，才把 GitHub attestation ID、URL 和官方仓库名写入最终 `build-info.json`，并重新执行发布包校验。
+3. 再对最终 `build-info.json` 单独生成 attestation，防止写入 provenance 状态后的 manifest 缺少来源证明。
+4. `publish-release` 只依赖已 attested 的 artifact；任一 attestation、记录或复核步骤失败，GitHub Release 不会发布。
+
+GitHub artifact attestation 证明产物由本仓库特定 Actions 工作流生成，不等于 Windows Authenticode 发布者签名，也不保证消除 SmartScreen 提示。官方能力、权限和验证方式见 [GitHub artifact attestations](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations)。下载 ZIP 后可联网验证：
+
+```powershell
+gh attestation verify ".\CharaPicker-v1.0.0-windows-x64.zip" -R yomihime/CharaPicker
+```
+
+### 8.3 SHA-256 与构建清单边界
+
+- 同名 `.sha256` 证明下载字节与 Release checksum 一致，不证明发布者身份；checksum 与 ZIP 同时被替换时，这一层不能独立发现账号失守。
+- `build-info.json` 记录官方仓库、commit、tag、确定性构建时间源、工具链、依赖锁、包内文件 hash、两个可执行文件的实际签名状态，以及 package attestation ID/URL。
+- `dependency-inventory.json` 记录锁定依赖与许可证 metadata；它不是漏洞扫描报告或法律结论。
+- 官方分发入口只使用本项目 GitHub Releases。镜像或转存文件即使 hash 相同，也不自动成为项目维护者承诺支持的发布渠道。
+
+Release 正文由 `scripts/prepare_release_notes.py` 从 CHANGELOG 版本段落生成，并自动附加官方入口、未签名披露、PowerShell SHA-256 比较命令和 `gh attestation verify` 命令；不得手工删去这些信任边界后再发布。
