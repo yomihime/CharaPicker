@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import re
 import shutil
 import tempfile
 import time
@@ -11,15 +9,20 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from utils.app_metadata import HTTP_USER_AGENT
+from utils.download_integrity import DownloadIntegrityError, download_staged_file
 from utils.env_manager import (
     BIN_ROOT,
     WHISPERCPP_ROOT,
     WHISPER_MODEL_ROOT,
     find_usable_whisper_runtime_binary,
 )
-from utils.network_middleware import NetworkMiddlewareError, open_response, read_json, redact_sensitive_text
+from utils.network_middleware import NetworkMiddlewareError, open_response, redact_sensitive_text
+from utils.runtime_downloads import (
+    RuntimeDownloadAsset,
+    RuntimeDownloadManifestError,
+    runtime_download_asset,
+)
 
-WHISPERCPP_LATEST_RELEASE_API = "https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest"
 WHISPER_MODEL_BASE_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{file_name}"
 DEFAULT_WHISPER_RUNTIME_PACKAGE_ID = "win-x64-cpu"
 DEFAULT_WHISPER_MODEL_ID = "tiny"
@@ -32,8 +35,7 @@ CancelCallback = Callable[[], bool]
 class WhisperRuntimePackage:
     package_id: str
     label_key: str
-    include_keywords: tuple[str, ...]
-    exclude_keywords: tuple[str, ...] = ()
+    asset_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,32 +58,17 @@ RUNTIME_PACKAGES: tuple[WhisperRuntimePackage, ...] = (
     WhisperRuntimePackage(
         package_id="win-x64-cpu",
         label_key="project.whisper.runtime.winX64Cpu",
-        include_keywords=("whisper", "bin", "x64"),
-        exclude_keywords=(
-            "arm64",
-            "blas",
-            "cuda",
-            "cublas",
-            "cu12",
-            "cu13",
-            "hip",
-            "openvino",
-            "rocm",
-            "sycl",
-            "vulkan",
-        ),
+        asset_id="whispercpp-win-x64-cpu",
     ),
     WhisperRuntimePackage(
         package_id="win-x64-blas",
         label_key="project.whisper.runtime.winX64Blas",
-        include_keywords=("whisper", "bin", "x64", "blas"),
-        exclude_keywords=("arm64", "cuda", "cublas", "cu12", "cu13", "hip", "openvino", "rocm", "sycl"),
+        asset_id="whispercpp-win-x64-blas",
     ),
     WhisperRuntimePackage(
         package_id="win-x64-cuda",
         label_key="project.whisper.runtime.winX64Cuda",
-        include_keywords=("whisper", "bin", "x64"),
-        exclude_keywords=("arm64", "openvino", "rocm", "sycl", "vulkan"),
+        asset_id="whispercpp-win-x64-cuda",
     ),
 )
 
@@ -149,25 +136,32 @@ def download_and_install_whisper(
     model_root.mkdir(parents=True, exist_ok=True)
 
     emit(0, "release")
-    release = _request_json(WHISPERCPP_LATEST_RELEASE_API, cancelled)
     _check_cancel(cancelled)
-    tag_name = str(release.get("tag_name") or "latest").strip() or "latest"
+    runtime_asset = _runtime_asset(runtime_package)
     runtime_target: Path | None = None
     model_target = model_root / model_package.file_name
     with tempfile.TemporaryDirectory(prefix="whispercpp-", dir=bin_root) as temp_dir_name:
         temp_dir = Path(temp_dir_name)
         staged_model_path = temp_dir / model_package.file_name
 
-        cached_runtime = _installed_runtime_for_package(release, runtime_package, bin_root)
+        cached_runtime = _installed_runtime_for_package(
+            runtime_asset.version,
+            runtime_package,
+            bin_root,
+        )
         if cached_runtime is None:
             staged_runtime_dir, installed_runtime_package = _download_and_stage_runtime(
-                release,
                 runtime_package,
                 temp_dir,
                 emit,
                 cancelled,
             )
-            runtime_target = _runtime_install_dir(bin_root, tag_name, installed_runtime_package.package_id)
+            installed_asset = _runtime_asset(installed_runtime_package)
+            runtime_target = _runtime_install_dir(
+                bin_root,
+                installed_asset.version,
+                installed_runtime_package.package_id,
+            )
             emit(94, "install")
             _replace_directory(staged_runtime_dir, runtime_target)
         else:
@@ -204,18 +198,6 @@ def remove_installed_whisper(
         _remove_path_inside(model_root, BIN_ROOT.parent / "models")
 
 
-def select_runtime_asset(release: dict, package: WhisperRuntimePackage) -> dict:
-    assets = release.get("assets", [])
-    candidates = [
-        asset
-        for asset in assets
-        if isinstance(asset, dict) and _runtime_asset_score(str(asset.get("name", "")), package) >= 0
-    ]
-    if not candidates:
-        raise WhisperCppDownloadError(f"No matching whisper.cpp asset found for {package.package_id}.")
-    return max(candidates, key=lambda asset: _runtime_asset_score(str(asset.get("name", "")), package))
-
-
 def installed_whisper_runtime_package_ids(
     *,
     runtime_root: Path = WHISPERCPP_ROOT,
@@ -248,12 +230,11 @@ def installed_whisper_model_ids(
 
 
 def _installed_runtime_for_package(
-    release: dict,
+    runtime_version: str,
     package: WhisperRuntimePackage,
     bin_root: Path,
 ) -> tuple[Path, WhisperRuntimePackage] | None:
-    tag_name = str(release.get("tag_name") or "latest").strip() or "latest"
-    runtime_target = _runtime_install_dir(bin_root, tag_name, package.package_id)
+    runtime_target = _runtime_install_dir(bin_root, runtime_version, package.package_id)
     if find_usable_whisper_runtime_binary(runtime_target) is not None:
         return runtime_target, package
     generic_runtime = find_usable_whisper_runtime_binary(bin_root)
@@ -279,7 +260,6 @@ def _runtime_package_id_from_path(runtime_path: Path | None) -> str:
 
 
 def _download_and_stage_runtime(
-    release: dict,
     package: WhisperRuntimePackage,
     temp_dir: Path,
     emit: ProgressCallback,
@@ -296,15 +276,11 @@ def _download_and_stage_runtime(
         extract_dir = temp_dir / f"extract-{_safe_segment(candidate_package.package_id)}"
         stage_dir.mkdir()
         extract_dir.mkdir()
-        asset = select_runtime_asset(release, candidate_package)
-        asset_name = str(asset.get("name", "whisper.cpp.zip"))
-        download_url = str(asset.get("browser_download_url", ""))
-        if not download_url:
-            raise WhisperCppDownloadError("Selected whisper.cpp asset has no download URL.")
+        asset = _runtime_asset(candidate_package)
 
-        archive_path = temp_dir / asset_name
+        archive_path = temp_dir / asset.file_name
         emit(5, "download")
-        _download_file(download_url, archive_path, 5, 54, "download", emit, cancelled)
+        _download_runtime_asset(asset, archive_path, 5, 54, "download", emit, cancelled)
 
         emit(56, "extract")
         try:
@@ -330,46 +306,57 @@ def _check_cancel(cancelled: CancelCallback | None) -> None:
         raise WhisperCppDownloadCancelled("Download cancelled.")
 
 
-def _request_json(url: str, cancelled: CancelCallback | None = None) -> dict:
-    _check_cancel(cancelled)
+def _download_runtime_asset(
+    asset: RuntimeDownloadAsset,
+    target_path: Path,
+    start_percent: int,
+    end_percent: int,
+    step: str,
+    emit: ProgressCallback,
+    cancelled: CancelCallback | None,
+) -> None:
     try:
-        data = read_json(url, headers={"User-Agent": HTTP_USER_AGENT}, timeout=30)
-        _check_cancel(cancelled)
-    except (OSError, NetworkMiddlewareError, ValueError, json.JSONDecodeError) as exc:
+        download_staged_file(
+            asset.url,
+            target_path,
+            max_bytes=asset.max_bytes,
+            expected_size=asset.size_bytes,
+            expected_sha256=asset.sha256,
+            headers={"User-Agent": HTTP_USER_AGENT},
+            timeout=60,
+            check_cancelled=lambda: _check_cancel(cancelled),
+            progress=lambda downloaded, total: _emit_download_progress(
+                downloaded,
+                total,
+                start_percent,
+                end_percent,
+                step,
+                emit,
+            ),
+        )
+    except (OSError, NetworkMiddlewareError, DownloadIntegrityError) as exc:
         raise WhisperCppDownloadError(redact_sensitive_text(exc)) from exc
-    if not isinstance(data, dict):
-        raise WhisperCppDownloadError("Release response is not a JSON object.")
-    return data
 
 
-def _runtime_asset_score(asset_name: str, package: WhisperRuntimePackage) -> int:
-    name = asset_name.lower()
-    if not name.endswith(".zip"):
-        return -1
-    if package.package_id == "win-x64-cuda" and not any(
-        token in name for token in ("cuda", "cublas", "cu12", "cu13")
-    ):
-        return -1
-    if any(keyword not in name for keyword in package.include_keywords):
-        return -1
-    if any(keyword in name for keyword in package.exclude_keywords):
-        return -1
+def _runtime_asset(package: WhisperRuntimePackage) -> RuntimeDownloadAsset:
+    try:
+        return runtime_download_asset(package.asset_id)
+    except RuntimeDownloadManifestError as exc:
+        raise WhisperCppDownloadError(str(exc)) from exc
 
-    score = 10
-    if "cpu" in name:
-        score += 30
-    if "avx2" in name:
-        score += 8
-    if "noavx" in name:
-        score -= 3
-    if package.package_id == "win-x64-cuda" and any(token in name for token in ("cuda", "cublas", "cu12", "cu13")):
-        score += 40
-        version_match = re.search(r"(?:cuda|cublas|cu)(?:[-_]?)(\d+)(?:[._-](\d+))?", name)
-        if version_match:
-            major = int(version_match.group(1))
-            minor = int(version_match.group(2) or 0)
-            score += major * 10 + minor
-    return score
+
+def _emit_download_progress(
+    downloaded: int,
+    total: int,
+    start_percent: int,
+    end_percent: int,
+    step: str,
+    emit: ProgressCallback,
+) -> None:
+    detail = _download_detail(downloaded, total, 0)
+    span = max(end_percent - start_percent, 1)
+    percent = start_percent + int(downloaded / total * span) if total else start_percent
+    emit(percent, step, detail)
 
 
 def _download_file(

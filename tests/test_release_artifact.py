@@ -21,6 +21,7 @@ class ReleaseArtifactTests(unittest.TestCase):
             "THIRD_PARTY_NOTICES.md": b"notices",
             "_internal/runtime.dll": b"runtime",
             "_internal/res/default_prompts.json": b"{}",
+            "_internal/res/runtime_downloads.json": b"{}",
             "_internal/res/app_icon.png": b"png",
         }
         for locale in ("zh_CN", "zh_TW", "en_US", "ja_JP"):

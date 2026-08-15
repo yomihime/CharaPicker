@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import shutil
 import tempfile
 import zipfile
@@ -8,10 +7,12 @@ from collections.abc import Callable
 from pathlib import Path
 
 from utils.app_metadata import HTTP_USER_AGENT
+from utils.download_integrity import DownloadIntegrityError, download_staged_file
 from utils.env_manager import BIN_ROOT, find_usable_llamacpp_binary
-from utils.network_middleware import NetworkMiddlewareError, open_response, read_json, redact_sensitive_text
+from utils.network_middleware import NetworkMiddlewareError, redact_sensitive_text
+from utils.runtime_downloads import RuntimeDownloadManifestError, runtime_download_asset
 
-LLAMACPP_LATEST_RELEASE_API = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
+LLAMACPP_WINDOWS_ASSET_ID = "llamacpp-win-x64-cpu"
 
 ProgressCallback = Callable[[int, str], None]
 
@@ -30,47 +31,6 @@ CancelCallback = Callable[[], bool]
 def _check_cancel(cancelled: CancelCallback | None) -> None:
     if cancelled and cancelled():
         raise LlamaCppDownloadCancelled("Download cancelled.")
-
-
-def _request_json(url: str, cancelled: CancelCallback | None = None) -> dict:
-    _check_cancel(cancelled)
-    try:
-        data = read_json(url, headers={"User-Agent": HTTP_USER_AGENT}, timeout=30)
-        _check_cancel(cancelled)
-        return data
-    except (OSError, NetworkMiddlewareError, ValueError, json.JSONDecodeError) as exc:
-        raise LlamaCppDownloadError(redact_sensitive_text(exc)) from exc
-
-
-def _asset_score(asset_name: str) -> int:
-    name = asset_name.lower()
-    if not name.endswith(".zip") or "bin-win" not in name or "x64" not in name:
-        return -1
-    if "arm64" in name:
-        return -1
-
-    score = 0
-    if "cpu" in name:
-        score += 50
-    if "avx2" in name:
-        score += 40
-    if "cuda" in name or "cudart" in name or "cu12" in name or "cu13" in name:
-        score -= 40
-    if "vulkan" in name or "sycl" in name or "hip" in name:
-        score -= 30
-    return score
-
-
-def select_windows_x64_asset(release: dict) -> dict:
-    assets = release.get("assets", [])
-    candidates = [
-        asset
-        for asset in assets
-        if isinstance(asset, dict) and _asset_score(str(asset.get("name", ""))) >= 0
-    ]
-    if not candidates:
-        raise LlamaCppDownloadError("No Windows x64 llama.cpp binary asset found.")
-    return max(candidates, key=lambda asset: _asset_score(str(asset.get("name", ""))))
 
 
 def _extract_zip_safely(
@@ -98,45 +58,36 @@ def download_and_install_llamacpp(
             progress(value, message)
 
     bin_root.mkdir(parents=True, exist_ok=True)
-    emit(0, "release")
-    release = _request_json(LLAMACPP_LATEST_RELEASE_API, cancelled)
+    try:
+        asset = runtime_download_asset(LLAMACPP_WINDOWS_ASSET_ID)
+    except RuntimeDownloadManifestError as exc:
+        raise LlamaCppDownloadError(str(exc)) from exc
     _check_cancel(cancelled)
-    asset = select_windows_x64_asset(release)
-    asset_name = str(asset.get("name", "llama.cpp.zip"))
-    download_url = str(asset.get("browser_download_url", ""))
-    if not download_url:
-        raise LlamaCppDownloadError("Selected llama.cpp asset has no download URL.")
+    emit(0, "release")
 
     with tempfile.TemporaryDirectory(prefix="llamacpp-", dir=bin_root) as temp_dir_name:
         temp_dir = Path(temp_dir_name)
-        archive_path = temp_dir / asset_name
+        archive_path = temp_dir / asset.file_name
         extract_dir = temp_dir / "extract"
         extract_dir.mkdir()
 
         emit(5, "download")
         try:
-            with open_response(
-                "GET",
-                download_url,
+            download_staged_file(
+                asset.url,
+                archive_path,
+                max_bytes=asset.max_bytes,
+                expected_size=asset.size_bytes,
+                expected_sha256=asset.sha256,
                 headers={"User-Agent": HTTP_USER_AGENT},
                 timeout=60,
-                stream=True,
-            ) as response:
-                _check_cancel(cancelled)
-                if response.status_code >= 400:
-                    raise LlamaCppDownloadError(f"HTTP {response.status_code}")
-                total_size = int(response.headers.get("Content-Length") or 0)
-                downloaded = 0
-                with archive_path.open("wb") as archive:
-                    for chunk in response.iter_content(chunk_size=1024 * 256):
-                        _check_cancel(cancelled)
-                        if not chunk:
-                            continue
-                        archive.write(chunk)
-                        downloaded += len(chunk)
-                        if total_size:
-                            emit(5 + int(downloaded / total_size * 75), "download")
-        except (OSError, NetworkMiddlewareError) as exc:
+                check_cancelled=lambda: _check_cancel(cancelled),
+                progress=lambda downloaded, total: emit(
+                    5 + int(downloaded / total * 75) if total else 5,
+                    "download",
+                ),
+            )
+        except (OSError, NetworkMiddlewareError, DownloadIntegrityError) as exc:
             raise LlamaCppDownloadError(redact_sensitive_text(exc)) from exc
 
         emit(82, "extract")

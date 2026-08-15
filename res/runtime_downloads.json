@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "assets": {
+    "ffmpeg-win-x64": {
+      "version": "9.0.1",
+      "file_name": "ffmpeg-9.0.1-essentials_build.zip",
+      "url": "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.1-essentials_build.zip",
+      "sha256": "fec81ae03971d9dd4be3ebe02e263bd2ec1d789483f931bdba5f5715e65da2e9",
+      "size_bytes": 111253802,
+      "max_bytes": 134217728,
+      "source_revision": "gyan-ffmpeg-9.0.1-essentials_build"
+    },
+    "whispercpp-win-x64-cpu": {
+      "version": "v1.9.2",
+      "file_name": "whisper-bin-x64.zip",
+      "url": "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.2/whisper-bin-x64.zip",
+      "sha256": "49dcc16de826f20bd53d44f947a1ae49dfa81f86cad67a64d80820cb192d674a",
+      "size_bytes": 8194445,
+      "max_bytes": 16777216,
+      "source_revision": "v1.9.2"
+    },
+    "whispercpp-win-x64-blas": {
+      "version": "v1.9.2",
+      "file_name": "whisper-blas-bin-x64.zip",
+      "url": "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.2/whisper-blas-bin-x64.zip",
+      "sha256": "ffe5b47ca8e53a7677949f23a9c4641bbec4eee8a5714c3d14b67bb8d7b24a78",
+      "size_bytes": 20981386,
+      "max_bytes": 33554432,
+      "source_revision": "v1.9.2"
+    },
+    "whispercpp-win-x64-cuda": {
+      "version": "v1.9.2",
+      "file_name": "whisper-cublas-12.4.0-bin-x64.zip",
+      "url": "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.2/whisper-cublas-12.4.0-bin-x64.zip",
+      "sha256": "443110ddaad70d4290ab2e77179e31cf712035bbc4fad56bb4519a90c917b39c",
+      "size_bytes": 670611449,
+      "max_bytes": 805306368,
+      "source_revision": "v1.9.2"
+    },
+    "llamacpp-win-x64-cpu": {
+      "version": "b10446",
+      "file_name": "llama-b10446-bin-win-cpu-x64.zip",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b10446/llama-b10446-bin-win-cpu-x64.zip",
+      "sha256": "5a17dacb8ad6a3ec87e20a8ead6aea69bd586e3ae1cb55bd6b5dcd9863fa8304",
+      "size_bytes": 18449025,
+      "max_bytes": 33554432,
+      "source_revision": "b10446"
+    }
+  }
+}

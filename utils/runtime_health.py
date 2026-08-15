@@ -23,6 +23,7 @@ def collect_runtime_health() -> dict[str, Any]:
     from utils.ai_model_middleware import load_default_prompts
     from utils.app_metadata import APP_NAME, APP_VERSION_TAG, format_version_tag
     from utils.i18n import SUPPORTED_LOCALES, load_messages
+    from utils.runtime_downloads import load_runtime_download_manifest
 
     errors: list[str] = []
     created_application = QApplication.instance() is None
@@ -49,6 +50,14 @@ def collect_runtime_health() -> dict[str, Any]:
         prompt_count = 0
         errors.append(f"default prompt resource is unreadable: {type(exc).__name__}")
 
+    try:
+        runtime_asset_count = len(load_runtime_download_manifest().assets)
+        if runtime_asset_count == 0:
+            errors.append("runtime download manifest contains no assets")
+    except Exception as exc:  # pragma: no cover - reported by packaged negative checks
+        runtime_asset_count = 0
+        errors.append(f"runtime download manifest is unreadable: {type(exc).__name__}")
+
     icon = QIcon(str(APP_ICON_PATH))
     if not APP_ICON_PATH.is_file() or icon.isNull():
         errors.append("application icon resource is missing or unreadable")
@@ -71,6 +80,7 @@ def collect_runtime_health() -> dict[str, Any]:
         "version": APP_VERSION_TAG,
         "locales": locale_counts,
         "prompt_count": prompt_count,
+        "runtime_asset_count": runtime_asset_count,
         "errors": errors,
     }
 
