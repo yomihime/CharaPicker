@@ -55,7 +55,7 @@ from res.colors import (
     CHARACTER_CARD_LIGHT_BACKGROUND,
     CHARACTER_CARD_LIGHT_MUTED_TEXT,
 )
-from utils.atomic_io import DataCorruptionError
+from utils.atomic_io import DataCorruptionError, write_file_atomically
 from utils.i18n import t
 from utils.cloud_model_presets import CloudModelPreset
 
@@ -494,7 +494,18 @@ class CharacterCardPage(QWidget):
         cover_path = store.resolve_cover_path(self._project.project_id, self._current_card.card_id)
         image = QImage(str(image_path))
         cropped = image.copy(dialog.crop_rect)
-        if cropped.isNull() or not cropped.save(str(cover_path), "PNG"):
+        if cropped.isNull():
+            self._show_warning(t("cards.cover.failed.title"), t("cards.cover.failed.content"))
+            return
+
+        def save_cover(temporary_path: Path) -> None:
+            if not cropped.save(str(temporary_path), "PNG"):
+                raise OSError("cropped cover could not be encoded as PNG")
+
+        try:
+            write_file_atomically(cover_path, save_cover)
+        except OSError:
+            LOGGER.error("Character card cover save failed; path=%s", cover_path, exc_info=True)
             self._show_warning(t("cards.cover.failed.title"), t("cards.cover.failed.content"))
             return
         card = self._current_card.model_copy(deep=True)
