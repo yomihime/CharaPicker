@@ -41,18 +41,20 @@
 - `cloud_model_presets.py`：保存和读取云端模型配置预设，维护云端服务类型到模型调用后端的映射，提供视频输出 Token / 分钟到单次请求上限的换算工具，以及 GUI/core 共用的具体模型音频理解能力判断。
 - `cloud_models.py`：按云端服务类型路由并拉取模型列表，当前底层复用 OpenAI-compatible 模型列表接口。
 - `network_middleware.py`：统一应用内 HTTP(S) 请求、代理读取、连通性测试、URL/错误脱敏和 DashScope 临时代理环境。
-- `app_update.py`：应用更新协议入口；负责 GitHub Release 版本与 Windows x64 资产筛选、测试版偏好、代理感知下载、SHA-256 与 ZIP 安全校验、平铺或唯一单层包装 payload 解析、更新请求准备和新版启动确认。实际安装目录替换由独立更新器执行。
-- `llamacpp_downloader.py`：下载并安装 llama.cpp 运行时到 `bin/`。
-- `whispercpp_downloader.py`：下载并安装 whisper.cpp 运行时到 `bin/whisper.cpp/`，下载 Whisper 模型到 `models/whisper/`。
+- `download_integrity.py`：为更新包和外部运行时提供 staging 流式下载、可信大小、`Content-Length`、实际字节、SHA-256、取消检查和失败清理的共用边界。
+- `runtime_downloads.py`：加载并验证 `res/runtime_downloads.json` 中经审查的运行时资产清单，限制 HTTPS host、固定 revision、文件名、大小上限和 SHA-256；运行时不自动信任 `latest` 或 `/main/`。
+- `app_update.py`：应用更新协议入口；负责 GitHub Release 版本与 Windows x64 资产筛选、固定下载来源、测试版偏好、压缩包/checksum 独立大小上限、SHA-256 与 ZIP 安全校验、平铺或唯一单层包装 payload 解析、更新请求准备和新版启动确认。实际安装目录替换由独立更新器执行。
+- `llamacpp_downloader.py`：按受审查清单下载、校验并安装 llama.cpp 运行时到 `bin/`。
+- `whispercpp_downloader.py`：按受审查清单下载、校验并安装 whisper.cpp 运行时到 `bin/whisper.cpp/`，下载 Whisper 模型到 `models/whisper/`；已有模型仅在大小和 SHA-256 均匹配时复用。
 - `audio_transcription.py`：封装本地 whisper.cpp episode 转写、音频/视频输入准备、缓存命中判断和 `episode_transcript.json` 写入；缓存键覆盖素材指纹、运行时、模型和语言，日志不记录完整转写文本。
-- `ffmpeg_downloader.py`：下载并安装 ffmpeg 运行时到 `bin/`。
+- `ffmpeg_downloader.py`：按受审查清单下载、校验并安装 FFmpeg 运行时到 `bin/`。
 - `source_importer.py`：把直接素材或已启用容器按项目目录规则原子复制到 `projects/{project_id}/raw`，计算 raw 目标，并通过预处理 manifest 协调 raw 清理、素材移除和 stale 派生产物清理；容器不得进入普通 materials link 分支。
 - `source_status.py`：计算项目页需要的素材显示名、raw/materials 或预处理 manifest 映射、项目内素材列表和素材状态；状态刷新只执行 manifest 结构、文件存在和大小检查，不在 GUI 主线程计算派生文件 SHA256。
 - `material_processing_middleware.py`：统一接收上层的素材处理请求，把 raw 拆成直接视频、直接非视频、已启用容器和 unsupported 四类；容器先预处理，直接非视频走 source importer，只有非原始方案中的直接视频进入 FFmpeg。FFmpeg 缺失策略由调用方显式选择 `error` 或 `skip_video`，并由 middleware 在执行点再次校验。
 - `startup_middleware.py`：启动阶段预加载中间件，集中探测 FFmpeg/llama.cpp/whisper.cpp、预取项目配置和云模型预设，供启动页线程复用。
 - `logging_preferences.py`：管理日志等级偏好。
 - `logging_middleware.py`：安装全局日志中间件，日志只写入文件；日志等级边界和敏感信息规则见运行时中间件参考文档。
-- `ai_model_middleware.py`：统一模型调用入口，负责加载默认提示词、构造标准消息、携带按请求设置的超时/结构化输出/后端专用参数、屏蔽敏感日志并路由下层模型后端；同时保留供应商错误的结构化失败类别，并提供不含 prompt 正文的资源版本、有效来源和模板 SHA-256 归因。
+- `ai_model_middleware.py`：统一模型调用入口，负责加载默认提示词、构造标准消息、携带按请求设置的超时/结构化输出/后端专用参数、屏蔽敏感日志并路由下层模型后端；同时保留供应商错误的结构化失败类别，并提供不含 prompt 正文的资源版本、有效来源和模板 SHA-256 归因。OpenAI-compatible 原生音频在读取和 Base64 编码本地文件前执行 25 MiB 上限，超限时保留 transcript 主路径并返回可解释降级。
 - `ai_model_middleware.py` 中的 OpenAI-compatible 视频输入会按请求中的 FPS 抽帧为图片组后发送；支持直接视频 FPS 的后端则由对应 provider 传递原始视频参数。
 - `prompt_preferences.py`：管理用户自定义提示词覆盖，空内容不覆盖默认提示词。
 - `__init__.py`：标记 `utils` 为 Python 包。
@@ -89,7 +91,8 @@
 - 全局用户数据和配置选项统一通过 `global_store.py` 读写。
 - 项目配置读写保持 UTF-8 和结构化 JSON；全局配置读写保持 UTF-8 和结构化 YAML。
 - 新增程序内联网入口时应复用 `network_middleware.py`，避免绕过代理偏好、网络锁和敏感信息脱敏规则。
-- 模型执行必须通过 `call_text_model()`、`call_image_model()` 或 `call_video_model()` 进入后端。
+- 自动下载的新资产必须进入 `res/runtime_downloads.json` 并复用 `download_integrity.py`；不得在下载器内恢复 `latest`、`/main/` 或无 hash 的旁路。
+- 模型执行必须通过 `call_text_model()`、`call_image_model()`、`call_audio_model()` 或 `call_video_model()` 进入后端。
 - 新增模型任务时，默认 prompt 正文放入 `res/default_prompts.json`；业务代码不得为了临时修复而复制、拼接或长期硬编码 prompt 指令文本。
 - 日志按 `INFO` 阶段摘要、`DEBUG` 诊断细节、`WARNING` 可恢复降级、`ERROR` 任务失败划分；不得输出 API Key、完整密钥、完整 prompt、完整模型响应、隐私文本或大型原始素材内容。
 - 运行时中间件的详细职责边界见 [`../docs/reference/runtime-middleware.zh_CN.md`](../docs/reference/runtime-middleware.zh_CN.md)。
