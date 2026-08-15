@@ -260,6 +260,14 @@ class RefusalSampleTests(unittest.TestCase):
         self.assertEqual(record["classification_reason"], "legacy_policy_marker")
         self.assertTrue(record["prompt_tuning_candidate"])
         self.assertTrue(record["requires_manual_review"])
+        self.assertEqual(record["schema_version"], 2)
+        self.assertEqual(record["default_prompt_resource_version"], 1)
+        self.assertEqual(record["effective_prompt_source"], "default")
+        self.assertEqual(
+            record["prompt_component_sources"],
+            {"system": "default", "user_template": "default"},
+        )
+        self.assertRegex(record["prompt_template_hash"], r"^sha256:[0-9a-f]{64}$")
 
 
 class FailingTextHandler:

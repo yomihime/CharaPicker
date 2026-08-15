@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from hashlib import sha256
 from pathlib import Path
 from string import Formatter
 from collections.abc import Callable
@@ -140,12 +141,23 @@ class _PromptFile(BaseModel):
     prompts: dict[str, _PromptTemplate]
 
 
+class PromptAttribution(BaseModel):
+    default_resource_version: int
+    effective_source: Literal["default", "override"]
+    component_sources: dict[str, Literal["default", "override"]]
+    template_hash: str
+
+
 class _SafeFormatDict(dict[str, Any]):
     def __missing__(self, key: str) -> str:
         return "{" + key + "}"
 
 
 def load_default_prompts(path: Path = DEFAULT_PROMPTS_PATH) -> dict[str, _PromptTemplate]:
+    return _load_default_prompt_file(path).prompts
+
+
+def _load_default_prompt_file(path: Path) -> _PromptFile:
     candidate_paths = _resolve_default_prompt_candidates(path)
     resolved_path = next((candidate for candidate in candidate_paths if candidate.is_file()), path)
     try:
@@ -161,7 +173,7 @@ def load_default_prompts(path: Path = DEFAULT_PROMPTS_PATH) -> dict[str, _Prompt
         raise ModelMiddlewareError(
             f"Default prompts could not be loaded: {resolved_path}"
         ) from exc
-    return prompt_file.prompts
+    return prompt_file
 
 
 def _resolve_default_prompt_candidates(primary_path: Path) -> list[Path]:
@@ -184,6 +196,47 @@ def render_prompt_texts(*, purpose: str, variables: dict[str, Any]) -> tuple[str
     user_template = override.user_template.strip() or template.user_template
     rendered_user = _render_template(user_template, variables)
     return system_prompt, rendered_user
+
+
+def prompt_attribution(
+    purpose: str,
+    *,
+    path: Path = DEFAULT_PROMPTS_PATH,
+) -> PromptAttribution:
+    prompt_file = _load_default_prompt_file(path)
+    template = prompt_file.prompts.get(purpose)
+    if template is None:
+        raise PromptNotFoundError(f"Prompt purpose is not defined: {purpose}")
+
+    override = prompt_override(purpose)
+    system_overridden = bool(override.system.strip())
+    user_template_overridden = bool(override.user_template.strip())
+    system_prompt = override.system.strip() if system_overridden else template.system
+    user_template = (
+        override.user_template.strip() if user_template_overridden else template.user_template
+    )
+    component_sources: dict[str, Literal["default", "override"]] = {
+        "system": "override" if system_overridden else "default",
+        "user_template": "override" if user_template_overridden else "default",
+    }
+    canonical = json.dumps(
+        {
+            "purpose": purpose,
+            "system": system_prompt,
+            "user_template": user_template,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return PromptAttribution(
+        default_resource_version=prompt_file.version,
+        effective_source=(
+            "override" if system_overridden or user_template_overridden else "default"
+        ),
+        component_sources=component_sources,
+        template_hash=f"sha256:{sha256(canonical.encode('utf-8')).hexdigest()}",
+    )
 
 
 def build_model_call_request(

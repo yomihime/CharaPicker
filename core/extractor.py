@@ -93,6 +93,7 @@ from utils.ai_model_middleware import (
     ModelCallError,
     build_model_call_request,
     call_video_model,
+    prompt_attribution,
     render_prompt_texts,
 )
 from utils.cloud_model_presets import (
@@ -1395,6 +1396,16 @@ class Extractor(QObject):
         metadata: dict[str, Any] | None = None,
     ) -> None:
         classification = classify_failure(exc)
+        attribution = None
+        if prompt_purpose:
+            try:
+                attribution = prompt_attribution(prompt_purpose)
+            except Exception:  # noqa: BLE001
+                LOGGER.warning(
+                    "Prompt attribution could not be resolved; purpose=%s",
+                    prompt_purpose,
+                    exc_info=True,
+                )
         try:
             result = record_extraction_failure_sample(
                 ExtractionFailureSampleRequest(
@@ -1421,6 +1432,18 @@ class Extractor(QObject):
                     classification_reason=classification.reason_code,
                     prompt_tuning_candidate=classification.prompt_tuning_candidate,
                     requires_manual_review=classification.requires_manual_review,
+                    default_prompt_resource_version=(
+                        attribution.default_resource_version if attribution is not None else None
+                    ),
+                    effective_prompt_source=(
+                        attribution.effective_source if attribution is not None else "unavailable"
+                    ),
+                    prompt_component_sources=(
+                        attribution.component_sources if attribution is not None else {}
+                    ),
+                    prompt_template_hash=(
+                        attribution.template_hash if attribution is not None else ""
+                    ),
                     error_type=exc.__class__.__name__,
                     error_summary=self._compact_exception_message(exc),
                     user_prompt_override_present=self._prompt_override_present(prompt_purpose),
