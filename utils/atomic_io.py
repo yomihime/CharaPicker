@@ -9,6 +9,7 @@ from typing import Any
 
 
 TextValidator = Callable[[str], object]
+FileWriter = Callable[[Path], object]
 
 
 class DataCorruptionError(ValueError):
@@ -74,6 +75,39 @@ def write_json_atomically(
     if trailing_newline:
         text += "\n"
     return write_text_atomically(path, text)
+
+
+def write_file_atomically(path: Path, writer: FileWriter) -> Path:
+    """Build a file beside its destination and publish it with one replace."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".tmp-",
+        suffix=".tmp",
+        dir=path.parent,
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        os.close(descriptor)
+        descriptor = -1
+        writer(temporary_path)
+        with temporary_path.open("rb+") as handle:
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+        _sync_directory(path.parent)
+    except BaseException:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        raise
+    finally:
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    return path
 
 
 def read_validated_text(

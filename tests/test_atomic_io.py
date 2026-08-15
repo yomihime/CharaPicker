@@ -11,6 +11,7 @@ from utils.atomic_io import (
     DataCorruptionError,
     backup_path_for,
     restore_backup_atomically,
+    write_file_atomically,
     write_json_atomically,
     write_text_atomically,
     write_text_atomically_with_backup,
@@ -18,6 +19,30 @@ from utils.atomic_io import (
 
 
 class AtomicIoTests(unittest.TestCase):
+    def test_binary_writer_publishes_complete_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "artifact.zip"
+
+            write_file_atomically(path, lambda temporary: temporary.write_bytes(b"complete"))
+
+            self.assertEqual(path.read_bytes(), b"complete")
+            self.assertEqual(list(path.parent.glob(".tmp-*.tmp")), [])
+
+    def test_binary_writer_failure_preserves_old_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "artifact.zip"
+            path.write_bytes(b"old")
+
+            def fail(temporary: Path) -> None:
+                temporary.write_bytes(b"partial")
+                raise OSError("writer failed")
+
+            with self.assertRaisesRegex(OSError, "writer failed"):
+                write_file_atomically(path, fail)
+
+            self.assertEqual(path.read_bytes(), b"old")
+            self.assertEqual(list(path.parent.glob(".tmp-*.tmp")), [])
+
     def test_text_write_replaces_complete_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "nested" / "data.txt"
