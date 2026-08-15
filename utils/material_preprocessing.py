@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Callable, Literal
 
+from utils.atomic_io import write_json_atomically
 from utils.media_types import InputPreprocessorKey
 
 
@@ -946,17 +947,7 @@ def _result_from_manifest(
 
 
 def _write_json_atomically(path: Path, payload: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.updating")
-    temporary.unlink(missing_ok=True)
-    try:
-        temporary.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    write_json_atomically(path, payload)
 
 
 def validate_archive_entry_path(entry_name: str) -> ArchivePathValidation:

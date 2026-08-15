@@ -7,6 +7,7 @@ from typing import Any
 from core.character_card_constants import CHARACTER_CARD_JSON_FILE_NAME, PREVIEW_CARD_ID
 from core.extraction_plan import FormalExtractionRunPlan
 from core.models import ChunkExtractionResult, EpisodeTranscript, ExtractionArtifactStage
+from utils.atomic_io import write_json_atomically
 from utils.paths import ensure_project_tree
 
 
@@ -179,9 +180,7 @@ def is_full_artifact_payload_for_run(payload: dict[str, Any], extraction_run_id:
 
 
 def write_json(path: Path, payload: Any) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    return path
+    return write_json_atomically(path, payload)
 
 
 def save_source_manifest(project_id: str, manifest: dict[str, Any]) -> Path:
