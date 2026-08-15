@@ -12,6 +12,7 @@ from utils.ai_model_middleware import (
     ModelCallError,
     ModelCallRequest,
     ModelCallResult,
+    PromptAttribution,
     build_model_call_request,
     call_audio_model,
     call_image_model,
@@ -34,8 +35,16 @@ class FormalExtractionJsonError(ModelCallError):
         attempts: int = 0,
         attempt_metadata: list[dict[str, Any]] | None = None,
         last_content: str = "",
+        prompt_attribution: PromptAttribution | None = None,
+        request_temperature: float | None = None,
+        structured_output_mode: str = "",
     ) -> None:
-        super().__init__(message)
+        super().__init__(
+            message,
+            prompt_attribution=prompt_attribution,
+            request_temperature=request_temperature,
+            structured_output_mode=structured_output_mode,
+        )
         self.attempts = attempts
         self.attempt_metadata = attempt_metadata or []
         self.last_content = last_content
@@ -227,6 +236,9 @@ def call_formal_json_model(
                 attempts=attempt,
                 attempt_metadata=attempt_metadata,
                 last_content=content,
+                prompt_attribution=request.prompt_attribution,
+                request_temperature=request.temperature,
+                structured_output_mode=_structured_output_mode(request),
             )
 
         try:
@@ -238,6 +250,9 @@ def call_formal_json_model(
                     attempts=attempt,
                     attempt_metadata=attempt_metadata,
                     last_content=content,
+                    prompt_attribution=request.prompt_attribution,
+                    request_temperature=request.temperature,
+                    structured_output_mode=_structured_output_mode(request),
                 ) from exc
             last_error = str(exc)
             LOGGER.warning(
@@ -291,7 +306,16 @@ def call_formal_json_model(
         attempts=attempts,
         attempt_metadata=attempt_metadata,
         last_content=last_content,
+        prompt_attribution=request.prompt_attribution,
+        request_temperature=request.temperature,
+        structured_output_mode=_structured_output_mode(request),
     )
+
+
+def _structured_output_mode(request: ModelCallRequest) -> str:
+    if not request.response_format:
+        return ""
+    return str(request.response_format.get("type") or "").strip()
 
 
 def looks_like_model_text_refusal(content: str) -> bool:

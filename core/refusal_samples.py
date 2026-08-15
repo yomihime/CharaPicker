@@ -76,6 +76,8 @@ class ExtractionFailureSampleRequest(BaseModel):
     effective_prompt_source: str = "unavailable"
     prompt_component_sources: dict[str, str] = Field(default_factory=dict)
     prompt_template_hash: str = ""
+    model_temperature: float | None = None
+    structured_output_mode: str = ""
     error_type: str = ""
     error_summary: str = ""
     user_prompt_override_present: bool = False
@@ -116,6 +118,8 @@ class RefusalSampleRecord(BaseModel):
     effective_prompt_source: str = "unavailable"
     prompt_component_sources: dict[str, str] = Field(default_factory=dict)
     prompt_template_hash: str = ""
+    model_temperature: float | None = None
+    structured_output_mode: str = ""
     error_type: str = ""
     error_summary: str = ""
     user_prompt_override_present: bool = False
@@ -193,6 +197,8 @@ def record_extraction_failure_sample(
             for key, value in request.prompt_component_sources.items()
         },
         prompt_template_hash=_clean_text(request.prompt_template_hash, 80),
+        model_temperature=request.model_temperature,
+        structured_output_mode=_clean_text(request.structured_output_mode, 80),
         error_type=_clean_text(request.error_type, 120),
         error_summary=_clean_text(request.error_summary, 500),
         user_prompt_override_present=request.user_prompt_override_present,

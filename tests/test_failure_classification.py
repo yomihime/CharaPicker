@@ -14,6 +14,7 @@ from core.extraction_ai import (
 from core.failure_classification import (
     ContentRequiresManualReviewError,
     UserOverrideRegressionError,
+    FailureCategory,
     classify_failure,
 )
 from utils.ai_model_middleware import (
@@ -106,6 +107,12 @@ class FailureClassificationTests(unittest.TestCase):
         )
 
         self.assertEqual(result.payload["facts"], ["A quoted line says I cannot assist with that."])
+
+    def test_non_prompt_failures_use_defensive_fallback_categories(self) -> None:
+        self.assertEqual(classify_failure(OSError("Synthetic disk failure")).category,
+                         FailureCategory.LOCAL_PROCESSING_FAILURE)
+        self.assertEqual(classify_failure(RuntimeError("Synthetic unknown failure")).category,
+                         FailureCategory.UNKNOWN_FAILURE)
 
 
 def _exception_from_case(case: dict[str, Any]) -> Exception:

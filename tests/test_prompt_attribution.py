@@ -6,7 +6,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from utils.ai_model_middleware import prompt_attribution
+from utils.ai_model_middleware import (
+    ModelCallError,
+    ModelCallRequest,
+    ModelMessage,
+    PromptAttribution,
+    call_text_model,
+    prompt_attribution,
+)
 from utils.prompt_preferences import PromptOverride
 
 
@@ -60,6 +67,30 @@ class PromptAttributionTests(unittest.TestCase):
         )
         self.assertNotIn("Custom system template", serialized)
         self.assertNotIn("Extract {material_text}", serialized)
+
+    def test_model_failure_retains_request_time_prompt_snapshot(self) -> None:
+        attribution = PromptAttribution(
+            default_resource_version=7,
+            effective_source="override",
+            component_sources={"system": "override", "user_template": "default"},
+            template_hash=f"sha256:{'a' * 64}",
+        )
+        request = ModelCallRequest(
+            purpose="synthetic_purpose",
+            backend="local",
+            model_name="synthetic-model",
+            messages=[ModelMessage(role="user", content="Synthetic input")],
+            temperature=0.35,
+            response_format={"type": "json_object"},
+            prompt_attribution=attribution,
+        )
+
+        with self.assertRaises(ModelCallError) as context:
+            call_text_model(request)
+
+        self.assertEqual(context.exception.prompt_attribution, attribution)
+        self.assertEqual(context.exception.request_temperature, 0.35)
+        self.assertEqual(context.exception.structured_output_mode, "json_object")
 
 
 if __name__ == "__main__":

@@ -51,6 +51,13 @@ class PromptNotFoundError(ModelMiddlewareError):
     pass
 
 
+class PromptAttribution(BaseModel):
+    default_resource_version: int
+    effective_source: Literal["default", "override"]
+    component_sources: dict[str, Literal["default", "override"]]
+    template_hash: str
+
+
 class ModelCallError(ModelMiddlewareError):
     def __init__(
         self,
@@ -59,11 +66,17 @@ class ModelCallError(ModelMiddlewareError):
         failure_category: str = "",
         status_code: int | None = None,
         provider_code: str = "",
+        prompt_attribution: PromptAttribution | None = None,
+        request_temperature: float | None = None,
+        structured_output_mode: str = "",
     ) -> None:
         super().__init__(message)
         self.failure_category = failure_category
         self.status_code = status_code
         self.provider_code = provider_code
+        self.prompt_attribution = prompt_attribution
+        self.request_temperature = request_temperature
+        self.structured_output_mode = structured_output_mode
 
 
 def _compact_error_text(value: object, *, max_length: int = 500) -> str:
@@ -123,6 +136,7 @@ class ModelCallRequest(BaseModel):
     response_format: dict[str, Any] | None = None
     extra_body: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    prompt_attribution: PromptAttribution | None = None
 
 
 class ModelCallResult(BaseModel):
@@ -139,13 +153,6 @@ class _PromptTemplate(BaseModel):
 class _PromptFile(BaseModel):
     version: int = 1
     prompts: dict[str, _PromptTemplate]
-
-
-class PromptAttribution(BaseModel):
-    default_resource_version: int
-    effective_source: Literal["default", "override"]
-    component_sources: dict[str, Literal["default", "override"]]
-    template_hash: str
 
 
 class _SafeFormatDict(dict[str, Any]):
@@ -186,14 +193,7 @@ def _resolve_default_prompt_candidates(primary_path: Path) -> list[Path]:
 
 
 def render_prompt_texts(*, purpose: str, variables: dict[str, Any]) -> tuple[str, str]:
-    prompts = load_default_prompts()
-    template = prompts.get(purpose)
-    if template is None:
-        raise PromptNotFoundError(f"Prompt purpose is not defined: {purpose}")
-
-    override = prompt_override(purpose)
-    system_prompt = override.system.strip() or template.system
-    user_template = override.user_template.strip() or template.user_template
+    system_prompt, user_template, _attribution = _resolve_prompt_templates(purpose)
     rendered_user = _render_template(user_template, variables)
     return system_prompt, rendered_user
 
@@ -203,6 +203,18 @@ def prompt_attribution(
     *,
     path: Path = DEFAULT_PROMPTS_PATH,
 ) -> PromptAttribution:
+    _system_prompt, _user_template, attribution = _resolve_prompt_templates(
+        purpose,
+        path=path,
+    )
+    return attribution
+
+
+def _resolve_prompt_templates(
+    purpose: str,
+    *,
+    path: Path = DEFAULT_PROMPTS_PATH,
+) -> tuple[str, str, PromptAttribution]:
     prompt_file = _load_default_prompt_file(path)
     template = prompt_file.prompts.get(purpose)
     if template is None:
@@ -229,7 +241,7 @@ def prompt_attribution(
         separators=(",", ":"),
         sort_keys=True,
     )
-    return PromptAttribution(
+    attribution = PromptAttribution(
         default_resource_version=prompt_file.version,
         effective_source=(
             "override" if system_overridden or user_template_overridden else "default"
@@ -237,6 +249,7 @@ def prompt_attribution(
         component_sources=component_sources,
         template_hash=f"sha256:{sha256(canonical.encode('utf-8')).hexdigest()}",
     )
+    return system_prompt, user_template, attribution
 
 
 def build_model_call_request(
@@ -252,7 +265,8 @@ def build_model_call_request(
     stream: bool = False,
     metadata: dict[str, Any] | None = None,
 ) -> ModelCallRequest:
-    system_prompt, rendered_user = render_prompt_texts(purpose=purpose, variables=variables)
+    system_prompt, user_template, attribution = _resolve_prompt_templates(purpose)
+    rendered_user = _render_template(user_template, variables)
     LOGGER.debug(
         "Model call request built; purpose=%s backend=%s model=%s stream=%s max_tokens=%s "
         "variable_keys=%s metadata_keys=%s has_api_key=%s",
@@ -275,6 +289,7 @@ def build_model_call_request(
         max_tokens=max_tokens,
         stream=stream,
         metadata=metadata or {},
+        prompt_attribution=attribution,
         messages=[
             ModelMessage(role="system", content=system_prompt),
             ModelMessage(role="user", content=rendered_user),
@@ -288,20 +303,33 @@ def _call_model(
     on_stream_delta: Callable[[str], None] | None = None,
 ) -> ModelCallResult:
     request = _request_with_output_token_guidance(request)
-    if request.backend == "openai_compatible":
-        return _call_openai_compatible(request, on_stream_delta=on_stream_delta)
-    if request.backend == "dashscope":
-        return _call_dashscope(request)
-    if request.backend == "local":
+    try:
+        if request.backend == "openai_compatible":
+            return _call_openai_compatible(request, on_stream_delta=on_stream_delta)
+        if request.backend == "dashscope":
+            return _call_dashscope(request)
+        if request.backend == "local":
+            raise ModelCallError(
+                "Local model execution is not wired yet; "
+                "use this middleware entrypoint when it is added.",
+                failure_category="unsupported_capability",
+            )
         raise ModelCallError(
-            "Local model execution is not wired yet; "
-            "use this middleware entrypoint when it is added.",
+            f"Unsupported model backend: {request.backend}",
             failure_category="unsupported_capability",
         )
-    raise ModelCallError(
-        f"Unsupported model backend: {request.backend}",
-        failure_category="unsupported_capability",
-    )
+    except ModelCallError as exc:
+        _attach_request_context(exc, request)
+        raise
+
+
+def _attach_request_context(exc: ModelCallError, request: ModelCallRequest) -> None:
+    if exc.prompt_attribution is None:
+        exc.prompt_attribution = request.prompt_attribution
+    if exc.request_temperature is None:
+        exc.request_temperature = request.temperature
+    if not exc.structured_output_mode and request.response_format:
+        exc.structured_output_mode = str(request.response_format.get("type") or "").strip()
 
 
 def _request_with_output_token_guidance(request: ModelCallRequest) -> ModelCallRequest:

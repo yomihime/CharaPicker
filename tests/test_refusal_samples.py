@@ -102,6 +102,8 @@ class RefusalSampleTests(unittest.TestCase):
                 season_id="season_001",
                 episode_id="episode_001",
                 failure_kind="model_call_failed",
+                model_temperature=0.2,
+                structured_output_mode="json_object",
                 error_type="ModelCallError",
                 error_summary="provider rejected request",
                 metadata={"api_key": "secret-key", "retry_count": 2},
@@ -119,6 +121,8 @@ class RefusalSampleTests(unittest.TestCase):
         self.assertEqual(record.source_refs[0].copy_policy, "copy_allowed")
         self.assertEqual(record.metadata["api_key"], "<redacted>")
         self.assertEqual(len(record.sample_hash), 16)
+        self.assertEqual(record.model_temperature, 0.2)
+        self.assertEqual(record.structured_output_mode, "json_object")
 
     def test_package_failure_sample_copies_small_materials_and_indexes_large_ones(self) -> None:
         (self.paths.materials / "small.txt").write_text("small", encoding="utf-8")

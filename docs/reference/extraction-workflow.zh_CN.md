@@ -243,9 +243,11 @@ projects/{project_id}/cache/refusal_samples/{sample_id}/refusal_sample.json
 - `user_override_regression`：已经确认由用户 prompt override 引起的模板回退。
 - `content_requires_manual_review`：内容本身需要人工判断，不应自动通过 prompt 绕过。
 
+本地素材处理失败使用 `local_processing_failure`，无法安全归入上述语义的意外异常使用 `unknown_failure`；二者是防御性兜底，也不进入 prompt 调优队列。
+
 只有 `provider_policy_refusal` 和 `model_text_refusal` 会标记为安全误拒绝 prompt 调优候选；unsupported、截断、解析和网络问题不得混入该队列。供应商策略拒绝仍受项目的“跳过拒绝片段”选项控制，模型文本拒绝不会冒充供应商级阻断。
 
-样例还记录默认 prompt 资源版本、有效 prompt 来源（`default` 或 `override`）、system/user template 的组件级来源和有效模板 SHA-256。摘要只针对未渲染的模板，不包含素材变量值；样例不会保存 API Key、完整 prompt、完整模型响应或原始隐私文本。若 prompt 资源无法解析，归因明确写为 `unavailable`，但失败样例记录本身仍可继续。
+样例还记录请求创建时的默认 prompt 资源版本、有效 prompt 来源（`default` 或 `override`）、system/user template 的组件级来源、有效模板 SHA-256、temperature 和结构化输出模式。摘要只针对未渲染的模板，不包含素材变量值；样例不会保存 API Key、完整 prompt、完整模型响应或原始隐私文本。若 prompt 资源无法解析，归因明确写为 `unavailable`，但失败样例记录本身仍可继续。
 
 用户明确打包时，样例会导出到：
 

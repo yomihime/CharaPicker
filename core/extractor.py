@@ -1397,8 +1397,8 @@ class Extractor(QObject):
         metadata: dict[str, Any] | None = None,
     ) -> None:
         classification = classify_failure(exc)
-        attribution = None
-        if prompt_purpose:
+        attribution = getattr(exc, "prompt_attribution", None)
+        if attribution is None and prompt_purpose:
             try:
                 attribution = prompt_attribution(prompt_purpose)
             except PromptNotFoundError:
@@ -1450,6 +1450,8 @@ class Extractor(QObject):
                     prompt_template_hash=(
                         attribution.template_hash if attribution is not None else ""
                     ),
+                    model_temperature=getattr(exc, "request_temperature", None),
+                    structured_output_mode=getattr(exc, "structured_output_mode", ""),
                     error_type=exc.__class__.__name__,
                     error_summary=self._compact_exception_message(exc),
                     user_prompt_override_present=self._prompt_override_present(prompt_purpose),
