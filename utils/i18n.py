@@ -95,3 +95,13 @@ def t(key: str, **kwargs: Any) -> str:
     if kwargs:
         return text.format(**kwargs)
     return text
+
+
+def t_system(key: str, **kwargs: Any) -> str:
+    """Translate startup failures without reading the possibly corrupt global config."""
+    messages = load_messages(system_locale())
+    fallback = load_messages(DEFAULT_LOCALE)
+    text = messages.get(key, fallback.get(key, key))
+    if kwargs:
+        return text.format(**kwargs)
+    return text

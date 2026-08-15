@@ -853,5 +853,11 @@
   "transcription.error.cancelled": "Audio transcription was cancelled.",
   "extractor.insight.title": "Waiting for material insights",
   "extractor.insight.description": "After AI integration, CharaPicker will write key findings to knowledge_base/targeted_insights.json.",
-  "compiler.placeholder.summary": "Compiler placeholder: later it will aggregate character state through Retrieval -> Chunking -> Rolling Update."
+  "compiler.placeholder.summary": "Compiler placeholder: later it will aggregate character state through Retrieval -> Chunking -> Rolling Update.",
+  "recovery.global.title": "Global configuration is damaged",
+  "recovery.global.backupAvailable": "The global configuration could not be read:\n{path}\n\nA valid backup is available:\n{backup_path}\n\nRestore this backup? The damaged file will be replaced only after you confirm.",
+  "recovery.global.noBackup": "The global configuration could not be read:\n{path}\n\nNo valid backup is available. The original file has been preserved, and the app will not overwrite it with an empty configuration. Repair or move the file, then restart the app.",
+  "recovery.global.restoreFailed": "The global configuration could not be restored from its backup. The original file has been preserved.\n\nConfiguration: {path}\nBackup: {backup_path}",
+  "recovery.action.restore": "Restore backup",
+  "recovery.action.exit": "Exit app"
 }

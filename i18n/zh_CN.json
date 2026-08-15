@@ -853,5 +853,11 @@
   "transcription.error.cancelled": "音频转写已取消。",
   "extractor.insight.title": "等待素材洞察",
   "extractor.insight.description": "AI 接入后，拾卡姬会把关键发现写入 knowledge_base/targeted_insights.json。",
-  "compiler.placeholder.summary": "编译器占位实现：后续会按 Retrieval -> Chunking -> Rolling Update 汇总角色状态。"
+  "compiler.placeholder.summary": "编译器占位实现：后续会按 Retrieval -> Chunking -> Rolling Update 汇总角色状态。",
+  "recovery.global.title": "全局配置损坏",
+  "recovery.global.backupAvailable": "无法读取全局配置：\n{path}\n\n检测到有效备份：\n{backup_path}\n\n是否用该备份恢复？只有确认恢复后，损坏文件才会被替换。",
+  "recovery.global.noBackup": "无法读取全局配置：\n{path}\n\n没有可用备份。原文件已保留，应用不会创建空配置覆盖它。请先修复或移走该文件，再重新启动。",
+  "recovery.global.restoreFailed": "无法从备份恢复全局配置。原文件已保留。\n\n配置：{path}\n备份：{backup_path}",
+  "recovery.action.restore": "恢复备份",
+  "recovery.action.exit": "退出应用"
 }
