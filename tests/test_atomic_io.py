@@ -28,7 +28,7 @@ class AtomicIoTests(unittest.TestCase):
 
             self.assertEqual(result, path)
             self.assertEqual(path.read_text(encoding="utf-8"), "new")
-            self.assertEqual(list(path.parent.glob(f".{path.name}.*.tmp")), [])
+            self.assertEqual(list(path.parent.glob(".tmp-*.tmp")), [])
 
     def test_fsync_failure_preserves_old_file_and_cleans_temporary_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -40,7 +40,7 @@ class AtomicIoTests(unittest.TestCase):
                     write_text_atomically(path, "new")
 
             self.assertEqual(path.read_text(encoding="utf-8"), "old")
-            self.assertEqual(list(path.parent.glob(f".{path.name}.*.tmp")), [])
+            self.assertEqual(list(path.parent.glob(".tmp-*.tmp")), [])
 
     def test_replace_failure_preserves_old_file_and_cleans_temporary_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -52,7 +52,25 @@ class AtomicIoTests(unittest.TestCase):
                     write_text_atomically(path, "new")
 
             self.assertEqual(path.read_text(encoding="utf-8"), "old")
-            self.assertEqual(list(path.parent.glob(f".{path.name}.*.tmp")), [])
+            self.assertEqual(list(path.parent.glob(".tmp-*.tmp")), [])
+
+    def test_deep_target_uses_short_temporary_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parent = Path(tmp).joinpath(*(["nested-directory"] * 6))
+            path = parent / ("long-target-name-" * 5 + ".json")
+            sources: list[Path] = []
+            real_replace = os.replace
+
+            def capture_replace(source, destination) -> None:
+                sources.append(Path(source))
+                real_replace(source, destination)
+
+            with patch("utils.atomic_io.os.replace", side_effect=capture_replace):
+                write_text_atomically(path, "{}")
+
+            self.assertEqual(len(sources), 1)
+            self.assertLess(len(sources[0].name), len(path.name))
+            self.assertTrue(sources[0].name.startswith(".tmp-"))
 
     def test_consecutive_writes_use_distinct_temporary_names(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -38,7 +38,7 @@ def write_text_atomically(
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.",
+        prefix=".tmp-",
         suffix=".tmp",
         dir=path.parent,
     )
