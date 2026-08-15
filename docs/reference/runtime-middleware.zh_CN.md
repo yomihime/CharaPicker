@@ -206,6 +206,8 @@
 - 模型执行必须通过 `call_text_model()`、`call_image_model()` 或 `call_video_model()` 进入后端。
 - OpenAI-compatible 视频输入当前会按请求 FPS 抽帧为图片组后发送；支持直接视频 FPS 的后端由对应 provider 传递原始视频参数。
 - `ModelCallRequest` 支持按请求设置超时时间、结构化输出 `response_format` 和后端专用 `extra_body` 参数；调用方不得把 API Key 或完整模型响应写入普通日志。
+- `ModelCallError` 可携带供应商返回的状态码、错误码和标准失败类别。策略拒绝、能力不支持、响应结构错误和网络/鉴权错误必须分开，上层不得只凭“请求失败”统一归类为安全拒绝。
+- `prompt_attribution()` 返回默认资源版本、实际生效来源、system/user template 的组件来源和模板 SHA-256；hash 基于未渲染模板，不包含用户素材变量，也不返回 prompt 正文。归因失败不得遮蔽原始模型失败。
 - 云端视频预览的输出上限按“输出 Token / 分钟”配置并结合视频 chunk 时长换算为单次请求 `max_tokens`；调用方应检查后端返回的停止原因，识别 `length` / `max_tokens` 等输出截断情况。
 - 模型调用日志遵循第 3 节的等级划分和诊断边界，默认只暴露安全摘要，DEBUG 也不得输出完整 prompt、完整响应或大段素材内容。
 - 本地模型执行入口存在，但是否可用必须以当前代码为准，不要假定已完整接线。

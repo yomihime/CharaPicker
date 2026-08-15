@@ -102,6 +102,8 @@ class RefusalSampleTests(unittest.TestCase):
                 season_id="season_001",
                 episode_id="episode_001",
                 failure_kind="model_call_failed",
+                model_temperature=0.2,
+                structured_output_mode="json_object",
                 error_type="ModelCallError",
                 error_summary="provider rejected request",
                 metadata={"api_key": "secret-key", "retry_count": 2},
@@ -119,6 +121,8 @@ class RefusalSampleTests(unittest.TestCase):
         self.assertEqual(record.source_refs[0].copy_policy, "copy_allowed")
         self.assertEqual(record.metadata["api_key"], "<redacted>")
         self.assertEqual(len(record.sample_hash), 16)
+        self.assertEqual(record.model_temperature, 0.2)
+        self.assertEqual(record.structured_output_mode, "json_object")
 
     def test_package_failure_sample_copies_small_materials_and_indexes_large_ones(self) -> None:
         (self.paths.materials / "small.txt").write_text("small", encoding="utf-8")
@@ -256,6 +260,18 @@ class RefusalSampleTests(unittest.TestCase):
         self.assertEqual(record["unit_id"], "unit_text_001")
         self.assertEqual(record["source_refs"][0]["project_relative_path"], "materials/novel.txt")
         self.assertEqual(record["error_type"], "ModelCallError")
+        self.assertEqual(record["failure_category"], "provider_policy_refusal")
+        self.assertEqual(record["classification_reason"], "legacy_policy_marker")
+        self.assertTrue(record["prompt_tuning_candidate"])
+        self.assertTrue(record["requires_manual_review"])
+        self.assertEqual(record["schema_version"], 2)
+        self.assertEqual(record["default_prompt_resource_version"], 1)
+        self.assertEqual(record["effective_prompt_source"], "default")
+        self.assertEqual(
+            record["prompt_component_sources"],
+            {"system": "default", "user_template": "default"},
+        )
+        self.assertRegex(record["prompt_template_hash"], r"^sha256:[0-9a-f]{64}$")
 
 
 class FailingTextHandler:

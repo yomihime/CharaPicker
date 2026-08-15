@@ -232,7 +232,22 @@ knowledge_base/
 projects/{project_id}/cache/refusal_samples/{sample_id}/refusal_sample.json
 ```
 
-样例用于后续分析 prompt 边界、模型能力、输出截断或素材处理问题。它记录 `media_type`、`content_form`、unit、项目内来源路径、模型供应商、backend、模型名、prompt purpose、提取阶段、run/season/episode/chunk 标识、错误类型和脱敏错误摘要。它不会保存 API Key、完整 prompt、完整模型响应或原始隐私文本。
+样例用于后续分析 prompt 边界、模型能力、输出截断或素材处理问题。它记录 `media_type`、`content_form`、unit、项目内来源路径、模型供应商、backend、模型名、prompt purpose、提取阶段、run/season/episode/chunk 标识、错误类型和脱敏错误摘要。失败分类统一使用以下语义：
+
+- `provider_policy_refusal`：供应商在协议层明确返回安全或策略拒绝。
+- `model_text_refusal`：请求成功，但模型用自然语言拒绝返回结构化提取结果。
+- `unsupported_capability`：后端、模型或请求 schema 不支持所需能力。
+- `output_truncated`：模型因输出上限停止，结果不完整。
+- `json_parse_failure`：模型有响应，但预期 JSON 无法解析。
+- `transport_or_auth_failure`：网络、鉴权、限流或服务端调用失败。
+- `user_override_regression`：已经确认由用户 prompt override 引起的模板回退。
+- `content_requires_manual_review`：内容本身需要人工判断，不应自动通过 prompt 绕过。
+
+本地素材处理失败使用 `local_processing_failure`，无法安全归入上述语义的意外异常使用 `unknown_failure`；二者是防御性兜底，也不进入 prompt 调优队列。
+
+只有 `provider_policy_refusal` 和 `model_text_refusal` 会标记为安全误拒绝 prompt 调优候选；unsupported、截断、解析和网络问题不得混入该队列。供应商策略拒绝仍受项目的“跳过拒绝片段”选项控制，模型文本拒绝不会冒充供应商级阻断。
+
+样例还记录请求创建时的默认 prompt 资源版本、有效 prompt 来源（`default` 或 `override`）、system/user template 的组件级来源、有效模板 SHA-256、temperature 和结构化输出模式。摘要只针对未渲染的模板，不包含素材变量值；样例不会保存 API Key、完整 prompt、完整模型响应或原始隐私文本。若 prompt 资源无法解析，归因明确写为 `unavailable`，但失败样例记录本身仍可继续。
 
 用户明确打包时，样例会导出到：
 
@@ -243,6 +258,8 @@ projects/{project_id}/output/refusal_samples/{project_name}_{created_at}_{sample
 zip 至少包含 `refusal_sample.json` 和 `package_manifest.json`。如果用户选择包含素材，系统只会复制样例引用到的项目内素材；大型素材会按索引引用，缺失素材和项目外路径会写入 warning，不会被静默复制。应用不会自动上传失败样例或素材。
 
 能力不支持、格式暂不支持或 handler 不可用这类情况仍作为 warning 进入洞察流，不冒充模型拒绝样例；它们说明当前链路不可处理，不代表模型已经拒绝了某个 prompt。
+
+仓库中的分类回归只使用 `tests/fixtures/refusal_classification_cases.json` 内的合成最小样例，不提交真实用户素材、作品片段或生产模型响应。真实失败样例默认只留在当前项目的 `cache/`，除非用户主动打包，否则不会进入输出目录或联网传输。
 
 ## 8. 角色卡生成
 

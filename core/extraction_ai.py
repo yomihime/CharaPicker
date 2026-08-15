@@ -12,6 +12,7 @@ from utils.ai_model_middleware import (
     ModelCallError,
     ModelCallRequest,
     ModelCallResult,
+    PromptAttribution,
     build_model_call_request,
     call_audio_model,
     call_image_model,
@@ -34,14 +35,26 @@ class FormalExtractionJsonError(ModelCallError):
         attempts: int = 0,
         attempt_metadata: list[dict[str, Any]] | None = None,
         last_content: str = "",
+        prompt_attribution: PromptAttribution | None = None,
+        request_temperature: float | None = None,
+        structured_output_mode: str = "",
     ) -> None:
-        super().__init__(message)
+        super().__init__(
+            message,
+            prompt_attribution=prompt_attribution,
+            request_temperature=request_temperature,
+            structured_output_mode=structured_output_mode,
+        )
         self.attempts = attempts
         self.attempt_metadata = attempt_metadata or []
         self.last_content = last_content
 
 
 class FormalExtractionOutputTruncatedError(FormalExtractionJsonError):
+    pass
+
+
+class ModelTextRefusalError(FormalExtractionJsonError):
     pass
 
 
@@ -223,11 +236,24 @@ def call_formal_json_model(
                 attempts=attempt,
                 attempt_metadata=attempt_metadata,
                 last_content=content,
+                prompt_attribution=request.prompt_attribution,
+                request_temperature=request.temperature,
+                structured_output_mode=_structured_output_mode(request),
             )
 
         try:
             payload = extract_json_object(content)
         except ValueError as exc:
+            if looks_like_model_text_refusal(content):
+                raise ModelTextRefusalError(
+                    "model returned a refusal instead of structured extraction",
+                    attempts=attempt,
+                    attempt_metadata=attempt_metadata,
+                    last_content=content,
+                    prompt_attribution=request.prompt_attribution,
+                    request_temperature=request.temperature,
+                    structured_output_mode=_structured_output_mode(request),
+                ) from exc
             last_error = str(exc)
             LOGGER.warning(
                 "Formal extraction JSON parse failed; purpose=%s attempt=%s/%s "
@@ -280,7 +306,39 @@ def call_formal_json_model(
         attempts=attempts,
         attempt_metadata=attempt_metadata,
         last_content=last_content,
+        prompt_attribution=request.prompt_attribution,
+        request_temperature=request.temperature,
+        structured_output_mode=_structured_output_mode(request),
     )
+
+
+def _structured_output_mode(request: ModelCallRequest) -> str:
+    if not request.response_format:
+        return ""
+    return str(request.response_format.get("type") or "").strip()
+
+
+def looks_like_model_text_refusal(content: str) -> bool:
+    text = " ".join(content.strip().casefold().split())
+    if not text or len(text) > 4000:
+        return False
+    refusal_markers = (
+        "i can't assist with",
+        "i cannot assist with",
+        "i can't help with",
+        "i cannot help with",
+        "i'm unable to assist",
+        "i am unable to assist",
+        "i must refuse",
+        "我不能协助",
+        "我无法协助",
+        "我不能帮助",
+        "我无法帮助",
+        "我必须拒绝",
+        "お手伝いできません",
+        "対応できません",
+    )
+    return any(marker in text for marker in refusal_markers)
 
 
 def extract_json_object(content: str) -> dict[str, Any]:

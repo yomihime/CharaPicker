@@ -17,8 +17,8 @@ from utils.network_middleware import redact_sensitive_text
 from utils.paths import ensure_project_tree, project_paths
 
 
-REFUSAL_SAMPLE_SCHEMA_VERSION = 1
-REFUSAL_SAMPLE_HASH_SALT_ID = "CharaPickerRefusalSample:v1"
+REFUSAL_SAMPLE_SCHEMA_VERSION = 2
+REFUSAL_SAMPLE_HASH_SALT_ID = "CharaPickerRefusalSample:v2"
 REFUSAL_SAMPLE_HASH_ALGORITHM = "sha256-16"
 REFUSAL_SAMPLE_FILE_NAME = "refusal_sample.json"
 PACKAGE_MANIFEST_FILE_NAME = "package_manifest.json"
@@ -68,6 +68,16 @@ class ExtractionFailureSampleRequest(BaseModel):
     episode_id: str = ""
     chunk_id: str = ""
     failure_kind: str = ""
+    failure_category: str = "unknown_failure"
+    classification_reason: str = ""
+    prompt_tuning_candidate: bool = False
+    requires_manual_review: bool = False
+    default_prompt_resource_version: int | None = None
+    effective_prompt_source: str = "unavailable"
+    prompt_component_sources: dict[str, str] = Field(default_factory=dict)
+    prompt_template_hash: str = ""
+    model_temperature: float | None = None
+    structured_output_mode: str = ""
     error_type: str = ""
     error_summary: str = ""
     user_prompt_override_present: bool = False
@@ -100,6 +110,16 @@ class RefusalSampleRecord(BaseModel):
     episode_id: str = ""
     chunk_id: str = ""
     failure_kind: str = ""
+    failure_category: str = "unknown_failure"
+    classification_reason: str = ""
+    prompt_tuning_candidate: bool = False
+    requires_manual_review: bool = False
+    default_prompt_resource_version: int | None = None
+    effective_prompt_source: str = "unavailable"
+    prompt_component_sources: dict[str, str] = Field(default_factory=dict)
+    prompt_template_hash: str = ""
+    model_temperature: float | None = None
+    structured_output_mode: str = ""
     error_type: str = ""
     error_summary: str = ""
     user_prompt_override_present: bool = False
@@ -166,6 +186,19 @@ def record_extraction_failure_sample(
         episode_id=_clean_text(request.episode_id, 120),
         chunk_id=_clean_text(request.chunk_id, 120),
         failure_kind=_clean_text(request.failure_kind, 120),
+        failure_category=_clean_text(request.failure_category, 120),
+        classification_reason=_clean_text(request.classification_reason, 120),
+        prompt_tuning_candidate=request.prompt_tuning_candidate,
+        requires_manual_review=request.requires_manual_review,
+        default_prompt_resource_version=request.default_prompt_resource_version,
+        effective_prompt_source=_clean_text(request.effective_prompt_source, 40),
+        prompt_component_sources={
+            _clean_text(key, 40): _clean_text(value, 40)
+            for key, value in request.prompt_component_sources.items()
+        },
+        prompt_template_hash=_clean_text(request.prompt_template_hash, 80),
+        model_temperature=request.model_temperature,
+        structured_output_mode=_clean_text(request.structured_output_mode, 80),
         error_type=_clean_text(request.error_type, 120),
         error_summary=_clean_text(request.error_summary, 500),
         user_prompt_override_present=request.user_prompt_override_present,

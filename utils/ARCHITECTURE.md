@@ -52,7 +52,7 @@
 - `startup_middleware.py`：启动阶段预加载中间件，集中探测 FFmpeg/llama.cpp/whisper.cpp、预取项目配置和云模型预设，供启动页线程复用。
 - `logging_preferences.py`：管理日志等级偏好。
 - `logging_middleware.py`：安装全局日志中间件，日志只写入文件；日志等级边界和敏感信息规则见运行时中间件参考文档。
-- `ai_model_middleware.py`：统一模型调用入口，负责加载默认提示词、构造标准消息、携带按请求设置的超时/结构化输出/后端专用参数、屏蔽敏感日志并路由下层模型后端。
+- `ai_model_middleware.py`：统一模型调用入口，负责加载默认提示词、构造标准消息、携带按请求设置的超时/结构化输出/后端专用参数、屏蔽敏感日志并路由下层模型后端；同时保留供应商错误的结构化失败类别，并提供不含 prompt 正文的资源版本、有效来源和模板 SHA-256 归因。
 - `ai_model_middleware.py` 中的 OpenAI-compatible 视频输入会按请求中的 FPS 抽帧为图片组后发送；支持直接视频 FPS 的后端则由对应 provider 传递原始视频参数。
 - `prompt_preferences.py`：管理用户自定义提示词覆盖，空内容不覆盖默认提示词。
 - `__init__.py`：标记 `utils` 为 Python 包。
@@ -62,7 +62,7 @@
 - `gui` 调用 `i18n.py`、`theme.py`、`logging_preferences.py`、`prompt_preferences.py`、`cloud_model_presets.py` 和 `state_manager.py`。
 - `core` 可调用 `i18n.py` 获取流程文案，并通过 `ai_model_middleware.py` 访问模型后端。
 - `core` 的 AI 请求必须通过 `ai_model_middleware.py` 构造和执行，不能直接访问下层模型接口。
-- `ai_model_middleware.py` 从 `res/default_prompts.json` 加载默认提示词资源，并通过 `prompt_preferences.py` 读取非空用户覆盖。
+- `ai_model_middleware.py` 从 `res/default_prompts.json` 加载带版本的默认提示词资源，并通过 `prompt_preferences.py` 读取非空用户覆盖；归因摘要按实际生效的 system/user template 计算，不对渲染后的用户素材取 hash。
 - `ai_model_middleware.py` 是默认 prompt 的唯一加载与渲染入口；上层模块只传 purpose、变量、metadata 和多模态素材 part，不在业务代码中硬编码 prompt 正文。
 - `i18n.py`、`theme.py`、`logging_preferences.py`、`prompt_preferences.py`、`cloud_model_presets.py` 和 `proxy_preferences.py` 通过 `global_store.py` 管理全局用户偏好。
 - `state_manager.py` 使用 `core.models.ProjectConfig` 进行结构校验。

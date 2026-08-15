@@ -17,13 +17,16 @@ from core.character_card_store import mark_compiled_official_cards_stale
 from core.extraction_ai import (
     FormalExtractionJsonError,
     FormalExtractionOutputTruncatedError,
+    ModelTextRefusalError,
     build_formal_text_json_request,
     call_formal_json_model,
     call_formal_text_json_model,
     extract_json_object as parse_model_json_object,
     extract_json_object_candidates as parse_model_json_object_candidates,
+    looks_like_model_text_refusal,
     total_token_usage,
 )
+from core.failure_classification import FailureCategory, classify_failure
 from core.extraction_budget import (
     FORMAL_EPISODE_CONTENT_MERGE,
     FORMAL_EPISODE_SUMMARY,
@@ -88,8 +91,10 @@ from utils.ai_model_middleware import (
     ModelCallRequest,
     ModelMessage,
     ModelCallError,
+    PromptNotFoundError,
     build_model_call_request,
     call_video_model,
+    prompt_attribution,
     render_prompt_texts,
 )
 from utils.cloud_model_presets import (
@@ -1334,16 +1339,7 @@ class Extractor(QObject):
         return self._model_finish_reason(result) in {"length", "max_tokens"}
 
     def _provider_rejected_video(self, exc: Exception) -> bool:
-        if not isinstance(exc, ModelCallError):
-            return False
-        text = str(exc)
-        lower_text = text.lower()
-        return (
-            "DataInspectionFailed" in text
-            or "inappropriate content" in lower_text
-            or "data inspection" in lower_text
-            or "content safety" in lower_text
-        )
+        return classify_failure(exc).category == FailureCategory.PROVIDER_POLICY_REFUSAL
 
     def _compact_exception_message(self, exc: Exception, *, max_length: int = 300) -> str:
         text = " ".join(str(exc).split())
@@ -1354,8 +1350,11 @@ class Extractor(QObject):
         return f"{text[: max_length - 3]}..."
 
     def _failure_kind_for_exception(self, exc: Exception) -> str:
-        if self._provider_rejected_video(exc):
-            return "provider_data_inspection_failed"
+        classification = classify_failure(exc)
+        if classification.category == FailureCategory.PROVIDER_POLICY_REFUSAL:
+            return "provider_policy_refusal"
+        if classification.category == FailureCategory.MODEL_TEXT_REFUSAL:
+            return "model_text_refusal"
         if isinstance(exc, FormalExtractionOutputTruncatedError):
             return "formal_output_truncated"
         if isinstance(exc, FormalExtractionJsonError):
@@ -1397,6 +1396,22 @@ class Extractor(QObject):
         exc: Exception,
         metadata: dict[str, Any] | None = None,
     ) -> None:
+        classification = classify_failure(exc)
+        attribution = getattr(exc, "prompt_attribution", None)
+        if attribution is None and prompt_purpose:
+            try:
+                attribution = prompt_attribution(prompt_purpose)
+            except PromptNotFoundError:
+                LOGGER.debug(
+                    "Prompt attribution is unavailable for a promptless operation; purpose=%s",
+                    prompt_purpose,
+                )
+            except Exception:  # noqa: BLE001
+                LOGGER.warning(
+                    "Prompt attribution could not be resolved; purpose=%s",
+                    prompt_purpose,
+                    exc_info=True,
+                )
         try:
             result = record_extraction_failure_sample(
                 ExtractionFailureSampleRequest(
@@ -1419,6 +1434,24 @@ class Extractor(QObject):
                     episode_id=episode_id,
                     chunk_id=chunk_id,
                     failure_kind=failure_kind or self._failure_kind_for_exception(exc),
+                    failure_category=classification.category.value,
+                    classification_reason=classification.reason_code,
+                    prompt_tuning_candidate=classification.prompt_tuning_candidate,
+                    requires_manual_review=classification.requires_manual_review,
+                    default_prompt_resource_version=(
+                        attribution.default_resource_version if attribution is not None else None
+                    ),
+                    effective_prompt_source=(
+                        attribution.effective_source if attribution is not None else "unavailable"
+                    ),
+                    prompt_component_sources=(
+                        attribution.component_sources if attribution is not None else {}
+                    ),
+                    prompt_template_hash=(
+                        attribution.template_hash if attribution is not None else ""
+                    ),
+                    model_temperature=getattr(exc, "request_temperature", None),
+                    structured_output_mode=getattr(exc, "structured_output_mode", ""),
                     error_type=exc.__class__.__name__,
                     error_summary=self._compact_exception_message(exc),
                     user_prompt_override_present=self._prompt_override_present(prompt_purpose),
@@ -5099,6 +5132,12 @@ class Extractor(QObject):
                         )
                         self._emit_preview_warning(emit_event, message)
                         continue
+                    if looks_like_model_text_refusal(result.content):
+                        raise ModelTextRefusalError(
+                            "model returned a refusal instead of structured extraction",
+                            attempts=1,
+                            last_content=result.content,
+                        )
                     raise
                 season_id, episode_id, chunk_id = self._preview_chunk_identity(
                     config.project_id,
