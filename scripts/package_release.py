@@ -135,7 +135,7 @@ def validate_release_environment(
 def collect_package_files(stage_dir: Path) -> list[dict[str, str | int]]:
     files: list[dict[str, str | int]] = []
     root_name = stage_dir.name
-    for path in sorted(item for item in stage_dir.rglob("*") if item.is_file()):
+    for path in _sorted_stage_files(stage_dir):
         relative = path.relative_to(stage_dir).as_posix()
         files.append(
             {
@@ -145,6 +145,16 @@ def collect_package_files(stage_dir: Path) -> list[dict[str, str | int]]:
             }
         )
     return files
+
+
+def _sorted_stage_files(stage_dir: Path) -> list[Path]:
+    return sorted(
+        (item for item in stage_dir.rglob("*") if item.is_file()),
+        key=lambda item: (
+            item.relative_to(stage_dir).as_posix().casefold(),
+            item.relative_to(stage_dir).as_posix(),
+        ),
+    )
 
 
 def validate_stage(stage_dir: Path) -> None:
@@ -180,7 +190,7 @@ def write_normalized_zip(stage_dir: Path, archive_path: Path, source_date_epoch:
         compresslevel=9,
         allowZip64=True,
     ) as archive:
-        for path in sorted(item for item in stage_dir.rglob("*") if item.is_file()):
+        for path in _sorted_stage_files(stage_dir):
             relative = path.relative_to(stage_dir).as_posix()
             info = zipfile.ZipInfo(f"{stage_dir.name}/{relative}", date_time=timestamp)
             info.compress_type = zipfile.ZIP_DEFLATED

@@ -106,6 +106,18 @@ jobs:
             throw "build.bat failed with exit code $LASTEXITCODE."
           }
 
+      - name: Validate packaged release
+        shell: pwsh
+        run: |
+          $archives = @(Get-ChildItem -LiteralPath release -Filter *.zip)
+          if ($archives.Count -ne 1) {
+            throw "Expected exactly one release archive, found $($archives.Count)."
+          }
+          python scripts/validate_release_artifact.py --archive $archives[0].FullName --run-health-check
+          if ($LASTEXITCODE -ne 0) {
+            throw "Packaged release validation failed."
+          }
+
       - name: Prepare release notes
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
