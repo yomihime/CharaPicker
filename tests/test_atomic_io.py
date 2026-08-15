@@ -7,7 +7,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from utils.atomic_io import write_json_atomically, write_text_atomically
+from utils.atomic_io import (
+    DataCorruptionError,
+    backup_path_for,
+    restore_backup_atomically,
+    write_json_atomically,
+    write_text_atomically,
+    write_text_atomically_with_backup,
+)
 
 
 class AtomicIoTests(unittest.TestCase):
@@ -74,6 +81,43 @@ class AtomicIoTests(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             self.assertTrue(text.endswith("\n"))
             self.assertEqual(json.loads(text), {"name": "拾卡姬"})
+
+    def test_valid_previous_file_becomes_single_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            path.write_text('{"revision": 1}', encoding="utf-8")
+
+            write_text_atomically_with_backup(path, '{"revision": 2}', json.loads)
+
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"revision": 2})
+            self.assertEqual(
+                json.loads(backup_path_for(path).read_text(encoding="utf-8")),
+                {"revision": 1},
+            )
+
+    def test_corrupt_main_is_not_overwritten_and_valid_backup_is_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            backup = backup_path_for(path)
+            path.write_text("{broken", encoding="utf-8")
+            backup.write_text('{"revision": 1}', encoding="utf-8")
+
+            with self.assertRaises(DataCorruptionError) as raised:
+                write_text_atomically_with_backup(path, '{"revision": 2}', json.loads)
+
+            self.assertTrue(raised.exception.backup_available)
+            self.assertEqual(path.read_text(encoding="utf-8"), "{broken")
+            self.assertEqual(backup.read_text(encoding="utf-8"), '{"revision": 1}')
+
+    def test_valid_backup_is_restored_only_when_explicitly_requested(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            path.write_text("{broken", encoding="utf-8")
+            backup_path_for(path).write_text('{"revision": 1}', encoding="utf-8")
+
+            restore_backup_atomically(path, json.loads)
+
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"revision": 1})
 
 
 if __name__ == "__main__":
