@@ -22,6 +22,7 @@ DEPENDENCIES_PATTERN = re.compile(r"(?ms)^dependencies\s*=\s*\[(?P<body>.*?)\]")
 QUOTED_VALUE_PATTERN = re.compile(r'"(?P<value>[^"]+)"')
 BUILD_TOOL_NAMES = {"pip", "pyinstaller", "setuptools", "wheel"}
 QUALITY_TOOL_NAMES = {"ruff"}
+RELEASE_LOCK_ATTRIBUTE = "requirements-release-*.txt text eol=lf"
 PRIVATE_PATH_PATTERN = re.compile(
     r"(?:[a-z]:[\\/]|/(?:home|users|root)/)",
     re.IGNORECASE,
@@ -168,6 +169,13 @@ def validate_release_dependencies(
     lock_path = root / str(target["lock_file"])
     inventory_path = root / str(target["dependency_inventory"])
     lock_entries = parse_release_lock(lock_path)
+    attributes_path = root / ".gitattributes"
+    if not attributes_path.is_file() or RELEASE_LOCK_ATTRIBUTE not in {
+        line.strip() for line in attributes_path.read_text(encoding="utf-8").splitlines()
+    }:
+        errors.append(".gitattributes must enforce LF for release lock files")
+    if b"\r\n" in lock_path.read_bytes():
+        errors.append("release lock must use LF line endings")
     lock_versions = {
         canonicalize_name(entry["name"]): entry["version"] for entry in lock_entries
     }
