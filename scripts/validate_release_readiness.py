@@ -197,6 +197,8 @@ def validate_repository(
         errors.append(
             "build workflow release jobs do not form quality -> build -> attest -> publish chain"
         )
+    if "scripts/prepare_release_notes.py" not in workflow:
+        errors.append("build workflow does not generate release trust guidance")
 
     lock_path = root / str(target["lock_file"])
     if not lock_path.is_file():

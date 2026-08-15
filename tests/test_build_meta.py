@@ -112,6 +112,7 @@ class BuildMetadataTests(unittest.TestCase):
 
         self.assertIn("release/*.sha256", workflow)
         self.assertIn("release/build-info.json", workflow)
+        self.assertIn("scripts/prepare_release_notes.py", workflow)
 
     def test_release_workflow_separates_publish_permissions(self) -> None:
         workflow = (ROOT_DIR / ".github" / "workflows" / "build.yml").read_text(

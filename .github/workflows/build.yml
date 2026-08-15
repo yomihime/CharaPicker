@@ -125,46 +125,18 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         run: |
-          $tag = $env:GITHUB_REF_NAME
-          $changelog = "CHANGELOG.md"
-          if (-not (Test-Path -LiteralPath $changelog)) {
-            throw "CHANGELOG.md is required for tag releases."
+          $archives = @(Get-ChildItem -LiteralPath release -Filter *.zip)
+          if ($archives.Count -ne 1) {
+            throw "Expected exactly one release archive, found $($archives.Count)."
           }
-
-          $lines = Get-Content -LiteralPath $changelog -Encoding UTF8
-          $escapedTag = [regex]::Escape($tag)
-          $start = $null
-
-          for ($i = 0; $i -lt $lines.Count; $i++) {
-            if ($lines[$i] -match "^##\s+\[?$escapedTag\]?(\s|$)") {
-              $start = $i
-              break
-            }
+          python scripts/prepare_release_notes.py `
+            --tag $env:GITHUB_REF_NAME `
+            --archive $archives[0].FullName `
+            --changelog CHANGELOG.md `
+            --output release_notes.md
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release notes preparation failed."
           }
-
-          if ($null -eq $start) {
-            throw "No CHANGELOG.md section found for $tag."
-          }
-
-          $end = $lines.Count
-          for ($i = $start + 1; $i -lt $lines.Count; $i++) {
-            if ($lines[$i] -match "^##\s+") {
-              $end = $i
-              break
-            }
-          }
-
-          $section = New-Object System.Collections.Generic.List[string]
-          for ($i = $start + 1; $i -lt $end; $i++) {
-            $section.Add($lines[$i])
-          }
-
-          $body = ($section -join "`n").Trim()
-          if ([string]::IsNullOrWhiteSpace($body)) {
-            throw "CHANGELOG.md section for $tag is empty."
-          }
-
-          Set-Content -LiteralPath release_notes.md -Value $body -Encoding UTF8
 
       - name: Upload build artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
