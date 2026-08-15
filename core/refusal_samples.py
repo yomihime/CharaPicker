@@ -12,6 +12,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from utils.app_metadata import APP_VERSION_TAG
+from utils.atomic_io import write_file_atomically, write_text_atomically
 from utils.network_middleware import redact_sensitive_text
 from utils.paths import ensure_project_tree, project_paths
 
@@ -178,7 +179,7 @@ def record_extraction_failure_sample(
     sample_dir = paths.cache / "refusal_samples" / sample_id
     sample_dir.mkdir(parents=True, exist_ok=True)
     sample_path = sample_dir / REFUSAL_SAMPLE_FILE_NAME
-    sample_path.write_text(record.model_dump_json(indent=2), encoding="utf-8")
+    write_text_atomically(sample_path, record.model_dump_json(indent=2))
     return RefusalSampleWriteResult(
         sample_id=sample_id,
         sample_dir=str(sample_dir),
@@ -209,48 +210,51 @@ def package_refusal_sample(
     missing: list[str] = []
     warnings: list[str] = []
 
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.write(_sample_path(project_id, sample_id), REFUSAL_SAMPLE_FILE_NAME)
-        for source_ref in record.source_refs:
-            material_path = _source_ref_path(paths.root, source_ref)
-            label = source_ref.project_relative_path or source_ref.source_path
-            if source_ref.copy_policy == "missing":
-                missing.append(label)
-                continue
-            if source_ref.copy_policy not in {"copy_allowed", "index_only_large"}:
-                indexed.append(label)
-                warnings.append(f"material not copied due to {source_ref.copy_policy}: {label}")
-                continue
-            if not include_materials:
-                indexed.append(label)
-                continue
-            if material_path is None or not material_path.is_file():
-                missing.append(label)
-                continue
-            size_bytes = material_path.stat().st_size
-            if size_bytes > max_material_copy_bytes:
-                indexed.append(label)
-                warnings.append(f"material exceeds copy limit and was indexed only: {label}")
-                continue
-            archive_name = f"materials/{_archive_safe_name(_material_archive_label(label))}"
-            archive.write(material_path, archive_name)
-            copied.append(archive_name)
+    def build_package(temporary_path: Path) -> None:
+        with zipfile.ZipFile(temporary_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.write(_sample_path(project_id, sample_id), REFUSAL_SAMPLE_FILE_NAME)
+            for source_ref in record.source_refs:
+                material_path = _source_ref_path(paths.root, source_ref)
+                label = source_ref.project_relative_path or source_ref.source_path
+                if source_ref.copy_policy == "missing":
+                    missing.append(label)
+                    continue
+                if source_ref.copy_policy not in {"copy_allowed", "index_only_large"}:
+                    indexed.append(label)
+                    warnings.append(f"material not copied due to {source_ref.copy_policy}: {label}")
+                    continue
+                if not include_materials:
+                    indexed.append(label)
+                    continue
+                if material_path is None or not material_path.is_file():
+                    missing.append(label)
+                    continue
+                size_bytes = material_path.stat().st_size
+                if size_bytes > max_material_copy_bytes:
+                    indexed.append(label)
+                    warnings.append(f"material exceeds copy limit and was indexed only: {label}")
+                    continue
+                archive_name = f"materials/{_archive_safe_name(_material_archive_label(label))}"
+                archive.write(material_path, archive_name)
+                copied.append(archive_name)
 
-        manifest = {
-            "schema_version": 1,
-            "sample_id": sample_id,
-            "sample_hash": record.sample_hash,
-            "include_materials": include_materials,
-            "max_material_copy_bytes": max_material_copy_bytes,
-            "copied_materials": copied,
-            "indexed_materials": indexed,
-            "missing_materials": missing,
-            "warnings": warnings,
-        }
-        archive.writestr(
-            PACKAGE_MANIFEST_FILE_NAME,
-            json.dumps(manifest, ensure_ascii=False, indent=2),
-        )
+            manifest = {
+                "schema_version": 1,
+                "sample_id": sample_id,
+                "sample_hash": record.sample_hash,
+                "include_materials": include_materials,
+                "max_material_copy_bytes": max_material_copy_bytes,
+                "copied_materials": copied,
+                "indexed_materials": indexed,
+                "missing_materials": missing,
+                "warnings": warnings,
+            }
+            archive.writestr(
+                PACKAGE_MANIFEST_FILE_NAME,
+                json.dumps(manifest, ensure_ascii=False, indent=2),
+            )
+
+    write_file_atomically(zip_path, build_package)
 
     return RefusalSamplePackageResult(
         sample_id=sample_id,
