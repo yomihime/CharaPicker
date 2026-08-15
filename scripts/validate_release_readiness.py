@@ -44,7 +44,7 @@ RUNTIME_ROOT_ALLOWLIST = {
     "models/ARCHITECTURE.md",
     "projects/ARCHITECTURE.md",
 }
-PRIVATE_FILE_SUFFIXES = (".key", ".p12", ".pem", ".pfx")
+PRIVATE_FILE_SUFFIXES = (".bak", ".key", ".p12", ".pem", ".pfx")
 FINAL_README_CONTRACTS = {
     "README.md": ("首个稳定基线", "仍处在 beta 阶段"),
     "docs/readme/README.zh_TW.md": ("首個穩定基線", "仍處在 beta 階段"),

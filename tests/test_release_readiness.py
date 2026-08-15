@@ -70,12 +70,14 @@ class ReleaseReadinessTests(unittest.TestCase):
             tracked_files={
                 "README.md",
                 "config.yaml.bak",
+                "private/card.json.bak",
                 "projects/private-project/config.json",
                 "signing.pfx",
             }
         )
 
         self.assertTrue(any("config.yaml.bak" in error for error in errors))
+        self.assertTrue(any("private/card.json.bak" in error for error in errors))
         self.assertTrue(any("projects/private-project" in error for error in errors))
         self.assertTrue(any("signing.pfx" in error for error in errors))
 

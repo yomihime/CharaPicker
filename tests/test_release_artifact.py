@@ -124,6 +124,7 @@ class ReleaseArtifactTests(unittest.TestCase):
             archive, checksum, build_info = self._build_fixture(root)
             with zipfile.ZipFile(archive, "a") as packaged:
                 packaged.writestr("CharaPicker/projects/private/config.json", b"private")
+                packaged.writestr("CharaPicker/_internal/card.json.bak", b"private backup")
             checksum.write_text(f"{sha256_file(archive)}  {archive.name}\n", encoding="ascii")
 
             errors = validate_release_artifact(
@@ -134,6 +135,7 @@ class ReleaseArtifactTests(unittest.TestCase):
             )
 
             self.assertTrue(any("forbidden path" in error for error in errors))
+            self.assertTrue(any("card.json.bak" in error for error in errors))
 
     def test_missing_required_file_is_reported(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

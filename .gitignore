@@ -7,7 +7,7 @@
 
 # Generated/runtime assets
 config.yaml
-config.yaml.bak
+*.bak
 build/
 dist/
 release/
