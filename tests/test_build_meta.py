@@ -79,6 +79,12 @@ class BuildMetadataTests(unittest.TestCase):
         )
 
         self.assertEqual(_validate(meta), [])
+        self.assertGreater(meta.source_date_epoch, 0)
+
+    def test_source_date_epoch_can_be_fixed_explicitly(self) -> None:
+        meta = self._meta("--source-date-epoch=1700000000")
+
+        self.assertEqual(meta.source_date_epoch, 1700000000)
 
     def test_batch_composes_archive_name_from_metadata(self) -> None:
         batch = (ROOT_DIR / "build.bat").read_text(encoding="utf-8")
@@ -106,6 +112,13 @@ class BuildMetadataTests(unittest.TestCase):
 
         self.assertIn("Get-FileHash", workflow)
         self.assertIn("release/*.sha256", workflow)
+
+    def test_batch_uses_normalized_release_packager(self) -> None:
+        batch = (ROOT_DIR / "build.bat").read_text(encoding="utf-8")
+
+        self.assertIn("scripts\\package_release.py", batch)
+        self.assertIn('set "PYTHONHASHSEED=0"', batch)
+        self.assertNotIn("Compress-Archive", batch)
 
     def test_about_version_messages_use_runtime_placeholder(self) -> None:
         for locale in ("zh_CN", "zh_TW", "en_US", "ja_JP"):

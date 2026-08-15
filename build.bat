@@ -14,6 +14,8 @@ set "LOCAL_BUILD=0"
 set "TAG_SOURCE="
 set "RAW_TAG="
 set "PYTHON_CMD=python"
+set "SOURCE_DATE_EPOCH="
+set "PYTHONHASHSEED=0"
 
 for /f "usebackq tokens=1,* delims==" %%A in (`%PYTHON_CMD% scripts\build_meta.py %*`) do (
   if /i "%%A"=="ERROR" (
@@ -31,6 +33,8 @@ set "BUILD_DIR=%ROOT_DIR%build"
 set "RELEASE_DIR=%ROOT_DIR%release"
 set "STAGE_DIR=%RELEASE_DIR%\%APP_NAME%"
 set "ZIP_PATH=%RELEASE_DIR%\%ZIP_NAME%"
+set "CHECKSUM_PATH=%ZIP_PATH%.sha256"
+set "BUILD_INFO_PATH=%RELEASE_DIR%\build-info.json"
 
 if not exist "%RELEASE_DIR%" mkdir "%RELEASE_DIR%"
 
@@ -47,6 +51,8 @@ if exist "%DIST_DIR%\%APP_NAME%.exe" del /q "%DIST_DIR%\%APP_NAME%.exe"
 if exist "%DIST_DIR%\%APP_NAME%Updater.exe" del /q "%DIST_DIR%\%APP_NAME%Updater.exe"
 if exist "%STAGE_DIR%" rmdir /s /q "%STAGE_DIR%"
 if exist "%ZIP_PATH%" del /q "%ZIP_PATH%"
+if exist "%CHECKSUM_PATH%" del /q "%CHECKSUM_PATH%"
+if exist "%BUILD_INFO_PATH%" del /q "%BUILD_INFO_PATH%"
 
 echo [1/5] Building one-folder package with main.spec...
 echo Version: v%VERSION_TAG%
@@ -74,22 +80,27 @@ for %%F in (README.md LICENSE THIRD_PARTY_NOTICES.md) do (
   if exist "%ROOT_DIR%%%F" copy /y "%ROOT_DIR%%%F" "%STAGE_DIR%\%%F" >nul
 )
 
-echo [4/5] Compressing release zip...
-set "ZIP_OK=0"
-for /l %%I in (1,1,5) do (
-  powershell -NoProfile -Command "$ErrorActionPreference='Stop'; Compress-Archive -Path '%STAGE_DIR%' -DestinationPath '%ZIP_PATH%' -Force" >nul
-  if not errorlevel 1 (
-    set "ZIP_OK=1"
-    goto :zip_done
-  )
-  timeout /t 2 /nobreak >nul
-)
-
-:zip_done
-if "%ZIP_OK%"=="0" goto :error
+echo [4/5] Creating normalized archive and build manifest...
+set "LOCK_MATCH_ARG=--require-lock-match"
+if "%LOCAL_BUILD%"=="1" set "LOCK_MATCH_ARG="
+%PYTHON_CMD% scripts\package_release.py ^
+  --stage-dir "%STAGE_DIR%" ^
+  --archive "%ZIP_PATH%" ^
+  --build-info "%BUILD_INFO_PATH%" ^
+  --version "%VERSION%" ^
+  --stage "%STAGE%" ^
+  --version-tag "%VERSION_TAG%" ^
+  --tag "%RAW_TAG%" ^
+  --platform "%PLATFORM_TAG%" ^
+  --arch "%ARCH_TAG%" ^
+  --source-date-epoch "%SOURCE_DATE_EPOCH%" ^
+  %LOCK_MATCH_ARG%
+if errorlevel 1 goto :error
 
 echo [5/5] Done.
 echo Output: %ZIP_PATH%
+echo Checksum: %CHECKSUM_PATH%
+echo Build info: %BUILD_INFO_PATH%
 popd >nul
 exit /b 0
 

@@ -14,6 +14,7 @@
 ## 关键文件
 
 - `build_meta.py`：解析命令行参数、Git tag、平台和架构，输出 `VERSION`、`STAGE`、`VERSION_TAG`、`PLATFORM_TAG`、`ARCH_TAG` 等构建变量；默认版本和阶段来自 `utils.app_metadata`。非本地构建必须与应用源码版本、阶段一致，正式版 `VERSION_TAG` 不包含 `release` 后缀。
+- `package_release.py`：按 `SOURCE_DATE_EPOCH` 规范化 ZIP 成员顺序与时间，生成同名 SHA-256 和无绝对路径、无环境变量值的 `build-info.json`；正式构建还会核对实际安装版本与 Release 锁文件。
 - `validate_extraction_plan_models.py`：验证四媒体类型、内容形态、素材引用、unit、派生成果、evidence、source trace 和正式 run plan 的模型边界。
 - `validate_extraction_plan_builder.py`：验证旧视频扫描结果进入 `FormalExtractionRunPlan`、稳定 ID、run 持久化和旧 manifest 观察索引边界。
 - `validate_video_unit_handler.py`：验证视频 unit 时长预算、模型请求变量和正式视频 handler 边界。

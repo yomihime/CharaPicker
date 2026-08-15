@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import platform
 import re
 import subprocess
@@ -25,6 +26,7 @@ DEFAULT_STAGE = APP_RELEASE_STAGE
 ALLOWED_STAGES = {"alpha", "beta", "rc", "release", "local"}
 STAGE_WITH_INDEX_PATTERN = re.compile(r"^(alpha|beta|rc)\.\d+$")
 SEMVER_PATTERN = re.compile(r"^\d+\.\d+\.\d+$")
+FALLBACK_SOURCE_DATE_EPOCH = 315532800
 
 
 @dataclass
@@ -36,6 +38,7 @@ class Meta:
     local_build: int
     raw_tag: str
     tag_source: str
+    source_date_epoch: int
 
     @property
     def version_tag(self) -> str:
@@ -77,6 +80,24 @@ def _run_git_describe(args: list[str]) -> str:
     return completed.stdout.strip()
 
 
+def _resolve_source_date_epoch(explicit_value: str | None) -> int:
+    value = explicit_value or os.environ.get("SOURCE_DATE_EPOCH", "")
+    if not value:
+        try:
+            completed = subprocess.run(
+                ["git", "show", "-s", "--format=%ct", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            value = completed.stdout.strip()
+        except Exception:
+            value = ""
+    if value.isdigit() and int(value) > 0:
+        return int(value)
+    return FALLBACK_SOURCE_DATE_EPOCH
+
+
 def _parse_tag(tag: str) -> tuple[str, str]:
     tag_value = tag.strip()
     if tag_value.lower().startswith("v"):
@@ -94,6 +115,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--platform")
     parser.add_argument("--arch")
     parser.add_argument("--tag")
+    parser.add_argument("--source-date-epoch")
     parser.add_argument("--local", action="store_true")
     parser.add_argument("extra", nargs="*")
     return parser.parse_args(argv)
@@ -141,6 +163,7 @@ def _build_meta(ns: argparse.Namespace) -> Meta:
         local_build=local_build,
         raw_tag=raw_tag,
         tag_source=tag_source,
+        source_date_epoch=_resolve_source_date_epoch(ns.source_date_epoch),
     )
 
 
@@ -185,6 +208,7 @@ def main(argv: list[str]) -> int:
     print(f"LOCAL_BUILD={meta.local_build}")
     print(f"RAW_TAG={meta.raw_tag}")
     print(f"TAG_SOURCE={meta.tag_source}")
+    print(f"SOURCE_DATE_EPOCH={meta.source_date_epoch}")
     return 0
 
 
