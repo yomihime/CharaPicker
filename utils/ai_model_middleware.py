@@ -51,7 +51,18 @@ class PromptNotFoundError(ModelMiddlewareError):
 
 
 class ModelCallError(ModelMiddlewareError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_category: str = "",
+        status_code: int | None = None,
+        provider_code: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.failure_category = failure_category
+        self.status_code = status_code
+        self.provider_code = provider_code
 
 
 def _compact_error_text(value: object, *, max_length: int = 500) -> str:
@@ -231,9 +242,13 @@ def _call_model(
     if request.backend == "local":
         raise ModelCallError(
             "Local model execution is not wired yet; "
-            "use this middleware entrypoint when it is added."
+            "use this middleware entrypoint when it is added.",
+            failure_category="unsupported_capability",
         )
-    raise ModelCallError(f"Unsupported model backend: {request.backend}")
+    raise ModelCallError(
+        f"Unsupported model backend: {request.backend}",
+        failure_category="unsupported_capability",
+    )
 
 
 def _request_with_output_token_guidance(request: ModelCallRequest) -> ModelCallRequest:
@@ -294,7 +309,10 @@ def call_audio_model(
     if request.backend == "dashscope":
         return _call_model(request.model_copy(update={"stream": False}))
     if request.backend != "openai_compatible":
-        raise ModelCallError("Audio input is not supported by the selected model backend.")
+        raise ModelCallError(
+            "Audio input is not supported by the selected model backend.",
+            failure_category="unsupported_capability",
+        )
     extra_body = dict(request.extra_body)
     extra_body.setdefault("modalities", ["text"])
     return _call_model(
@@ -401,13 +419,26 @@ def _call_dashscope(request: ModelCallRequest) -> ModelCallResult:
             safe_endpoint,
             exc_info=True,
         )
-        raise ModelCallError(redact_sensitive_text(exc)) from exc
+        raise ModelCallError(
+            redact_sensitive_text(exc),
+            failure_category="transport_or_auth_failure",
+        ) from exc
 
     raw = _dashscope_response_to_dict(response)
     status_code = raw.get("status_code")
     if isinstance(status_code, int) and status_code >= 400:
-        message = raw.get("message") or raw.get("code") or "DashScope call failed"
-        raise ModelCallError(str(message))
+        provider_code = str(raw.get("code") or "").strip()
+        message = str(raw.get("message") or provider_code or "DashScope call failed")
+        raise ModelCallError(
+            message,
+            failure_category=_provider_failure_category(
+                status_code=status_code,
+                provider_code=provider_code,
+                message=message,
+            ),
+            status_code=status_code,
+            provider_code=provider_code,
+        )
 
     content = _extract_dashscope_content(raw)
     usage = _extract_token_usage(raw)
@@ -505,13 +536,28 @@ def _extract_dashscope_content(payload: dict[str, Any]) -> str:
         return _extract_message_content(payload)
     choices = output.get("choices")
     if not isinstance(choices, list) or not choices:
-        raise ModelCallError("DashScope response does not include choices.")
+        raise ModelCallError(
+            "DashScope response does not include choices.",
+            failure_category="json_parse_failure",
+        )
     first_choice = choices[0]
     if not isinstance(first_choice, dict):
-        raise ModelCallError("DashScope response choice is not an object.")
+        raise ModelCallError(
+            "DashScope response choice is not an object.",
+            failure_category="json_parse_failure",
+        )
     message = first_choice.get("message")
     if not isinstance(message, dict):
-        raise ModelCallError("DashScope response choice does not include a message.")
+        raise ModelCallError(
+            "DashScope response choice does not include a message.",
+            failure_category="json_parse_failure",
+        )
+    refusal = message.get("refusal")
+    if isinstance(refusal, str) and refusal.strip():
+        raise ModelCallError(
+            "DashScope response contains an explicit refusal.",
+            failure_category="model_text_refusal",
+        )
     content = message.get("content")
     if isinstance(content, str):
         return content
@@ -525,7 +571,10 @@ def _extract_dashscope_content(payload: dict[str, Any]) -> str:
                 text_parts.append(text)
         if text_parts:
             return "\n".join(text_parts)
-    raise ModelCallError("DashScope response message content is not text.")
+    raise ModelCallError(
+        "DashScope response message content is not text.",
+        failure_category="json_parse_failure",
+    )
 
 
 def _to_openai_compatible_message(message: ModelMessage) -> dict[str, Any]:
@@ -582,7 +631,10 @@ def _openai_audio_item_to_input_audio_part(item: dict[str, Any]) -> dict[str, An
             audio_data = audio_url["url"]
 
     if not isinstance(audio_data, str) or not audio_data.strip():
-        raise ModelCallError("OpenAI-compatible audio input requires an audio file reference.")
+        raise ModelCallError(
+            "OpenAI-compatible audio input requires an audio file reference.",
+            failure_category="local_processing_failure",
+        )
 
     normalized_data, inferred_format = _openai_audio_reference_to_data(audio_data)
     input_audio_payload = {
@@ -600,7 +652,10 @@ def _openai_audio_reference_to_data(value: str) -> tuple[str, str | None]:
 
     audio_path = _local_path_from_reference(stripped)
     if audio_path is None or not audio_path.is_file():
-        raise ModelCallError("OpenAI-compatible audio input currently requires a local audio file.")
+        raise ModelCallError(
+            "OpenAI-compatible audio input currently requires a local audio file.",
+            failure_category="local_processing_failure",
+        )
     encoded = base64.b64encode(audio_path.read_bytes()).decode("ascii")
     return f"data:;base64,{encoded}", _infer_audio_format(audio_path.name)
 
@@ -620,11 +675,17 @@ def _openai_video_item_to_image_parts(item: dict[str, Any]) -> list[dict[str, An
         if isinstance(video_url, dict) and isinstance(video_url.get("url"), str):
             video_reference = video_url["url"]
     if not isinstance(video_reference, str):
-        raise ModelCallError("OpenAI-compatible video input requires a local video path.")
+        raise ModelCallError(
+            "OpenAI-compatible video input requires a local video path.",
+            failure_category="local_processing_failure",
+        )
 
     video_path = _local_path_from_reference(video_reference)
     if video_path is None or not video_path.is_file():
-        raise ModelCallError("OpenAI-compatible video input currently requires a local video file.")
+        raise ModelCallError(
+            "OpenAI-compatible video input currently requires a local video file.",
+            failure_category="local_processing_failure",
+        )
     data_urls = _extract_video_frame_data_urls(video_path, fps)
     return [{"type": "image_url", "image_url": {"url": data_url}} for data_url in data_urls]
 
@@ -655,7 +716,10 @@ def _local_path_from_reference(value: str) -> Path | None:
 def _extract_video_frame_data_urls(video_path: Path, fps: float, max_frames: int = 24) -> list[str]:
     ffmpeg_binary = find_usable_ffmpeg_binary()
     if ffmpeg_binary is None:
-        raise ModelCallError("FFmpeg is required to sample video frames for OpenAI-compatible video input.")
+        raise ModelCallError(
+            "FFmpeg is required to sample video frames for OpenAI-compatible video input.",
+            failure_category="local_processing_failure",
+        )
 
     with tempfile.TemporaryDirectory(prefix="charapicker_video_frames_") as temp_dir:
         frame_pattern = Path(temp_dir) / "frame_%03d.jpg"
@@ -677,10 +741,16 @@ def _extract_video_frame_data_urls(video_path: Path, fps: float, max_frames: int
         try:
             completed = subprocess.run(command, capture_output=True, check=False, timeout=120)
         except (OSError, subprocess.SubprocessError) as exc:
-            raise ModelCallError(f"Video frame sampling failed: {exc}") from exc
+            raise ModelCallError(
+                f"Video frame sampling failed: {exc}",
+                failure_category="local_processing_failure",
+            ) from exc
         if completed.returncode != 0:
             error_text = completed.stderr.decode("utf-8", errors="replace").strip()
-            raise ModelCallError(f"Video frame sampling failed: {error_text or completed.returncode}")
+            raise ModelCallError(
+                f"Video frame sampling failed: {error_text or completed.returncode}",
+                failure_category="local_processing_failure",
+            )
 
         data_urls: list[str] = []
         for frame_path in sorted(Path(temp_dir).glob("frame_*.jpg")):
@@ -688,7 +758,10 @@ def _extract_video_frame_data_urls(video_path: Path, fps: float, max_frames: int
             encoded = base64.b64encode(frame_path.read_bytes()).decode("ascii")
             data_urls.append(f"data:{mime_type or 'image/jpeg'};base64,{encoded}")
         if not data_urls:
-            raise ModelCallError("Video frame sampling produced no frames.")
+            raise ModelCallError(
+                "Video frame sampling produced no frames.",
+                failure_category="local_processing_failure",
+            )
         LOGGER.debug(
             "Sampled video frames for OpenAI-compatible request; video=%s fps=%s frames=%s",
             video_path.name,
@@ -783,9 +856,19 @@ def _call_openai_compatible(
                         _compact_error_text(error_body, max_length=2000),
                     )
                 detail = f"HTTP {response.status_code} {response.reason}"
+                provider_code, provider_message = _provider_error_details(error_body)
                 if error_body:
-                    detail = f"{detail}: {redact_sensitive_text(error_body)}"
-                raise ModelCallError(detail)
+                    detail = f"{detail}: {_compact_error_text(provider_message or error_body)}"
+                raise ModelCallError(
+                    detail,
+                    failure_category=_provider_failure_category(
+                        status_code=response.status_code,
+                        provider_code=provider_code,
+                        message=provider_message or error_body,
+                    ),
+                    status_code=response.status_code,
+                    provider_code=provider_code,
+                )
             if request.stream:
                 return _read_streamed_response(response, request, on_stream_delta=on_stream_delta)
             raw = response.json()
@@ -804,7 +887,10 @@ def _call_openai_compatible(
             safe_endpoint,
             exc_info=True,
         )
-        raise ModelCallError(redact_sensitive_text(exc)) from exc
+        raise ModelCallError(
+            redact_sensitive_text(exc),
+            failure_category="transport_or_auth_failure",
+        ) from exc
 
     content = _extract_message_content(raw)
     usage = _extract_token_usage(raw)
@@ -868,7 +954,15 @@ def _read_streamed_response(
         except ModelCallError:
             content = ""
     if not content:
-        raise ModelCallError("Streamed model response does not include text content.")
+        if _stream_contains_refusal(chunks):
+            raise ModelCallError(
+                "Streamed model response contains a refusal instead of text content.",
+                failure_category="model_text_refusal",
+            )
+        raise ModelCallError(
+            "Streamed model response does not include text content.",
+            failure_category="json_parse_failure",
+        )
     usage = _extract_token_usage_from_chunks(chunks)
     if usage:
         LOGGER.info(
@@ -959,13 +1053,28 @@ def _extract_stream_delta_text(payload: dict[str, Any]) -> str:
 def _extract_message_content(payload: dict[str, Any]) -> str:
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices:
-        raise ModelCallError("Model response does not include choices.")
+        raise ModelCallError(
+            "Model response does not include choices.",
+            failure_category="json_parse_failure",
+        )
     first_choice = choices[0]
     if not isinstance(first_choice, dict):
-        raise ModelCallError("Model response choice is not an object.")
+        raise ModelCallError(
+            "Model response choice is not an object.",
+            failure_category="json_parse_failure",
+        )
     message = first_choice.get("message")
     if not isinstance(message, dict):
-        raise ModelCallError("Model response choice does not include a message.")
+        raise ModelCallError(
+            "Model response choice does not include a message.",
+            failure_category="json_parse_failure",
+        )
+    refusal = message.get("refusal")
+    if isinstance(refusal, str) and refusal.strip():
+        raise ModelCallError(
+            "Model response contains an explicit refusal.",
+            failure_category="model_text_refusal",
+        )
     content = message.get("content")
     if isinstance(content, str):
         return content
@@ -981,4 +1090,75 @@ def _extract_message_content(payload: dict[str, Any]) -> str:
                 text_parts.append(text)
         if text_parts:
             return "\n".join(text_parts)
-    raise ModelCallError("Model response message content is not text.")
+    raise ModelCallError(
+        "Model response message content is not text.",
+        failure_category="json_parse_failure",
+    )
+
+
+def _stream_contains_refusal(chunks: list[dict[str, Any]]) -> bool:
+    for chunk in chunks:
+        choices = chunk.get("choices")
+        if not isinstance(choices, list):
+            continue
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            for container_name in ("delta", "message"):
+                container = choice.get(container_name)
+                if not isinstance(container, dict):
+                    continue
+                refusal = container.get("refusal")
+                if isinstance(refusal, str) and refusal.strip():
+                    return True
+    return False
+
+
+def _provider_error_details(error_body: str) -> tuple[str, str]:
+    if not error_body:
+        return "", ""
+    try:
+        payload = json.loads(error_body)
+    except (json.JSONDecodeError, TypeError):
+        return "", error_body
+    if not isinstance(payload, dict):
+        return "", error_body
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        error = payload
+    provider_code = str(error.get("code") or error.get("type") or "").strip()
+    message = str(error.get("message") or payload.get("message") or "").strip()
+    return provider_code, message
+
+
+def _provider_failure_category(
+    *,
+    status_code: int | None,
+    provider_code: str,
+    message: str,
+) -> str:
+    signal = f"{provider_code} {message}".casefold()
+    policy_markers = (
+        "content_filter",
+        "content policy",
+        "content safety",
+        "data inspection",
+        "datainspectionfailed",
+        "inappropriate content",
+        "moderation",
+        "policy violation",
+        "safety refusal",
+    )
+    if any(marker in signal for marker in policy_markers):
+        return "provider_policy_refusal"
+    unsupported_markers = (
+        "does not support",
+        "not supported",
+        "unsupported capability",
+        "unsupported modality",
+    )
+    if any(marker in signal for marker in unsupported_markers):
+        return "unsupported_capability"
+    if status_code is not None:
+        return "transport_or_auth_failure"
+    return ""

@@ -68,6 +68,10 @@ class ExtractionFailureSampleRequest(BaseModel):
     episode_id: str = ""
     chunk_id: str = ""
     failure_kind: str = ""
+    failure_category: str = "unknown_failure"
+    classification_reason: str = ""
+    prompt_tuning_candidate: bool = False
+    requires_manual_review: bool = False
     error_type: str = ""
     error_summary: str = ""
     user_prompt_override_present: bool = False
@@ -100,6 +104,10 @@ class RefusalSampleRecord(BaseModel):
     episode_id: str = ""
     chunk_id: str = ""
     failure_kind: str = ""
+    failure_category: str = "unknown_failure"
+    classification_reason: str = ""
+    prompt_tuning_candidate: bool = False
+    requires_manual_review: bool = False
     error_type: str = ""
     error_summary: str = ""
     user_prompt_override_present: bool = False
@@ -166,6 +174,10 @@ def record_extraction_failure_sample(
         episode_id=_clean_text(request.episode_id, 120),
         chunk_id=_clean_text(request.chunk_id, 120),
         failure_kind=_clean_text(request.failure_kind, 120),
+        failure_category=_clean_text(request.failure_category, 120),
+        classification_reason=_clean_text(request.classification_reason, 120),
+        prompt_tuning_candidate=request.prompt_tuning_candidate,
+        requires_manual_review=request.requires_manual_review,
         error_type=_clean_text(request.error_type, 120),
         error_summary=_clean_text(request.error_summary, 500),
         user_prompt_override_present=request.user_prompt_override_present,

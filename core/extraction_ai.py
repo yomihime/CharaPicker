@@ -45,6 +45,10 @@ class FormalExtractionOutputTruncatedError(FormalExtractionJsonError):
     pass
 
 
+class ModelTextRefusalError(FormalExtractionJsonError):
+    pass
+
+
 @dataclass(frozen=True)
 class FormalExtractionJsonResult:
     payload: dict[str, Any]
@@ -228,6 +232,13 @@ def call_formal_json_model(
         try:
             payload = extract_json_object(content)
         except ValueError as exc:
+            if looks_like_model_text_refusal(content):
+                raise ModelTextRefusalError(
+                    "model returned a refusal instead of structured extraction",
+                    attempts=attempt,
+                    attempt_metadata=attempt_metadata,
+                    last_content=content,
+                ) from exc
             last_error = str(exc)
             LOGGER.warning(
                 "Formal extraction JSON parse failed; purpose=%s attempt=%s/%s "
@@ -281,6 +292,29 @@ def call_formal_json_model(
         attempt_metadata=attempt_metadata,
         last_content=last_content,
     )
+
+
+def looks_like_model_text_refusal(content: str) -> bool:
+    text = " ".join(content.strip().casefold().split())
+    if not text or len(text) > 4000:
+        return False
+    refusal_markers = (
+        "i can't assist with",
+        "i cannot assist with",
+        "i can't help with",
+        "i cannot help with",
+        "i'm unable to assist",
+        "i am unable to assist",
+        "i must refuse",
+        "我不能协助",
+        "我无法协助",
+        "我不能帮助",
+        "我无法帮助",
+        "我必须拒绝",
+        "お手伝いできません",
+        "対応できません",
+    )
+    return any(marker in text for marker in refusal_markers)
 
 
 def extract_json_object(content: str) -> dict[str, Any]:

@@ -256,6 +256,10 @@ class RefusalSampleTests(unittest.TestCase):
         self.assertEqual(record["unit_id"], "unit_text_001")
         self.assertEqual(record["source_refs"][0]["project_relative_path"], "materials/novel.txt")
         self.assertEqual(record["error_type"], "ModelCallError")
+        self.assertEqual(record["failure_category"], "provider_policy_refusal")
+        self.assertEqual(record["classification_reason"], "legacy_policy_marker")
+        self.assertTrue(record["prompt_tuning_candidate"])
+        self.assertTrue(record["requires_manual_review"])
 
 
 class FailingTextHandler:
