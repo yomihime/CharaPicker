@@ -16,7 +16,7 @@
 ## 关键文件和目录
 
 - `.gitkeep`：保留空目录。
-- `{project_id}/config.json`：项目配置，包含目标角色、提取模式、素材路径、素材处理配置和已清理 raw 标记等。
+- `{project_id}/config.json`：项目配置，包含目标角色、提取模式、素材路径、素材处理配置和已清理 raw 标记等；保存时采用原子替换，并在 `config.json.bak` 保留单份最近有效版本供显式恢复。
 - `{project_id}/raw/`：导入后的原始素材副本，用于后续重新处理。
 - `{project_id}/materials/`：当前处理管线实际读取的素材。使用原素材方案时通常指向 `raw/` 中的同名素材。
 - `{project_id}/materials/derived_inputs/{raw_relative_path}/`：容器预处理的派生素材根目录，完整镜像源文件在 `raw/` 下的相对路径（包含容器文件名），用于隔离同名容器，例如 `groupA/book.zip/` 与 `groupB/book.zip/`。

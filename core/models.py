@@ -106,6 +106,8 @@ class SourceProcessingConfig(BaseModel):
 
 
 class ProjectConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     project_id: str = Field(default_factory=lambda: f"project-{uuid4().hex[:8]}")
     name: str = "Untitled Project"
     target_characters: list[str] = Field(default_factory=list)
