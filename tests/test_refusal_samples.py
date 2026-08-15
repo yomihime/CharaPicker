@@ -50,11 +50,14 @@ def _test_pyqt_signal(*_args: object, **_kwargs: object) -> _TestSignal:
     return _TestSignal()
 
 
-qtcore = sys.modules.setdefault("PyQt6.QtCore", types.ModuleType("PyQt6.QtCore"))
-setattr(qtcore, "QObject", getattr(qtcore, "QObject", _TestQObject))
-setattr(qtcore, "QLocale", getattr(qtcore, "QLocale", _TestQLocale))
-setattr(qtcore, "pyqtSignal", getattr(qtcore, "pyqtSignal", _test_pyqt_signal))
-sys.modules.setdefault("PyQt6", types.ModuleType("PyQt6"))
+try:
+    import PyQt6.QtCore  # noqa: F401
+except ImportError:
+    qtcore = sys.modules.setdefault("PyQt6.QtCore", types.ModuleType("PyQt6.QtCore"))
+    setattr(qtcore, "QObject", getattr(qtcore, "QObject", _TestQObject))
+    setattr(qtcore, "QLocale", getattr(qtcore, "QLocale", _TestQLocale))
+    setattr(qtcore, "pyqtSignal", getattr(qtcore, "pyqtSignal", _test_pyqt_signal))
+    sys.modules.setdefault("PyQt6", types.ModuleType("PyQt6"))
 
 from core.extractor import Extractor  # noqa: E402
 
