@@ -19,11 +19,12 @@
 
 ## 剩余项目队列
 
-路线 01 提取质量基线、路线 02 plan-first 重构、路线 03 多内容形态覆盖与真实验收，以及更多输入格式专项计划已经完成并归档。当前执行入口只保留仍需跟踪的 TODO 和长期路线基准；实施前仍必须重新核对当前代码和相关架构文档。
+路线 01 提取质量基线、路线 02 plan-first 重构、路线 03 多内容形态覆盖与真实验收，以及更多输入格式专项计划已经完成并归档。当前执行入口包括仍需跟踪的 TODO、RC 到 Release 三部分收口专项和长期路线基准；实施前仍必须重新核对当前代码和相关架构文档。
 
 1. [当前计划与任务队列分组](plans/README.md)：仍需执行或持续跟踪的计划类文档入口。
 2. [TODO List](plans/TODO.zh_CN.md)：当前剩余任务总表，已移出完成的历史项目。
-3. [提取与角色成长编译路线](plans/extraction-development-roadmap.zh_CN.md)：Extract Once、知识库和角色状态编译的长期目标与验收基准。
+3. [RC 到 Release 三部分收口计划](plans/rc-to-release-hardening-plan.zh_CN.md)：按“文档与文本、全自动验证、优化与完善”组织用户文档、数据、构建、分发信誉、Prompt、Release 门禁、产物健康检查和下载保护。
+4. [提取与角色成长编译路线](plans/extraction-development-roadmap.zh_CN.md)：Extract Once、知识库和角色状态编译的长期目标与验收基准。
 
 ## 发布与维护
 
