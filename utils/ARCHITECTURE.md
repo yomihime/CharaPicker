@@ -30,7 +30,7 @@
 - `archive_material_preprocessor.py`：复用 Archive backend 对 7z/RAR 容器执行先列举、再完整性测试、后展开和落盘后二次清单校验；统一拒绝加密、链接、路径逃逸、规范化冲突和超过数量/大小/压缩比限制的容器，只把图片、音频和文本白名单叶子复制到预处理输出。`.7z`、`.rar` 保留支持叶子的相对路径，容器内视频返回 `container_video_requires_explicit_import`；`.cbr` 只接纳图片并按自然顺序派生为单一页目录。
 - `material_processing_events.py`：集中保存素材处理取消消息和 FFmpeg 进度事件前缀等跨层协议常量。
 - `paths.py`：定义应用根目录、项目根目录和单个项目的标准目录结构。
-- `global_store.py`：提供全局用户数据和配置选项的读写中间件，默认使用根目录 `config.yaml`。
+- `global_store.py`：提供全局用户数据和配置选项的原子读写中间件，默认使用根目录 `config.yaml`；保留单份最近有效备份，损坏主文件不会被默认值静默覆盖，恢复必须显式触发。
 - `proxy_preferences.py`：封装内置代理设置的默认值、归一化、读写和代理 URL 构造。
 - `state_manager.py`：保存、读取和列出项目配置，项目配置写入 `projects/{project_id}/config.json`。
 - `theme.py`：管理主题偏好，并调用 qfluentwidgets 应用亮色、暗色或系统主题。

@@ -5,6 +5,11 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from utils.atomic_io import (
+    read_validated_text,
+    restore_backup_atomically,
+    write_text_atomically_with_backup,
+)
 from utils.paths import APP_ROOT
 
 
@@ -54,16 +59,22 @@ class YamlFileGlobalStore(GlobalStore):
         self._write(data)
 
     def all(self) -> dict[str, Any]:
-        if not self.path.exists() or self.path.stat().st_size == 0:
+        if not self.path.exists():
             return {"version": GLOBAL_CONFIG_VERSION}
-        try:
-            data = _parse_yaml(self.path.read_text(encoding="utf-8"))
-        except OSError:
-            return {"version": GLOBAL_CONFIG_VERSION}
-        return data if isinstance(data, dict) else {"version": GLOBAL_CONFIG_VERSION}
+        return _validate_global_config_text(
+            read_validated_text(self.path, _validate_global_config_text)
+        )
 
     def _write(self, data: dict[str, Any]) -> None:
-        self.path.write_text(_dump_yaml(data), encoding="utf-8")
+        write_text_atomically_with_backup(
+            self.path,
+            _dump_yaml(data),
+            _validate_global_config_text,
+        )
+
+    def restore_backup(self) -> dict[str, Any]:
+        restore_backup_atomically(self.path, _validate_global_config_text)
+        return self.all()
 
 
 _store: GlobalStore = YamlFileGlobalStore()
@@ -86,6 +97,13 @@ def set_global_value(key: str, value: Any) -> None:
     global_store().set(key, value)
 
 
+def restore_global_config_backup() -> dict[str, Any]:
+    store = global_store()
+    if not isinstance(store, YamlFileGlobalStore):
+        raise RuntimeError("the configured global store does not support file recovery")
+    return store.restore_backup()
+
+
 def _parse_yaml(text: str) -> Any:
     lines = [
         (len(raw_line) - len(raw_line.lstrip(" ")), raw_line.strip())
@@ -94,7 +112,9 @@ def _parse_yaml(text: str) -> Any:
     ]
     if not lines:
         return {}
-    value, _index = _parse_block(lines, 0, lines[0][0])
+    value, index = _parse_block(lines, 0, lines[0][0])
+    if index != len(lines):
+        raise ValueError("unsupported or malformed YAML content")
     return value
 
 
@@ -120,6 +140,8 @@ def _parse_dict(lines: list[tuple[int, str]], index: int, indent: int) -> tuple[
 
         key, raw_value = content.split(":", maxsplit=1)
         key = key.strip()
+        if not key or key in data:
+            raise ValueError("invalid or duplicate YAML key")
         raw_value = raw_value.strip()
         index += 1
         if raw_value:
@@ -232,3 +254,12 @@ def _format_scalar(value: Any) -> str:
     import json
 
     return json.dumps(str(value), ensure_ascii=False)
+
+
+def _validate_global_config_text(text: str) -> dict[str, Any]:
+    if not text.strip():
+        raise ValueError("global configuration is empty")
+    data = _parse_yaml(text)
+    if not isinstance(data, dict):
+        raise ValueError("global configuration root must be a mapping")
+    return data

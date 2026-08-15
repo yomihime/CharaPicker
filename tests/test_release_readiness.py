@@ -67,9 +67,15 @@ class ReleaseReadinessTests(unittest.TestCase):
 
     def test_runtime_private_paths_are_reported(self) -> None:
         errors = validate_repository(
-            tracked_files={"README.md", "projects/private-project/config.json", "signing.pfx"}
+            tracked_files={
+                "README.md",
+                "config.yaml.bak",
+                "projects/private-project/config.json",
+                "signing.pfx",
+            }
         )
 
+        self.assertTrue(any("config.yaml.bak" in error for error in errors))
         self.assertTrue(any("projects/private-project" in error for error in errors))
         self.assertTrue(any("signing.pfx" in error for error in errors))
 

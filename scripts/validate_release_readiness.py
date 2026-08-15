@@ -30,6 +30,7 @@ PROJECT_SECTION_PATTERN = re.compile(r"(?ms)^\[project\]\s*(?P<body>.*?)(?=^\[|\
 PROJECT_VERSION_PATTERN = re.compile(r'^version\s*=\s*"(?P<version>[^"]+)"', re.MULTILINE)
 FORBIDDEN_TRACKED_PATHS = {
     "config.yaml",
+    "config.yaml.bak",
 }
 FORBIDDEN_TRACKED_PREFIXES = (
     ".codex/",

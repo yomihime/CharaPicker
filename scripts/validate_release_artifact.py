@@ -46,6 +46,7 @@ FORBIDDEN_ROOT_NAMES = {
 FORBIDDEN_FILE_NAMES = {
     ".env",
     "config.yaml",
+    "config.yaml.bak",
     "id_dsa",
     "id_ed25519",
     "id_rsa",
