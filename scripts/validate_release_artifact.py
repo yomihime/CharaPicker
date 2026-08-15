@@ -46,11 +46,12 @@ FORBIDDEN_ROOT_NAMES = {
 FORBIDDEN_FILE_NAMES = {
     ".env",
     "config.yaml",
+    "config.yaml.bak",
     "id_dsa",
     "id_ed25519",
     "id_rsa",
 }
-FORBIDDEN_PRIVATE_SUFFIXES = (".key", ".p12", ".pfx")
+FORBIDDEN_PRIVATE_SUFFIXES = (".bak", ".key", ".p12", ".pfx")
 MAX_ARCHIVE_MEMBERS = 20000
 MAX_UNCOMPRESSED_SIZE = 2 * 1024 * 1024 * 1024
 

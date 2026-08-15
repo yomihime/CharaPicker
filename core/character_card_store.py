@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import logging
 import re
 import shutil
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -20,9 +22,21 @@ from core.models import (
     CharacterCardStatus,
     CharacterCardSummary,
 )
+from utils.atomic_io import (
+    DataCorruptionError,
+    read_validated_text,
+    restore_backup_atomically,
+    write_text_atomically_with_backup,
+)
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class CharacterCardScanResult:
+    summaries: list[CharacterCardSummary] = field(default_factory=list)
+    issues: list[DataCorruptionError] = field(default_factory=list)
 
 
 def generate_card_id(character_name: str, *, existing_ids: set[str] | None = None) -> str:
@@ -67,16 +81,19 @@ def create_preview_card(project_id: str, character_name: str = "") -> CharacterC
 
 
 def load_card(project_id: str, card_id: str) -> CharacterCard:
-    return CharacterCard.model_validate(kb.read_json_object(kb.character_card_json_path(project_id, card_id)))
+    path = kb.character_card_json_path(project_id, card_id)
+    return _validate_card_text(read_validated_text(path, _validate_card_text))
 
 
 def save_card(card: CharacterCard) -> Path:
     if card.card_kind != CharacterCardKind.OFFICIAL:
         return save_preview_card(card)
     card.updated_at = datetime.now()
-    return kb.write_json(
-        kb.character_card_json_path(card.project_id, card.card_id),
-        card.model_dump(mode="json"),
+    path = kb.character_card_json_path(card.project_id, card.card_id)
+    return write_text_atomically_with_backup(
+        path,
+        card.model_dump_json(indent=2) + "\n",
+        _validate_card_text,
     )
 
 
@@ -89,21 +106,43 @@ def delete_card(project_id: str, card_id: str) -> None:
         shutil.rmtree(card_dir)
 
 
-def list_card_summaries(project_id: str) -> list[CharacterCardSummary]:
+def scan_card_summaries(project_id: str) -> CharacterCardScanResult:
     root = kb.character_cards_root_path(project_id)
     if not root.exists():
-        return []
-    summaries: list[CharacterCardSummary] = []
+        return CharacterCardScanResult()
+    result = CharacterCardScanResult()
     for card_dir in sorted([path for path in root.iterdir() if path.is_dir()], key=lambda item: item.name.lower()):
         try:
             card = load_card(project_id, card_dir.name)
+        except DataCorruptionError as exc:
+            result.issues.append(exc)
+            LOGGER.warning(
+                "Character card is corrupt; project_id=%s card_id=%s "
+                "backup_available=%s backup_path=%s",
+                project_id,
+                card_dir.name,
+                exc.backup_available,
+                exc.backup_path,
+            )
+            continue
         except Exception:  # noqa: BLE001
             LOGGER.warning("Character card skipped; project_id=%s card_id=%s", project_id, card_dir.name, exc_info=True)
             continue
         if card.card_kind != CharacterCardKind.OFFICIAL:
             continue
-        summaries.append(summary_from_card(card))
-    return sorted(summaries, key=lambda item: item.updated_at, reverse=True)
+        result.summaries.append(summary_from_card(card))
+    result.summaries.sort(key=lambda item: item.updated_at, reverse=True)
+    return result
+
+
+def list_card_summaries(project_id: str) -> list[CharacterCardSummary]:
+    return scan_card_summaries(project_id).summaries
+
+
+def restore_card_backup(project_id: str, card_id: str) -> CharacterCard:
+    path = kb.character_card_json_path(project_id, card_id)
+    restore_backup_atomically(path, _validate_card_text)
+    return load_card(project_id, card_id)
 
 
 def summary_from_card(card: CharacterCard) -> CharacterCardSummary:
@@ -216,3 +255,7 @@ def _slugify(value: str) -> str:
     slug = "".join(output).strip("-")
     slug = re.sub(r"-{2,}", "-", slug)
     return slug[:48].strip("-")
+
+
+def _validate_card_text(text: str) -> CharacterCard:
+    return CharacterCard.model_validate(json.loads(text))

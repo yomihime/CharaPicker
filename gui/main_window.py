@@ -23,12 +23,17 @@ from gui.pages.project_page import ProjectPage
 from gui.pages.settings_page import SettingsPage
 from res import APP_ICON_PATH
 from utils.app_metadata import APP_NAME
+from utils.atomic_io import DataCorruptionError
 from utils.cloud_model_presets import CloudModelPreset
 from utils.i18n import t
 from utils.logging_middleware import apply_log_level_preference
 from utils.progress_guard import ProgressGuard
 from utils.startup_middleware import StartupWarmupSnapshot
-from utils.state_manager import save_project_config
+from utils.state_manager import (
+    restore_project_config_backup,
+    save_project_config,
+    scan_project_configs,
+)
 from utils.theme import apply_theme_preference
 
 
@@ -141,10 +146,17 @@ class MainWindow(FluentWindow):
         self._extraction_thread: QThread | None = None
         self._preview_worker: PreviewWorker | None = None
         self._full_extraction_worker: FullExtractionWorker | None = None
+        if startup_snapshot is None:
+            project_scan = scan_project_configs()
+            initial_project_configs = project_scan.configs
+            self._project_config_issues = project_scan.issues
+        else:
+            initial_project_configs = startup_snapshot.project_configs
+            self._project_config_issues = list(startup_snapshot.project_config_issues)
 
         self.project_page = ProjectPage(
             self,
-            initial_projects=startup_snapshot.project_configs if startup_snapshot else None,
+            initial_projects=initial_project_configs,
             initial_encoder_options=startup_snapshot.encoder_options if startup_snapshot else None,
             initial_ffmpeg_ready=startup_snapshot.ffmpeg_ready if startup_snapshot else None,
             initial_whisper_status=startup_snapshot.whisper_status if startup_snapshot else None,
@@ -209,6 +221,106 @@ class MainWindow(FluentWindow):
             position=InfoBarPosition.TOP_RIGHT,
             duration=3000,
         )
+
+    def offer_persistence_recovery(self) -> None:
+        restored_any = False
+        for issue in self._project_config_issues:
+            if not issue.backup_available:
+                self._show_unrecoverable_data_issue(
+                    t("recovery.project.title"),
+                    t("recovery.item.projectConfig"),
+                    issue,
+                )
+                continue
+            if not self._confirm_data_recovery(
+                t("recovery.project.title"),
+                t("recovery.item.projectConfig"),
+                issue,
+            ):
+                continue
+            try:
+                restore_project_config_backup(issue.path)
+            except (DataCorruptionError, OSError, ValueError):
+                LOGGER.error("Project configuration recovery failed; path=%s", issue.path, exc_info=True)
+                self._show_failed_data_recovery(
+                    t("recovery.project.title"),
+                    t("recovery.item.projectConfig"),
+                    issue,
+                )
+                continue
+            restored_any = True
+            InfoBar.success(
+                title=t("recovery.restored.title"),
+                content=t(
+                    "recovery.item.restored",
+                    item=t("recovery.item.projectConfig"),
+                    path=issue.path,
+                ),
+                parent=self,
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=5000,
+            )
+
+        if restored_any:
+            scan = scan_project_configs()
+            self._project_config_issues = scan.issues
+            self.project_page.replace_projects(scan.configs)
+        self.character_card_page.enable_recovery_prompts()
+
+    def _confirm_data_recovery(
+        self,
+        title: str,
+        item: str,
+        issue: DataCorruptionError,
+    ) -> bool:
+        dialog = MessageBox(
+            title,
+            t(
+                "recovery.item.backupAvailable",
+                item=item,
+                path=issue.path,
+                backup_path=issue.backup_path,
+            ),
+            self,
+        )
+        dialog.yesButton.setText(t("recovery.action.restore"))
+        dialog.cancelButton.setText(t("recovery.action.keep"))
+        return bool(dialog.exec())
+
+    def _show_unrecoverable_data_issue(
+        self,
+        title: str,
+        item: str,
+        issue: DataCorruptionError,
+    ) -> None:
+        dialog = MessageBox(
+            title,
+            t("recovery.item.noBackup", item=item, path=issue.path),
+            self,
+        )
+        dialog.yesButton.setText(t("recovery.action.close"))
+        dialog.cancelButton.hide()
+        dialog.exec()
+
+    def _show_failed_data_recovery(
+        self,
+        title: str,
+        item: str,
+        issue: DataCorruptionError,
+    ) -> None:
+        dialog = MessageBox(
+            title,
+            t(
+                "recovery.item.restoreFailed",
+                item=item,
+                path=issue.path,
+                backup_path=issue.backup_path,
+            ),
+            self,
+        )
+        dialog.yesButton.setText(t("recovery.action.close"))
+        dialog.cancelButton.hide()
+        dialog.exec()
 
     def _confirm_low_preview_token_budget(self, preset: CloudModelPreset) -> bool:
         if preset.max_output_tokens >= PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE:

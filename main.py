@@ -5,7 +5,7 @@ import sys
 
 from PyQt6.QtCore import QtMsgType, qInstallMessageHandler
 from PyQt6.QtGui import QFont, QIcon
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QMessageBox
 
 
 DEFAULT_FONT_POINT_SIZE = 10
@@ -30,9 +30,9 @@ def main() -> int:
     _apply_application_icon(app)
 
     from gui.splash_screen import StartupController
-    from utils.theme import apply_theme_preference
-
-    apply_theme_preference()
+    if not _apply_theme_with_recovery():
+        LOGGER.error("Application startup stopped because global configuration is unavailable")
+        return 1
 
     startup = StartupController()
     app.startup_controller = startup
@@ -60,6 +60,77 @@ def _apply_application_icon(app: QApplication) -> None:
 
 def _install_qt_message_filter() -> None:
     qInstallMessageHandler(_qt_message_handler)
+
+
+def _apply_theme_with_recovery() -> bool:
+    from utils.atomic_io import DataCorruptionError
+    from utils.global_store import restore_global_config_backup
+    from utils.theme import apply_theme_preference
+
+    try:
+        apply_theme_preference()
+        return True
+    except DataCorruptionError as error:
+        corruption = error
+        LOGGER.error(
+            "Global configuration is corrupt; path=%s backup_available=%s backup_path=%s",
+            error.path,
+            error.backup_available,
+            error.backup_path,
+        )
+
+    if not corruption.backup_available:
+        _show_global_config_recovery_error(corruption, restore_failed=False)
+        return False
+    if not _prompt_global_config_recovery(corruption):
+        return False
+
+    try:
+        restore_global_config_backup()
+        apply_theme_preference()
+    except (DataCorruptionError, OSError, ValueError):
+        LOGGER.error("Global configuration recovery failed", exc_info=True)
+        _show_global_config_recovery_error(corruption, restore_failed=True)
+        return False
+    LOGGER.info("Global configuration restored from backup; path=%s", corruption.path)
+    return True
+
+
+def _prompt_global_config_recovery(error) -> bool:
+    from utils.i18n import t_system
+
+    dialog = QMessageBox()
+    dialog.setIcon(QMessageBox.Icon.Warning)
+    dialog.setWindowTitle(t_system("recovery.global.title"))
+    dialog.setText(
+        t_system(
+            "recovery.global.backupAvailable",
+            path=error.path,
+            backup_path=error.backup_path,
+        )
+    )
+    restore_button = dialog.addButton(
+        t_system("recovery.action.restore"),
+        QMessageBox.ButtonRole.AcceptRole,
+    )
+    cancel_button = dialog.addButton(
+        t_system("recovery.action.exit"),
+        QMessageBox.ButtonRole.RejectRole,
+    )
+    dialog.setDefaultButton(cancel_button)
+    dialog.exec()
+    return dialog.clickedButton() is restore_button
+
+
+def _show_global_config_recovery_error(error, *, restore_failed: bool) -> None:
+    from utils.i18n import t_system
+
+    key = "recovery.global.restoreFailed" if restore_failed else "recovery.global.noBackup"
+    QMessageBox.critical(
+        None,
+        t_system("recovery.global.title"),
+        t_system(key, path=error.path, backup_path=error.backup_path),
+    )
 
 
 def _qt_message_handler(message_type: QtMsgType, _context, message: str) -> None:

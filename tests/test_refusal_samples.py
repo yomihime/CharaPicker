@@ -7,6 +7,7 @@ import types
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 from core.extraction_plan import (
@@ -33,6 +34,10 @@ class _TestQObject:
     pass
 
 
+class _TestQLocale:
+    pass
+
+
 class _TestSignal:
     def connect(self, *_args: object, **_kwargs: object) -> None:
         return None
@@ -45,10 +50,14 @@ def _test_pyqt_signal(*_args: object, **_kwargs: object) -> _TestSignal:
     return _TestSignal()
 
 
-qtcore = sys.modules.setdefault("PyQt6.QtCore", types.ModuleType("PyQt6.QtCore"))
-setattr(qtcore, "QObject", getattr(qtcore, "QObject", _TestQObject))
-setattr(qtcore, "pyqtSignal", getattr(qtcore, "pyqtSignal", _test_pyqt_signal))
-sys.modules.setdefault("PyQt6", types.ModuleType("PyQt6"))
+try:
+    import PyQt6.QtCore  # noqa: F401
+except ImportError:
+    qtcore = sys.modules.setdefault("PyQt6.QtCore", types.ModuleType("PyQt6.QtCore"))
+    setattr(qtcore, "QObject", getattr(qtcore, "QObject", _TestQObject))
+    setattr(qtcore, "QLocale", getattr(qtcore, "QLocale", _TestQLocale))
+    setattr(qtcore, "pyqtSignal", getattr(qtcore, "pyqtSignal", _test_pyqt_signal))
+    sys.modules.setdefault("PyQt6", types.ModuleType("PyQt6"))
 
 from core.extractor import Extractor  # noqa: E402
 
@@ -165,6 +174,36 @@ class RefusalSampleTests(unittest.TestCase):
         self.assertEqual(record.source_path, "<outside_project>/source.txt")
         self.assertEqual(record.source_refs[0].source_path, "<outside_project>/source.txt")
         self.assertEqual(record.source_refs[0].copy_policy, "outside_project")
+
+    def test_failed_package_rebuild_preserves_previous_zip(self) -> None:
+        result = record_extraction_failure_sample(
+            ExtractionFailureSampleRequest(
+                project_id=self.project_id,
+                error_type="ModelCallError",
+                error_summary="failure",
+            )
+        )
+        package = package_refusal_sample(
+            self.project_id,
+            result.sample_id,
+            include_materials=False,
+        )
+        package_path = Path(package.zip_path)
+        original = package_path.read_bytes()
+
+        with patch(
+            "core.refusal_samples.zipfile.ZipFile.writestr",
+            side_effect=OSError("package failed"),
+        ):
+            with self.assertRaisesRegex(OSError, "package failed"):
+                package_refusal_sample(
+                    self.project_id,
+                    result.sample_id,
+                    include_materials=False,
+                )
+
+        self.assertEqual(package_path.read_bytes(), original)
+        self.assertEqual(list(package_path.parent.glob(".tmp-*.tmp")), [])
 
     def test_text_extraction_failure_records_refusal_sample(self) -> None:
         (self.paths.materials / "novel.txt").write_text("Lala appears here.", encoding="utf-8")

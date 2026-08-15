@@ -1,4 +1,5 @@
 from __future__ import annotations
+import logging
 from collections.abc import Callable
 from pathlib import Path
 
@@ -54,8 +55,12 @@ from res.colors import (
     CHARACTER_CARD_LIGHT_BACKGROUND,
     CHARACTER_CARD_LIGHT_MUTED_TEXT,
 )
+from utils.atomic_io import DataCorruptionError, write_file_atomically
 from utils.i18n import t
 from utils.cloud_model_presets import CloudModelPreset
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class NewCharacterCardDialog(FluentDialog):
@@ -195,6 +200,10 @@ class CharacterCardPage(QWidget):
         self._model_preset_provider: Callable[[], CloudModelPreset | None] | None = None
         self._loading_dialog: CharacterCardLoadingDialog | None = None
         self._suppress_gallery_selection = False
+        self._recovery_prompts_enabled = False
+        self._recovery_prompt_scheduled = False
+        self._pending_recovery_issues: list[DataCorruptionError] = []
+        self._reported_recovery_paths: set[Path] = set()
 
         root = QVBoxLayout(self)
         root.setContentsMargins(22, 10, 22, 16)
@@ -268,8 +277,12 @@ class CharacterCardPage(QWidget):
         self.detail.apply_theme_colors()
 
     def set_project(self, project: ProjectConfig | None) -> None:
+        previous_project_id = self._project.project_id if self._project is not None else ""
         self._project = project
         self._current_card = None
+        if project is None or project.project_id != previous_project_id:
+            self._pending_recovery_issues = []
+            self._reported_recovery_paths.clear()
         has_project = project is not None
         for widget in (self.preview_draft_button, self.import_button, self.new_button, self.gallery):
             widget.setEnabled(has_project)
@@ -284,7 +297,11 @@ class CharacterCardPage(QWidget):
     def refresh_gallery(self, select_card_id: str = "") -> None:
         if self._project is None:
             return
-        cards = store.list_card_summaries(self._project.project_id)
+        scan = store.scan_card_summaries(self._project.project_id)
+        cards = scan.summaries
+        self._pending_recovery_issues = [
+            issue for issue in scan.issues if issue.path not in self._reported_recovery_paths
+        ]
         self.gallery.set_cards(cards)
         if select_card_id:
             self.gallery.select_card(select_card_id)
@@ -292,6 +309,108 @@ class CharacterCardPage(QWidget):
             self.gallery.select_card(cards[0].card_id)
         else:
             self.detail.set_card(None)
+        self._schedule_recovery_prompt()
+
+    def enable_recovery_prompts(self) -> None:
+        self._recovery_prompts_enabled = True
+        self._schedule_recovery_prompt()
+
+    def _schedule_recovery_prompt(self) -> None:
+        if (
+            not self._recovery_prompts_enabled
+            or not self._pending_recovery_issues
+            or self._recovery_prompt_scheduled
+        ):
+            return
+        self._recovery_prompt_scheduled = True
+        QTimer.singleShot(0, self._offer_pending_recovery)
+
+    def _offer_pending_recovery(self) -> None:
+        self._recovery_prompt_scheduled = False
+        if self._project is None:
+            return
+        project_id = self._project.project_id
+        restored_any = False
+        issues = list(self._pending_recovery_issues)
+        self._pending_recovery_issues = []
+        for issue in issues:
+            if self._project is None or self._project.project_id != project_id:
+                return
+            self._reported_recovery_paths.add(issue.path)
+            if not issue.backup_available:
+                self._show_unrecoverable_card(issue)
+                continue
+            if not self._confirm_card_recovery(issue):
+                continue
+            try:
+                store.restore_card_backup(project_id, issue.path.parent.name)
+            except (DataCorruptionError, OSError, ValueError):
+                LOGGER.error(
+                    "Character card recovery failed; project_id=%s path=%s",
+                    project_id,
+                    issue.path,
+                    exc_info=True,
+                )
+                self._show_failed_card_recovery(issue)
+                continue
+            restored_any = True
+            InfoBar.success(
+                title=t("recovery.restored.title"),
+                content=t(
+                    "recovery.item.restored",
+                    item=t("recovery.item.characterCard"),
+                    path=issue.path,
+                ),
+                parent=self.window(),
+                position=InfoBarPosition.TOP_RIGHT,
+                duration=5000,
+            )
+        if restored_any:
+            self.refresh_gallery()
+
+    def _confirm_card_recovery(self, issue: DataCorruptionError) -> bool:
+        dialog = MessageBox(
+            t("recovery.card.title"),
+            t(
+                "recovery.item.backupAvailable",
+                item=t("recovery.item.characterCard"),
+                path=issue.path,
+                backup_path=issue.backup_path,
+            ),
+            self.window(),
+        )
+        dialog.yesButton.setText(t("recovery.action.restore"))
+        dialog.cancelButton.setText(t("recovery.action.keep"))
+        return bool(dialog.exec())
+
+    def _show_unrecoverable_card(self, issue: DataCorruptionError) -> None:
+        dialog = MessageBox(
+            t("recovery.card.title"),
+            t(
+                "recovery.item.noBackup",
+                item=t("recovery.item.characterCard"),
+                path=issue.path,
+            ),
+            self.window(),
+        )
+        dialog.yesButton.setText(t("recovery.action.close"))
+        dialog.cancelButton.hide()
+        dialog.exec()
+
+    def _show_failed_card_recovery(self, issue: DataCorruptionError) -> None:
+        dialog = MessageBox(
+            t("recovery.card.title"),
+            t(
+                "recovery.item.restoreFailed",
+                item=t("recovery.item.characterCard"),
+                path=issue.path,
+                backup_path=issue.backup_path,
+            ),
+            self.window(),
+        )
+        dialog.yesButton.setText(t("recovery.action.close"))
+        dialog.cancelButton.hide()
+        dialog.exec()
 
     def _create_card(self) -> None:
         if self._project is None:
@@ -375,7 +494,18 @@ class CharacterCardPage(QWidget):
         cover_path = store.resolve_cover_path(self._project.project_id, self._current_card.card_id)
         image = QImage(str(image_path))
         cropped = image.copy(dialog.crop_rect)
-        if cropped.isNull() or not cropped.save(str(cover_path), "PNG"):
+        if cropped.isNull():
+            self._show_warning(t("cards.cover.failed.title"), t("cards.cover.failed.content"))
+            return
+
+        def save_cover(temporary_path: Path) -> None:
+            if not cropped.save(str(temporary_path), "PNG"):
+                raise OSError("cropped cover could not be encoded as PNG")
+
+        try:
+            write_file_atomically(cover_path, save_cover)
+        except OSError:
+            LOGGER.error("Character card cover save failed; path=%s", cover_path, exc_info=True)
             self._show_warning(t("cards.cover.failed.title"), t("cards.cover.failed.content"))
             return
         card = self._current_card.model_copy(deep=True)

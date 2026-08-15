@@ -334,6 +334,7 @@ class StartupController(QObject):
         from utils.app_update import acknowledge_update_startup
 
         acknowledge_update_startup()
+        QTimer.singleShot(0, self.window.offer_persistence_recovery)
         LOGGER.info("Main window shown")
 
     def _center_main_window(self) -> None:

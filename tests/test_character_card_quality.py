@@ -14,10 +14,13 @@ class _TestQLocale:
         return "en_US"
 
 
-qtcore = types.ModuleType("PyQt6.QtCore")
-qtcore.QLocale = _TestQLocale
-sys.modules.setdefault("PyQt6", types.ModuleType("PyQt6"))
-sys.modules.setdefault("PyQt6.QtCore", qtcore)
+try:
+    import PyQt6.QtCore  # noqa: F401
+except ImportError:
+    qtcore = types.ModuleType("PyQt6.QtCore")
+    qtcore.QLocale = _TestQLocale
+    sys.modules.setdefault("PyQt6", types.ModuleType("PyQt6"))
+    sys.modules.setdefault("PyQt6.QtCore", qtcore)
 
 from core import character_card_compiler as compiler  # noqa: E402
 from core import character_card_store as store  # noqa: E402

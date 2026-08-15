@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import os
 import re
@@ -25,6 +24,7 @@ from utils.app_metadata import (
     HTTP_USER_AGENT,
     format_version_tag,
 )
+from utils.atomic_io import write_json_atomically, write_text_atomically
 from utils.global_store import get_global_value, set_global_value
 from utils.network_middleware import (
     NetworkMiddlewareError,
@@ -320,7 +320,7 @@ def launch_prepared_update(
         "failure_message": failure_message,
     }
     try:
-        request_path.write_text(json.dumps(request, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json_atomically(request_path, request)
         shutil.copy2(prepared.updater_path, updater_copy)
         creation_flags = 0
         if sys.platform == "win32":
@@ -345,7 +345,7 @@ def acknowledge_update_startup() -> None:
     if not raw_path:
         return
     try:
-        Path(raw_path).write_text("ok\n", encoding="ascii")
+        write_text_atomically(Path(raw_path), "ok\n", encoding="ascii")
     except OSError:
         LOGGER.warning("Failed to acknowledge updated application startup", exc_info=True)
 
