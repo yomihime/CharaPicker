@@ -1,0 +1,69 @@
+[
+  {
+    "name": "provider policy refusal",
+    "exception_type": "model_call",
+    "message": "Synthetic provider policy rejection",
+    "middleware_category": "provider_policy_refusal",
+    "expected_category": "provider_policy_refusal",
+    "prompt_tuning_candidate": true,
+    "requires_manual_review": true
+  },
+  {
+    "name": "model text refusal",
+    "exception_type": "model_text_refusal",
+    "message": "Synthetic model refusal",
+    "expected_category": "model_text_refusal",
+    "prompt_tuning_candidate": true,
+    "requires_manual_review": true
+  },
+  {
+    "name": "unsupported capability",
+    "exception_type": "model_call",
+    "message": "Synthetic unsupported modality",
+    "middleware_category": "unsupported_capability",
+    "expected_category": "unsupported_capability",
+    "prompt_tuning_candidate": false,
+    "requires_manual_review": false
+  },
+  {
+    "name": "output truncated",
+    "exception_type": "output_truncated",
+    "message": "Synthetic output limit",
+    "expected_category": "output_truncated",
+    "prompt_tuning_candidate": false,
+    "requires_manual_review": false
+  },
+  {
+    "name": "JSON parse failure",
+    "exception_type": "json_parse",
+    "message": "Synthetic invalid JSON",
+    "expected_category": "json_parse_failure",
+    "prompt_tuning_candidate": false,
+    "requires_manual_review": false
+  },
+  {
+    "name": "transport or authentication failure",
+    "exception_type": "model_call",
+    "message": "Synthetic HTTP 401",
+    "middleware_category": "transport_or_auth_failure",
+    "expected_category": "transport_or_auth_failure",
+    "prompt_tuning_candidate": false,
+    "requires_manual_review": false
+  },
+  {
+    "name": "user override regression",
+    "exception_type": "user_override",
+    "message": "Synthetic override regression",
+    "expected_category": "user_override_regression",
+    "prompt_tuning_candidate": false,
+    "requires_manual_review": false
+  },
+  {
+    "name": "content requires manual review",
+    "exception_type": "manual_review",
+    "message": "Synthetic manual review requirement",
+    "expected_category": "content_requires_manual_review",
+    "prompt_tuning_candidate": false,
+    "requires_manual_review": true
+  }
+]
