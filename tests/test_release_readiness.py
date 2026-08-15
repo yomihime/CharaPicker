@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 import tempfile
 import unittest
@@ -52,9 +53,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             root = self._fixture(Path(tmp))
             workflow = root / ".github" / "workflows" / "build.yml"
             workflow.write_text(
-                workflow.read_text(encoding="utf-8").replace(
-                    "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
-                    "actions/checkout@v4",
+                re.sub(
+                    r"actions/checkout@[0-9a-f]{40}",
+                    "actions/checkout@v7",
+                    workflow.read_text(encoding="utf-8"),
                 ),
                 encoding="utf-8",
             )
