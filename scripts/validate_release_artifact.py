@@ -31,7 +31,7 @@ REQUIRED_PACKAGE_FILES = {
     "CharaPicker/THIRD_PARTY_NOTICES.md",
 }
 REQUIRED_LOCALES = ("zh_CN", "zh_TW", "en_US", "ja_JP")
-REQUIRED_RESOURCE_NAMES = ("default_prompts.json", "app_icon.png")
+REQUIRED_RESOURCE_NAMES = ("default_prompts.json", "runtime_downloads.json", "app_icon.png")
 FORBIDDEN_ROOT_NAMES = {
     ".codex",
     ".git",

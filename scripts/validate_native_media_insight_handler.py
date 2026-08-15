@@ -33,7 +33,12 @@ from core.models import (  # noqa: E402
     ProjectConfig,
     ProjectPaths,
 )
-from utils.ai_model_middleware import ModelCallError, ModelCallRequest  # noqa: E402
+from utils.ai_model_middleware import (  # noqa: E402
+    ModelCallError,
+    ModelCallRequest,
+    NativeAudioRequestTooLargeError,
+    OPENAI_INLINE_AUDIO_LIMIT_REASON,
+)
 from utils.cloud_model_presets import CloudModelPreset  # noqa: E402
 
 
@@ -325,11 +330,50 @@ def _assert_request_failure_does_not_block_video_result() -> None:
         )
 
 
+def _assert_oversized_native_audio_downgrades_to_transcript_path() -> None:
+    project_id = "validation-native-audio-size-limit"
+    with _isolated_project(project_id) as paths:
+        paths.materials.joinpath("voice.wav").write_bytes(b"RIFFvalidation-audio")
+        extractor = Extractor()
+        run_plan = extractor.prepare_formal_extraction_run_plan(project_id)
+
+        def reject_oversized_audio(_request: ModelCallRequest) -> FormalExtractionJsonResult:
+            raise NativeAudioRequestTooLargeError(size_bytes=26, max_bytes=25)
+
+        handler = NativeMediaInsightHandler(
+            NativeMediaInsightHandlerConfig(
+                provider="aliyunBailian",
+                model_name="qwen2.5-omni-7b",
+            ),
+            audio_model_call=reject_oversized_audio,
+        )
+        events: list[dict] = []
+        created, _usage, chunks, stats = extractor._extract_native_media_insight_units(
+            project_id,
+            run_plan,
+            preset=_preset("aliyunBailian"),
+            extraction_stage=ExtractionArtifactStage.FULL,
+            handler=handler,
+            emit_event=events.append,
+        )
+
+        assert created == 0
+        assert chunks == []
+        assert stats["skipped_chunks"] == 1
+        assert stats["failed_chunks"] == 0
+        assert any(
+            event.get("meta", {}).get("reason") == OPENAI_INLINE_AUDIO_LIMIT_REASON
+            and event.get("meta", {}).get("transcript_policy") == "supplement_only"
+            for event in events
+        )
+
+
 def main() -> None:
     _assert_supported_audio_and_video_requests()
     _assert_model_specific_audio_support()
     _assert_unsupported_provider_status()
     _assert_request_failure_does_not_block_video_result()
+    _assert_oversized_native_audio_downgrades_to_transcript_path()
     print("native media insight handler validation passed")
 
 

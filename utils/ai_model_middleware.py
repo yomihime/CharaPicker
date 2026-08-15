@@ -37,6 +37,8 @@ OUTPUT_TOKEN_GUIDANCE_TEMPLATE = (
     "If the task may exceed the budget, compress wording and prioritize complete, "
     "parseable output over extra explanation."
 )
+OPENAI_INLINE_AUDIO_MAX_BYTES = 25 * 1024 * 1024
+OPENAI_INLINE_AUDIO_LIMIT_REASON = "openai_inline_audio_size_limit"
 
 MessageRole = Literal["system", "user", "assistant"]
 ModelBackend = Literal["openai_compatible", "dashscope", "local"]
@@ -77,6 +79,17 @@ class ModelCallError(ModelMiddlewareError):
         self.prompt_attribution = prompt_attribution
         self.request_temperature = request_temperature
         self.structured_output_mode = structured_output_mode
+
+
+class NativeAudioRequestTooLargeError(ModelCallError):
+    def __init__(self, *, size_bytes: int, max_bytes: int) -> None:
+        super().__init__(
+            "OpenAI-compatible native audio input exceeds the inline request limit "
+            f"({size_bytes} bytes > {max_bytes} bytes).",
+            failure_category="unsupported_capability",
+        )
+        self.size_bytes = size_bytes
+        self.max_bytes = max_bytes
 
 
 def _compact_error_text(value: object, *, max_length: int = 500) -> str:
@@ -737,8 +750,36 @@ def _openai_audio_reference_to_data(value: str) -> tuple[str, str | None]:
             "OpenAI-compatible audio input currently requires a local audio file.",
             failure_category="local_processing_failure",
         )
-    encoded = base64.b64encode(audio_path.read_bytes()).decode("ascii")
+    encoded = base64.b64encode(_read_openai_inline_audio_bytes(audio_path)).decode("ascii")
     return f"data:;base64,{encoded}", _infer_audio_format(audio_path.name)
+
+
+def _read_openai_inline_audio_bytes(
+    audio_path: Path,
+    *,
+    max_bytes: int = OPENAI_INLINE_AUDIO_MAX_BYTES,
+) -> bytes:
+    try:
+        size_bytes = audio_path.stat().st_size
+    except OSError as exc:
+        raise ModelCallError(
+            "OpenAI-compatible audio input could not be inspected.",
+            failure_category="local_processing_failure",
+        ) from exc
+    if size_bytes > max_bytes:
+        raise NativeAudioRequestTooLargeError(size_bytes=size_bytes, max_bytes=max_bytes)
+
+    try:
+        with audio_path.open("rb") as stream:
+            content = stream.read(max_bytes + 1)
+    except OSError as exc:
+        raise ModelCallError(
+            "OpenAI-compatible audio input could not be read.",
+            failure_category="local_processing_failure",
+        ) from exc
+    if len(content) > max_bytes:
+        raise NativeAudioRequestTooLargeError(size_bytes=len(content), max_bytes=max_bytes)
+    return content
 
 
 def _infer_audio_format(value: str) -> str | None:

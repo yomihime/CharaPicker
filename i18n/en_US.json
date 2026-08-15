@@ -812,6 +812,7 @@
   "extractor.nativeMedia.unsupported": "Native audiovisual understanding did not run for {name}: {reason}",
   "extractor.nativeMedia.failed": "Native audiovisual understanding failed for {name}: {error}",
   "extractor.nativeMedia.reason.audioUnsupported": "the selected model does not support native audio understanding",
+  "extractor.nativeMedia.reason.audioInlineLimit": "the audio exceeds the native model's inline request limit; supplemental native audio understanding was skipped, while transcript processing continues through its existing path",
   "extractor.nativeMedia.reason.videoUnsupported": "the selected model does not support native video or video-audio understanding",
   "extractor.nativeMedia.reason.videoBackendUnsupported": "the selected model channel can only sample frames, not native video input",
   "extractor.nativeMedia.reason.handlerNotAvailable": "no native audiovisual handler is available",

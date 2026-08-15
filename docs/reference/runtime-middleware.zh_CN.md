@@ -188,6 +188,20 @@
 - 展示或记录网络异常前，使用 `redact_sensitive_text()` 或通过中间件抛出的脱敏异常。
 - 设置页连通性测试只作为用户判断参考，不替用户决定代理是否可用。
 
+### 7.1 下载完整性与运行时资产信任
+
+更新包和自动下载的外部运行时统一先写入 staging 文件，校验通过后再解压、安装或替换。`utils/download_integrity.py` 同时约束可信清单大小、HTTP `Content-Length` 和实际流式字节数；缺少 `Content-Length` 时允许继续流式下载，但实际字节不得超过上限。取消、长度不符、流式超限、HTTP 失败或 SHA-256 不符都会删除本次 staging 文件。
+
+FFmpeg、whisper.cpp、Whisper 模型和 llama.cpp 的自动下载资产由 `res/runtime_downloads.json` 固定。每项必须包含经审查的版本或 revision、文件名、HTTPS URL、精确大小、用途上限和 SHA-256；运行时不调用 `latest` 端点，也不跟随 Hugging Face `/main/` 自动换版。更新上游版本时必须修改该清单并经过代码审查，不能只替换 URL。
+
+这些校验的信任边界是：
+
+- HTTPS 和允许的 host 限制下载来源；固定 URL 避免运行时无审查漂移。
+- 精确大小和 SHA-256 能发现传输损坏、意外内容和与仓库清单不一致的资产。
+- 仓库内固定的 digest 不是发布者签名，也不能在仓库及上游账号同时失守时证明发布者身份。
+- 已存在的 Whisper 模型只有在大小与 SHA-256 都匹配时才复用；否则重新下载到 staging，校验后再替换。
+- 外部运行时清单只覆盖自动下载链路，不把用户手动放入 `bin/` 或 `models/` 的文件声明为可信资产。
+
 ## 8. AI 模型调用中间件
 
 当前 AI 模型调用统一通过 `utils/ai_model_middleware.py` 管理。
@@ -203,7 +217,8 @@
 - 用户覆盖 prompt 由 `utils/prompt_preferences.py` 管理，空内容不覆盖默认 prompt。
 - prompt 正文不得硬编码在 `core`、`gui` 或其他业务模块中；新增 prompt purpose 时维护 `res/default_prompts.json`，由 `utils/ai_model_middleware.py` 统一加载、套用用户覆盖并渲染变量。
 - `core`、`gui` 和其他上层模块不得绕过中间件直连模型后端。
-- 模型执行必须通过 `call_text_model()`、`call_image_model()` 或 `call_video_model()` 进入后端。
+- 模型执行必须通过 `call_text_model()`、`call_image_model()`、`call_audio_model()` 或 `call_video_model()` 进入后端。
+- OpenAI-compatible 原生音频需要内联 Base64。中间件在读取和编码本地文件前执行 25 MiB 原始文件上限检查，并在读取时再次按上限截断探测，避免文件变化导致完整超限内容进入请求体。超限只跳过补充型原生音频理解并发出 warning；audio transcript 主路径继续按原流程处理，warning 不表示转写已经成功。
 - OpenAI-compatible 视频输入当前会按请求 FPS 抽帧为图片组后发送；支持直接视频 FPS 的后端由对应 provider 传递原始视频参数。
 - `ModelCallRequest` 支持按请求设置超时时间、结构化输出 `response_format` 和后端专用 `extra_body` 参数；调用方不得把 API Key 或完整模型响应写入普通日志。
 - `ModelCallError` 可携带供应商返回的状态码、错误码和标准失败类别。策略拒绝、能力不支持、响应结构错误和网络/鉴权错误必须分开，上层不得只凭“请求失败”统一归类为安全拒绝。

@@ -19,6 +19,7 @@
 - `colors.py`：集中定义当前 UI 使用的颜色标识。
 - `app_icon.png`、`app_icon.ico`：运行时窗口图标和 Windows 打包图标；`app_icon_source.png` 保留透明源图，便于后续重新生成尺寸。
 - `default_prompts.json`：模型调用中间件使用的默认提示词，覆盖文本、字幕、静态图片、视频提取与后续聚合/编译任务。它不是 UI 可见文案，只能由 `utils/ai_model_middleware.py` 加载和渲染；业务代码不得硬编码或复制这里的 prompt 正文。
+- `runtime_downloads.json`：自动下载外部运行时和 Whisper 模型的受审查资产清单，固定版本或 revision、文件名、HTTPS URL、精确大小、用途上限和 SHA-256；由 `utils/runtime_downloads.py` 验证，不能作为 UI 文案或用户配置使用。
 - `provider_icons.py`：供应商图标路径映射，按 `icon_id` 查找 `provider_icons/` 下的静态资源并提供缺省图标。
 - `provider_icons/`：模型页供应商下拉使用的项目自绘 SVG 图标，不保存用户配置路径。
 - `test_media/`：模型页测试素材目录，存放固定的图片/视频测试文件，例如 `model_test_input.jpg`、`model_test_input.mp4`。
@@ -28,6 +29,7 @@
 
 - `gui/` 从这里读取颜色标识，用于样式表和绘制。
 - `utils/ai_model_middleware.py` 从这里读取默认提示词资源。
+- FFmpeg、whisper.cpp、Whisper 模型和 llama.cpp 下载器通过 `utils/runtime_downloads.py` 读取这里的资产清单。
 - `utils/` 仍负责通用工具和主题偏好逻辑，不承载具体颜色表。
 
 ## 维护注意事项
@@ -37,3 +39,4 @@
 - 测试素材统一放到 `test_media/`，不要散落在项目根目录。
 - 新增或修改默认提示词时保持 UTF-8 编码和结构化 JSON；模板中需要输出字面量 `{` / `}` 时必须写成 `{{` / `}}`，避免被格式化器误识别为变量。
 - 新增模型任务或 prompt purpose 时，prompt 正文写入 `default_prompts.json`，业务模块只传变量、metadata 和多模态素材 part，不复制、不拼接、不硬编码 prompt 指令文本。
+- 更新 `runtime_downloads.json` 时必须同时审查上游版本、URL、文件名、精确大小、上限和 SHA-256；不得把 `latest`、Hugging Face `/main/` 或无 hash 资产加入自动下载链路。

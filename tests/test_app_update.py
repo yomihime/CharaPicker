@@ -36,7 +36,9 @@ def _release_payload(
     assets: list[dict[str, object]] = [
         {
             "name": archive_name,
-            "browser_download_url": f"https://github.com/example/{archive_name}",
+            "browser_download_url": (
+                f"https://github.com/yomihime/CharaPicker/releases/download/{tag}/{archive_name}"
+            ),
             "size": 123,
         }
     ]
@@ -44,7 +46,10 @@ def _release_payload(
         assets.append(
             {
                 "name": f"{archive_name}.sha256",
-                "browser_download_url": f"https://github.com/example/{archive_name}.sha256",
+                "browser_download_url": (
+                    "https://github.com/yomihime/CharaPicker/releases/download/"
+                    f"{tag}/{archive_name}.sha256"
+                ),
                 "size": 80,
             }
         )
@@ -121,6 +126,15 @@ class UpdateCheckTests(unittest.TestCase):
         ]
 
         self.assertIsNone(check_for_update(include_prereleases=True))
+
+    @patch("utils.app_update.read_json")
+    def test_release_assets_must_use_repository_download_origin(self, read_json) -> None:
+        payload = _release_payload("v1.1.0", prerelease=False)
+        payload["assets"][0]["browser_download_url"] = "https://example.com/update.zip"
+        read_json.return_value = [payload]
+
+        with self.assertRaises(UpdatePackageUnavailableError):
+            check_for_update(include_prereleases=False)
 
 
 class UpdateArchiveTests(unittest.TestCase):

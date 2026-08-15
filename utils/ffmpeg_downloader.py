@@ -7,11 +7,13 @@ from collections.abc import Callable
 from pathlib import Path
 
 from utils.app_metadata import HTTP_USER_AGENT
+from utils.download_integrity import DownloadIntegrityError, download_staged_file
 from utils.env_manager import BIN_ROOT
 from utils.ffmpeg_tool import find_usable_ffmpeg_binary
-from utils.network_middleware import NetworkMiddlewareError, open_response, redact_sensitive_text
+from utils.network_middleware import NetworkMiddlewareError, redact_sensitive_text
+from utils.runtime_downloads import RuntimeDownloadManifestError, runtime_download_asset
 
-FFMPEG_WINDOWS_ESSENTIALS_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+FFMPEG_WINDOWS_ASSET_ID = "ffmpeg-win-x64"
 
 ProgressCallback = Callable[[int, str], None]
 CancelCallback = Callable[[], bool]
@@ -55,37 +57,34 @@ def download_and_install_ffmpeg(
             progress(value, message)
 
     bin_root.mkdir(parents=True, exist_ok=True)
+    try:
+        asset = runtime_download_asset(FFMPEG_WINDOWS_ASSET_ID)
+    except RuntimeDownloadManifestError as exc:
+        raise FfmpegDownloadError(str(exc)) from exc
 
     with tempfile.TemporaryDirectory(prefix="ffmpeg-", dir=bin_root) as temp_dir_name:
         temp_dir = Path(temp_dir_name)
-        archive_path = temp_dir / "ffmpeg-release-essentials.zip"
+        archive_path = temp_dir / asset.file_name
         extract_dir = temp_dir / "extract"
         extract_dir.mkdir()
 
         emit(5, "download")
         try:
-            with open_response(
-                "GET",
-                FFMPEG_WINDOWS_ESSENTIALS_URL,
+            download_staged_file(
+                asset.url,
+                archive_path,
+                max_bytes=asset.max_bytes,
+                expected_size=asset.size_bytes,
+                expected_sha256=asset.sha256,
                 headers={"User-Agent": HTTP_USER_AGENT},
                 timeout=60,
-                stream=True,
-            ) as response:
-                _check_cancel(cancelled)
-                if response.status_code >= 400:
-                    raise FfmpegDownloadError(f"HTTP {response.status_code}")
-                total_size = int(response.headers.get("Content-Length") or 0)
-                downloaded = 0
-                with archive_path.open("wb") as archive:
-                    for chunk in response.iter_content(chunk_size=1024 * 256):
-                        _check_cancel(cancelled)
-                        if not chunk:
-                            continue
-                        archive.write(chunk)
-                        downloaded += len(chunk)
-                        if total_size:
-                            emit(5 + int(downloaded / total_size * 75), "download")
-        except (OSError, NetworkMiddlewareError) as exc:
+                check_cancelled=lambda: _check_cancel(cancelled),
+                progress=lambda downloaded, total: emit(
+                    5 + int(downloaded / total * 75) if total else 5,
+                    "download",
+                ),
+            )
+        except (OSError, NetworkMiddlewareError, DownloadIntegrityError) as exc:
             raise FfmpegDownloadError(redact_sensitive_text(exc)) from exc
 
         emit(82, "extract")

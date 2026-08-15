@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 import re
@@ -25,10 +24,10 @@ from utils.app_metadata import (
     format_version_tag,
 )
 from utils.atomic_io import write_json_atomically, write_text_atomically
+from utils.download_integrity import DownloadIntegrityError, download_staged_file
 from utils.global_store import get_global_value, set_global_value
 from utils.network_middleware import (
     NetworkMiddlewareError,
-    open_response,
     read_json,
     redact_sensitive_text,
 )
@@ -43,6 +42,8 @@ UPDATE_RUNNER_NAME = "CharaPickerUpdater.exe"
 UPDATE_ASSET_SUFFIX = "windows-x64.zip"
 PRESERVED_RUNTIME_PATHS = ("projects", "config.yaml", "log", "bin", "models")
 MAX_UPDATE_ARCHIVE_MEMBERS = 100_000
+MAX_UPDATE_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
+MAX_UPDATE_CHECKSUM_BYTES = 64 * 1024
 MAX_UPDATE_EXTRACTED_BYTES = 8 * 1024 * 1024 * 1024
 VERSION_PATTERN = re.compile(
     r"^v?(?P<major>\d+)\.(?P<minor>\d+)\.(?P<patch>\d+)"
@@ -241,6 +242,8 @@ def prepare_update(
         _download_file(
             release.checksum.download_url,
             checksum_path,
+            max_bytes=MAX_UPDATE_CHECKSUM_BYTES,
+            expected_size=release.checksum.size or None,
             progress=lambda ratio: emit(3 + int(ratio * 4), "checksum"),
             cancelled=cancelled,
         )
@@ -250,6 +253,8 @@ def prepare_update(
         actual_digest = _download_file(
             release.archive.download_url,
             archive_path,
+            max_bytes=MAX_UPDATE_ARCHIVE_BYTES,
+            expected_size=release.archive.size or None,
             progress=lambda ratio: emit(8 + int(ratio * 67), "download"),
             cancelled=cancelled,
             calculate_sha256=True,
@@ -273,7 +278,13 @@ def prepare_update(
     except UpdateDownloadCancelled:
         shutil.rmtree(workspace, ignore_errors=True)
         raise
-    except (OSError, NetworkMiddlewareError, zipfile.BadZipFile, UpdateDownloadError) as exc:
+    except (
+        OSError,
+        NetworkMiddlewareError,
+        DownloadIntegrityError,
+        zipfile.BadZipFile,
+        UpdateDownloadError,
+    ) as exc:
         shutil.rmtree(workspace, ignore_errors=True)
         if isinstance(exc, UpdateDownloadError):
             raise
@@ -365,7 +376,9 @@ def _release_from_payload(
             continue
         name = str(raw_asset.get("name") or "").strip()
         download_url = str(raw_asset.get("browser_download_url") or "").strip()
-        if name not in {archive_name, checksum_name} or not _is_https_url(download_url):
+        if name not in {archive_name, checksum_name} or not _is_trusted_release_asset_url(
+            download_url
+        ):
             continue
         assets[name] = ReleaseAsset(
             name=name,
@@ -391,6 +404,18 @@ def _is_https_url(url: str) -> bool:
     return parsed.scheme.lower() == "https" and bool(parsed.netloc)
 
 
+def _is_trusted_release_asset_url(url: str) -> bool:
+    parsed = urlsplit(url)
+    expected_prefix = "/yomihime/CharaPicker/releases/download/"
+    return (
+        _is_https_url(url)
+        and parsed.hostname == "github.com"
+        and parsed.path.startswith(expected_prefix)
+        and not parsed.query
+        and not parsed.fragment
+    )
+
+
 def _check_cancelled(cancelled: CancelCallback | None) -> None:
     if cancelled and cancelled():
         raise UpdateDownloadCancelled("Update download cancelled.")
@@ -400,31 +425,34 @@ def _download_file(
     url: str,
     destination: Path,
     *,
+    max_bytes: int,
+    expected_size: int | None = None,
     progress: Callable[[float], None] | None = None,
     cancelled: CancelCallback | None = None,
     calculate_sha256: bool = False,
 ) -> str:
-    digest = hashlib.sha256()
     headers = {"User-Agent": HTTP_USER_AGENT}
-    with open_response("GET", url, headers=headers, timeout=60, stream=True) as response:
-        if response.status_code >= 400:
-            raise UpdateDownloadError(f"HTTP {response.status_code}")
-        total_size = max(0, int(response.headers.get("Content-Length") or 0))
-        downloaded = 0
-        with destination.open("wb") as output:
-            for chunk in response.iter_content(chunk_size=1024 * 256):
-                _check_cancelled(cancelled)
-                if not chunk:
-                    continue
-                output.write(chunk)
-                if calculate_sha256:
-                    digest.update(chunk)
-                downloaded += len(chunk)
-                if progress and total_size:
-                    progress(min(1.0, downloaded / total_size))
-    if progress:
+
+    def check_cancelled() -> None:
+        _check_cancelled(cancelled)
+
+    def report_progress(downloaded: int, total: int) -> None:
+        if progress is not None and total > 0:
+            progress(min(1.0, downloaded / total))
+
+    result = download_staged_file(
+        url,
+        destination,
+        max_bytes=max_bytes,
+        expected_size=expected_size,
+        headers=headers,
+        timeout=60,
+        check_cancelled=check_cancelled,
+        progress=report_progress,
+    )
+    if progress is not None:
         progress(1.0)
-    return digest.hexdigest() if calculate_sha256 else ""
+    return result.sha256 if calculate_sha256 else ""
 
 
 def _read_expected_checksum(path: Path, expected_name: str) -> str:
