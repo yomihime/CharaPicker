@@ -98,6 +98,28 @@ def download_staged_file(
         raise
 
 
+def file_matches_integrity(
+    path: Path,
+    *,
+    expected_size: int,
+    expected_sha256: str,
+    chunk_size: int = 1024 * 1024,
+) -> bool:
+    normalized_digest = expected_sha256.strip().lower()
+    if expected_size < 0 or SHA256_PATTERN.fullmatch(normalized_digest) is None:
+        raise ValueError("expected file integrity metadata is invalid")
+    try:
+        if not path.is_file() or path.stat().st_size != expected_size:
+            return False
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(chunk_size), b""):
+                digest.update(chunk)
+        return digest.hexdigest() == normalized_digest
+    except OSError:
+        return False
+
+
 def _content_length(raw_value: object) -> int | None:
     if raw_value is None or str(raw_value).strip() == "":
         return None

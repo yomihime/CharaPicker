@@ -2,28 +2,30 @@ from __future__ import annotations
 
 import shutil
 import tempfile
-import time
 import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from utils.app_metadata import HTTP_USER_AGENT
-from utils.download_integrity import DownloadIntegrityError, download_staged_file
+from utils.download_integrity import (
+    DownloadIntegrityError,
+    download_staged_file,
+    file_matches_integrity,
+)
 from utils.env_manager import (
     BIN_ROOT,
     WHISPERCPP_ROOT,
     WHISPER_MODEL_ROOT,
     find_usable_whisper_runtime_binary,
 )
-from utils.network_middleware import NetworkMiddlewareError, open_response, redact_sensitive_text
+from utils.network_middleware import NetworkMiddlewareError, redact_sensitive_text
 from utils.runtime_downloads import (
     RuntimeDownloadAsset,
     RuntimeDownloadManifestError,
     runtime_download_asset,
 )
 
-WHISPER_MODEL_BASE_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{file_name}"
 DEFAULT_WHISPER_RUNTIME_PACKAGE_ID = "win-x64-cpu"
 DEFAULT_WHISPER_MODEL_ID = "tiny"
 
@@ -44,6 +46,7 @@ class WhisperModelPackage:
     label_key: str
     file_name: str
     size_label: str
+    asset_id: str
 
 
 class WhisperCppDownloadError(RuntimeError):
@@ -78,18 +81,21 @@ MODEL_PACKAGES: tuple[WhisperModelPackage, ...] = (
         label_key="project.whisper.model.tiny",
         file_name="ggml-tiny.bin",
         size_label="~75 MB",
+        asset_id="whisper-model-tiny",
     ),
     WhisperModelPackage(
         model_id="base",
         label_key="project.whisper.model.base",
         file_name="ggml-base.bin",
         size_label="~142 MB",
+        asset_id="whisper-model-base",
     ),
     WhisperModelPackage(
         model_id="small",
         label_key="project.whisper.model.small",
         file_name="ggml-small.bin",
         size_label="~466 MB",
+        asset_id="whisper-model-small",
     ),
 )
 
@@ -138,6 +144,7 @@ def download_and_install_whisper(
     emit(0, "release")
     _check_cancel(cancelled)
     runtime_asset = _runtime_asset(runtime_package)
+    model_asset = _model_asset(model_package)
     runtime_target: Path | None = None
     model_target = model_root / model_package.file_name
     with tempfile.TemporaryDirectory(prefix="whispercpp-", dir=bin_root) as temp_dir_name:
@@ -168,12 +175,23 @@ def download_and_install_whisper(
             runtime_target, installed_runtime_package = cached_runtime
             emit(64, "reuseRuntime")
 
-        if model_target.is_file():
+        if file_matches_integrity(
+            model_target,
+            expected_size=model_asset.size_bytes,
+            expected_sha256=model_asset.sha256,
+        ):
             emit(92, "reuseModel")
         else:
             emit(68, "downloadModel")
-            model_url = WHISPER_MODEL_BASE_URL.format(file_name=model_package.file_name)
-            _download_file(model_url, staged_model_path, 68, 92, "downloadModel", emit, cancelled)
+            _download_runtime_asset(
+                model_asset,
+                staged_model_path,
+                68,
+                92,
+                "downloadModel",
+                emit,
+                cancelled,
+            )
             emit(94, "install")
             staged_model_path.replace(model_target)
 
@@ -345,6 +363,18 @@ def _runtime_asset(package: WhisperRuntimePackage) -> RuntimeDownloadAsset:
         raise WhisperCppDownloadError(str(exc)) from exc
 
 
+def _model_asset(package: WhisperModelPackage) -> RuntimeDownloadAsset:
+    try:
+        asset = runtime_download_asset(package.asset_id)
+    except RuntimeDownloadManifestError as exc:
+        raise WhisperCppDownloadError(str(exc)) from exc
+    if asset.file_name != package.file_name:
+        raise WhisperCppDownloadError(
+            f"Whisper model manifest filename does not match package: {package.model_id}"
+        )
+    return asset
+
+
 def _emit_download_progress(
     downloaded: int,
     total: int,
@@ -357,47 +387,6 @@ def _emit_download_progress(
     span = max(end_percent - start_percent, 1)
     percent = start_percent + int(downloaded / total * span) if total else start_percent
     emit(percent, step, detail)
-
-
-def _download_file(
-    url: str,
-    target_path: Path,
-    start_percent: int,
-    end_percent: int,
-    step: str,
-    emit: ProgressCallback,
-    cancelled: CancelCallback | None,
-) -> None:
-    try:
-        with open_response(
-            "GET",
-            url,
-            headers={"User-Agent": HTTP_USER_AGENT},
-            timeout=60,
-            stream=True,
-        ) as response:
-            _check_cancel(cancelled)
-            if response.status_code >= 400:
-                raise WhisperCppDownloadError(f"HTTP {response.status_code}")
-            total_size = int(response.headers.get("Content-Length") or 0)
-            downloaded = 0
-            started_at = time.monotonic()
-            with target_path.open("wb") as target:
-                for chunk in response.iter_content(chunk_size=1024 * 256):
-                    _check_cancel(cancelled)
-                    if not chunk:
-                        continue
-                    target.write(chunk)
-                    downloaded += len(chunk)
-                    elapsed = max(time.monotonic() - started_at, 0.001)
-                    detail = _download_detail(downloaded, total_size, downloaded / elapsed)
-                    if total_size:
-                        span = max(end_percent - start_percent, 1)
-                        emit(start_percent + int(downloaded / total_size * span), step, detail)
-                    else:
-                        emit(start_percent, step, detail)
-    except (OSError, NetworkMiddlewareError) as exc:
-        raise WhisperCppDownloadError(redact_sensitive_text(exc)) from exc
 
 
 def _download_detail(downloaded_bytes: int, total_bytes: int, bytes_per_second: float) -> str:

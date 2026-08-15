@@ -17,6 +17,9 @@ EXPECTED_RUNTIME_ASSETS = {
     "whispercpp-win-x64-blas",
     "whispercpp-win-x64-cuda",
     "llamacpp-win-x64-cpu",
+    "whisper-model-tiny",
+    "whisper-model-base",
+    "whisper-model-small",
 }
 
 

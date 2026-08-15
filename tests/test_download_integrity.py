@@ -7,7 +7,11 @@ from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import patch
 
-from utils.download_integrity import DownloadIntegrityError, download_staged_file
+from utils.download_integrity import (
+    DownloadIntegrityError,
+    download_staged_file,
+    file_matches_integrity,
+)
 
 
 class _Response:
@@ -89,6 +93,26 @@ class DownloadIntegrityTests(unittest.TestCase):
             expected_size=4,
             error="trusted asset manifest",
         )
+
+    def test_existing_file_must_match_size_and_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            path = Path(temp_name) / "asset.bin"
+            path.write_bytes(b"trusted")
+
+            self.assertTrue(
+                file_matches_integrity(
+                    path,
+                    expected_size=7,
+                    expected_sha256=hashlib.sha256(b"trusted").hexdigest(),
+                )
+            )
+            self.assertFalse(
+                file_matches_integrity(
+                    path,
+                    expected_size=7,
+                    expected_sha256=hashlib.sha256(b"different").hexdigest(),
+                )
+            )
 
     def _assert_download_fails_and_is_removed(
         self,
