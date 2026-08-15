@@ -31,6 +31,7 @@ REQUIRED_PACKAGE_FILES = (
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
 )
+SOURCE_REPOSITORY = "yomihime/CharaPicker"
 
 
 def sha256_file(path: Path) -> str:
@@ -380,6 +381,7 @@ def build_release_package(
             "version_tag": version_tag,
         },
         "source": {
+            "repository": SOURCE_REPOSITORY,
             "commit": commit_sha,
             "tag": tag or None,
             "source_date_epoch": source_date_epoch,

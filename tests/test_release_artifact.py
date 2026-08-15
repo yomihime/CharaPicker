@@ -202,6 +202,32 @@ class ReleaseArtifactTests(unittest.TestCase):
 
             self.assertTrue(any("contradicts unsigned policy" in error for error in errors))
 
+    def test_attested_release_requires_valid_github_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive, checksum, build_info = self._build_fixture(root)
+            payload = json.loads(build_info.read_text(encoding="utf-8"))
+            payload["trust"].update(
+                {
+                    "attestation_generated": True,
+                    "attestation_provider": "github",
+                    "attestation_id": "12345",
+                    "attestation_url": (
+                        "https://github.com/yomihime/CharaPicker/attestations/67890"
+                    ),
+                }
+            )
+            build_info.write_text(json.dumps(payload), encoding="utf-8")
+
+            errors = validate_release_artifact(
+                archive,
+                checksum_path=checksum,
+                build_info_path=build_info,
+                repository_root=root,
+            )
+
+            self.assertTrue(any("attestation URL is invalid" in error for error in errors))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -261,6 +261,8 @@ def _validate_build_info(
         )
 
     source = payload.get("source") if isinstance(payload.get("source"), dict) else {}
+    if source.get("repository") != "yomihime/CharaPicker":
+        errors.append("build-info source repository is not the official repository")
     if not re.fullmatch(r"[0-9a-f]{40}", str(source.get("commit") or "")):
         errors.append("build-info source commit must be a full lowercase SHA")
     if not isinstance(source.get("source_date_epoch"), int) or source.get("source_date_epoch", 0) <= 0:
@@ -422,7 +424,11 @@ def _validate_trust(trust: dict[str, Any], artifacts: dict[str, Any]) -> list[st
         if not str(trust.get("attestation_id") or "").isdigit():
             errors.append("build-info attestation ID is invalid")
         attestation_url = str(trust.get("attestation_url") or "")
-        if re.fullmatch(r"https://github\.com/[^/]+/[^/]+/attestations/\d+", attestation_url) is None:
+        url_match = re.fullmatch(
+            r"https://github\.com/[^/]+/[^/]+/attestations/(?P<id>\d+)",
+            attestation_url,
+        )
+        if url_match is None or url_match.group("id") != str(trust.get("attestation_id")):
             errors.append("build-info attestation URL is invalid")
     elif any(
         trust.get(key) is not None

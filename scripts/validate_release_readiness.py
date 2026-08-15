@@ -188,8 +188,15 @@ def validate_repository(
             errors.append(f"build workflow action is not pinned to a full commit SHA: {action_ref}")
     if workflow.count("contents: write") != 1:
         errors.append("build workflow must grant contents: write to exactly one publish job")
-    if "needs: quality" not in workflow or "needs: windows-build" not in workflow:
-        errors.append("build workflow release jobs do not form quality -> build -> publish chain")
+    if workflow.count("id-token: write") != 1 or workflow.count("attestations: write") != 1:
+        errors.append("build workflow must isolate attestation permissions to one job")
+    if any(
+        dependency not in workflow
+        for dependency in ("needs: quality", "needs: windows-build", "needs: attest-release")
+    ):
+        errors.append(
+            "build workflow release jobs do not form quality -> build -> attest -> publish chain"
+        )
 
     lock_path = root / str(target["lock_file"])
     if not lock_path.is_file():
