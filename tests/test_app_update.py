@@ -10,13 +10,16 @@ from unittest.mock import patch
 
 from utils.app_update import (
     APP_NAME,
+    UPDATE_ACK_ENV,
     AppVersion,
     PreparedUpdate,
     UpdateDownloadError,
+    UpdateLaunchError,
     UpdatePackageUnavailableError,
     _extract_update_archive,
     _read_expected_checksum,
     _resolve_update_payload_dir,
+    acknowledge_update_startup,
     check_for_update,
     launch_prepared_update,
 )
@@ -247,6 +250,54 @@ class UpdateArchiveTests(unittest.TestCase):
 
 
 class UpdateLaunchTests(unittest.TestCase):
+    def test_launch_write_failure_preserves_previous_request(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            install_dir = root / "install"
+            workspace = root / "workspace"
+            payload_dir = root / "payload"
+            updater_path = payload_dir / "CharaPickerUpdater.exe"
+            for directory in (install_dir, workspace, payload_dir):
+                directory.mkdir(parents=True)
+            updater_path.write_bytes(b"updater")
+            request_path = workspace / "update-request.json"
+            request_path.write_text("previous request", encoding="utf-8")
+            prepared = PreparedUpdate(
+                version_tag="1.0.0",
+                workspace=workspace,
+                payload_dir=payload_dir,
+                updater_path=updater_path,
+            )
+
+            with (
+                patch("utils.app_update.packaged_install_dir", return_value=install_dir),
+                patch("utils.atomic_io.os.replace", side_effect=OSError("replace failed")),
+            ):
+                with self.assertRaises(UpdateLaunchError):
+                    launch_prepared_update(
+                        prepared,
+                        current_pid=1234,
+                        failure_title="Update failed",
+                        failure_message="Rollback required",
+                    )
+
+            self.assertEqual(request_path.read_text(encoding="utf-8"), "previous request")
+            self.assertEqual(list(workspace.glob(".tmp-*.tmp")), [])
+
+    def test_acknowledgement_write_failure_preserves_previous_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            ack_path = Path(temp_name) / "startup-ack"
+            ack_path.write_text("previous", encoding="ascii")
+
+            with (
+                patch.dict(os.environ, {UPDATE_ACK_ENV: str(ack_path)}),
+                patch("utils.atomic_io.os.replace", side_effect=OSError("replace failed")),
+            ):
+                acknowledge_update_startup()
+
+            self.assertEqual(ack_path.read_text(encoding="ascii"), "previous")
+            self.assertEqual(list(ack_path.parent.glob(".tmp-*.tmp")), [])
+
     def test_launch_request_relaunch_cwd_uses_install_dir_not_current_cwd(self) -> None:
         original_cwd = Path.cwd()
         with tempfile.TemporaryDirectory() as temp_name:
