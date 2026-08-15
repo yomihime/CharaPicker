@@ -361,11 +361,74 @@ def _validate_build_info(
                 errors.append("published dependency inventory differs from the repository source")
 
     trust = payload.get("trust") if isinstance(payload.get("trust"), dict) else {}
-    for key in ("signed", "signature_verified", "attestation_generated"):
+    errors.extend(_validate_trust(trust, artifacts))
+    return errors
+
+
+def _validate_trust(trust: dict[str, Any], artifacts: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    for key in (
+        "signature_inspection_passed",
+        "signed",
+        "signature_verified",
+        "attestation_generated",
+    ):
         if not isinstance(trust.get(key), bool):
             errors.append(f"build-info trust.{key} must be a boolean")
-    if trust.get("signed") and not trust.get("signature_verified"):
-        errors.append("build-info cannot claim signing without successful signature verification")
+    if trust.get("signature_policy") != "unsigned":
+        errors.append("build-info trust.signature_policy must be unsigned")
+    if trust.get("signature_inspection_passed") is not True:
+        errors.append("build-info must record successful executable signature inspection")
+    if trust.get("signed") is not False or trust.get("signature_verified") is not False:
+        errors.append("unsigned release cannot claim an Authenticode signature")
+
+    raw_entries = trust.get("executables")
+    if not isinstance(raw_entries, list):
+        errors.append("build-info trust.executables must be a list")
+    else:
+        expected = {
+            "CharaPicker.exe": artifacts.get("main_executable", {}),
+            "CharaPickerUpdater.exe": artifacts.get("updater_executable", {}),
+        }
+        seen: set[str] = set()
+        for entry in raw_entries:
+            if not isinstance(entry, dict):
+                errors.append("build-info trust.executables contains an invalid entry")
+                continue
+            name = str(entry.get("name") or "")
+            artifact = expected.get(name)
+            if artifact is None or name in seen:
+                errors.append(f"build-info trust contains an unexpected executable: {name}")
+                continue
+            seen.add(name)
+            if entry.get("sha256") != artifact.get("sha256"):
+                errors.append(f"build-info trust executable hash mismatch: {name}")
+            if (
+                entry.get("status") != "NotSigned"
+                or entry.get("signed") is not False
+                or entry.get("signature_verified") is not False
+                or entry.get("signer_subject") is not None
+                or entry.get("timestamp_subject") is not None
+            ):
+                errors.append(f"build-info trust contradicts unsigned policy: {name}")
+        missing = sorted(set(expected) - seen)
+        if missing:
+            errors.append(f"build-info trust is missing executable status: {missing}")
+
+    attested = trust.get("attestation_generated")
+    if attested:
+        if trust.get("attestation_provider") != "github":
+            errors.append("build-info attestation provider must be github")
+        if not str(trust.get("attestation_id") or "").isdigit():
+            errors.append("build-info attestation ID is invalid")
+        attestation_url = str(trust.get("attestation_url") or "")
+        if re.fullmatch(r"https://github\.com/[^/]+/[^/]+/attestations/\d+", attestation_url) is None:
+            errors.append("build-info attestation URL is invalid")
+    elif any(
+        trust.get(key) is not None
+        for key in ("attestation_provider", "attestation_id", "attestation_url")
+    ):
+        errors.append("build-info cannot record attestation details before generation")
     return errors
 
 

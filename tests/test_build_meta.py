@@ -127,6 +127,8 @@ class BuildMetadataTests(unittest.TestCase):
         batch = (ROOT_DIR / "build.bat").read_text(encoding="utf-8")
 
         self.assertIn("scripts\\package_release.py", batch)
+        self.assertIn("scripts\\inspect_release_signatures.py", batch)
+        self.assertIn("--signature-report", batch)
         self.assertIn('set "PYTHONHASHSEED=0"', batch)
         self.assertNotIn("Compress-Archive", batch)
 
