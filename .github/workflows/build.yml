@@ -57,6 +57,9 @@ jobs:
         run: >-
           python -m compileall -q core gui utils scripts tests main.py app_updater.py
 
+      - name: Validate release metadata
+        run: python scripts/validate_release_readiness.py
+
   windows-build:
     name: Windows Build
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')

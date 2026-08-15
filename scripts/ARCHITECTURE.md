@@ -31,6 +31,7 @@
 - `validate_formal_dispatch.py`：执行不联网的正式提取分发验证，覆盖分发表 handler 选择、audio transcript 物化后转入文本 handler、unsupported unit 洞察事件、模型不支持图片时不调用图片 handler、文本继续成功，以及视频旧提取路径回归。
 - `validate_gui_multi_material_status.py`：验证项目页素材状态映射、主窗口 worker 信号边界和 GUI 不直接承担正式提取实现。
 - `validate_i18n_keys.py`：验证四份 i18n JSON 的 key 集合一致。
+- `validate_release_readiness.py`：只读校验 tag、源码/构建版本、CHANGELOG、发布目标、Action 固定引用、CI 权限链、更新资产命名和禁止跟踪的运行时/私钥路径；正式版额外检查四语 README 状态标记。
 - `validate_multi_material_regression.py`：统一运行除自身外的全部 `validate_*.py`，随后执行 `tests/` 的 unittest discovery；不调用真实模型，也不把用户项目作为固定输入。
 - `preflight_real_multi_material_acceptance.py`：对用户明确指定的单个项目执行只读真实验收预检，只输出媒体类型、内容形态、handler、unit 和 unsupported reason 计数；可通过 `--preset-name` 加载已配置预设并执行具体模型能力过滤，但不输出密钥/endpoint、不写知识库、不调用模型、不打印素材路径。
 
