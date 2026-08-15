@@ -812,6 +812,7 @@
   "extractor.nativeMedia.unsupported": "素材 {name} 未运行原生视听理解：{reason}",
   "extractor.nativeMedia.failed": "素材 {name} 原生视听理解失败：{error}",
   "extractor.nativeMedia.reason.audioUnsupported": "当前模型不支持原生音频理解",
+  "extractor.nativeMedia.reason.audioInlineLimit": "音频超过原生模型的内联请求上限；已跳过补充型原生音频理解，transcript 转写仍按原流程继续",
   "extractor.nativeMedia.reason.videoUnsupported": "当前模型不支持原生视频或视频音轨理解",
   "extractor.nativeMedia.reason.videoBackendUnsupported": "当前模型通道只能抽帧，不能进行原生视频理解",
   "extractor.nativeMedia.reason.handlerNotAvailable": "没有可用的原生视听理解处理器",

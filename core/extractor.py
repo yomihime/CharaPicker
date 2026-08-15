@@ -91,6 +91,8 @@ from utils.ai_model_middleware import (
     ModelCallRequest,
     ModelMessage,
     ModelCallError,
+    NativeAudioRequestTooLargeError,
+    OPENAI_INLINE_AUDIO_LIMIT_REASON,
     PromptNotFoundError,
     build_model_call_request,
     call_video_model,
@@ -165,6 +167,7 @@ NATIVE_MEDIA_REASON_TRANSLATION_KEYS = {
     NATIVE_AUDIO_UNSUPPORTED_REASON: "extractor.nativeMedia.reason.audioUnsupported",
     NATIVE_VIDEO_UNSUPPORTED_REASON: "extractor.nativeMedia.reason.videoUnsupported",
     NATIVE_VIDEO_BACKEND_UNSUPPORTED_REASON: "extractor.nativeMedia.reason.videoBackendUnsupported",
+    OPENAI_INLINE_AUDIO_LIMIT_REASON: "extractor.nativeMedia.reason.audioInlineLimit",
     "native_media_handler_not_available": "extractor.nativeMedia.reason.handlerNotAvailable",
 }
 
@@ -2022,6 +2025,25 @@ class Extractor(QObject):
                     base_url=preset.base_url,
                     api_key=preset.api_key,
                 )
+            except NativeAudioRequestTooLargeError as exc:
+                stats["skipped_chunks"] += 1
+                LOGGER.warning(
+                    "Native audio insight skipped before request encoding; "
+                    "project_id=%s unit_id=%s source_path=%s size_bytes=%s max_bytes=%s",
+                    project_id,
+                    unit.unit_id,
+                    unit.material_ref.relative_path,
+                    exc.size_bytes,
+                    exc.max_bytes,
+                )
+                self._emit_native_media_warning(
+                    emit_event,
+                    unit=unit,
+                    reason=OPENAI_INLINE_AUDIO_LIMIT_REASON,
+                )
+                if emit_progress is not None and progress_span > 0:
+                    emit_progress(progress_base + int(index * progress_span / total_units))
+                continue
             except (ModelCallError, OSError, ValueError) as exc:
                 stats["failed_chunks"] += 1
                 LOGGER.warning(

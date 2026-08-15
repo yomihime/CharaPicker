@@ -812,6 +812,7 @@
   "extractor.nativeMedia.unsupported": "素材 {name} ではネイティブ視聴覚理解を実行しませんでした：{reason}",
   "extractor.nativeMedia.failed": "素材 {name} のネイティブ視聴覚理解に失敗しました：{error}",
   "extractor.nativeMedia.reason.audioUnsupported": "現在のモデルはネイティブ音声理解に対応していません",
+  "extractor.nativeMedia.reason.audioInlineLimit": "音声がネイティブモデルのインラインリクエスト上限を超えたため、補助的なネイティブ音声理解をスキップしました。transcript 処理は従来の経路で続行します",
   "extractor.nativeMedia.reason.videoUnsupported": "現在のモデルはネイティブ動画または動画音声理解に対応していません",
   "extractor.nativeMedia.reason.videoBackendUnsupported": "現在のモデル経路はフレーム抽出のみで、ネイティブ動画理解はできません",
   "extractor.nativeMedia.reason.handlerNotAvailable": "利用可能なネイティブ視聴覚処理がありません",
