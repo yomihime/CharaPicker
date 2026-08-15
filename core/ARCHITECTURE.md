@@ -28,7 +28,7 @@
 - `text_unit_handler.py`：负责普通 `.txt`、`.md`、受控 `.json`、首批 `.srt` / `.ass` 以及派生 `episode_transcript.json` 文本 unit 的解码、结构校验、预算分块、文本/时间范围 evidence、文本模型请求和 `ChunkExtractionResult` 构建；字幕与 transcript evidence 保留 segment 定位，speaker 只接受素材中的显式字段。
 - `image_unit_handler.py`：负责 `.png`、`.jpg` / `.jpeg`、`.webp` 静态图片的文件上限与签名校验、图片模型请求、每张图片内部输出预算、页码/可选区域 evidence 和 `ChunkExtractionResult` 构建；不接管 BMP/GIF，也不复用视频每分钟输出口径。
 - `native_media_insight_handler.py`：负责原生音频理解和原生视频/视频音轨理解的 provider、backend 与具体模型能力判断、音频/视频模型请求和补充型 `ChunkExtractionResult` 构建；只保存听觉摘要、画面摘要、语气、环境声、音乐、画外声音等视听线索，不生成或覆盖 transcript。
-- `refusal_samples.py`：记录和打包提取失败/模型拒绝样例；样例 JSON 只保存媒体类型、内容形态、unit、项目内来源、模型/prompt purpose、错误类型和脱敏错误摘要，不保存 API Key、完整 prompt、完整响应或原始隐私文本。
+- `refusal_samples.py`：原子记录和打包提取失败/模型拒绝样例；样例 JSON 只保存媒体类型、内容形态、unit、项目内来源、模型/prompt purpose、错误类型和脱敏错误摘要，不保存 API Key、完整 prompt、完整响应或原始隐私文本，ZIP 构建失败不会替换已有完整诊断包。
 - `extractor.py`：定义 `Extractor`，作为 UI-facing 提取入口，负责知识库分层初始化、通用 unit 采样预览、完整/洁净/快速正式提取、chunk/episode/season 内容合并、episode transcript 入口，并委托知识库读写与素材扫描 helper；预览逐个执行低成本候选，正式提取先经 `formal_dispatch.py` 选中 handler，单个失败或 unsupported unit 会进入 warning 而不阻断其它可提取素材。
 - `transcript_provider.py`：把 transcript 表达为 run plan 中的 text 型 `DerivedArtifact`，收集每集 video/audio 可转写素材并调用既有音频转写实现；READY artifact 会物化为短稳定 ID 的 `transcript_text` 派生 unit，引用知识库内 `episode_transcript.json`，不把 transcript 作为新的 `MediaType`。
 - `video_unit_handler.py`：封装正式视频 unit 的时长探测、按时长缩放输出 token 和 `ModelCallRequest` 构造；模型调用仍由 `utils.ai_model_middleware` 执行。
@@ -37,7 +37,7 @@
 - `character_card_compiler.py`：从正式或预览知识库生成 CharaPicker 角色卡 JSON；正式编译会构建 direct、mention、causal 和 season_context 分层证据包，并在每个 evidence entry 中保留紧凑 `source_metadata`（`extraction_run_id`、`source_kind`、`media_types`、`content_forms`、`source_counts`、`source_trace` 和 `evidence_refs`），同时把实际消费的 run 写入 `source_context.source_runs`；处理 AI 别名校验、AI 复核、冲突分组、`needs_review_reasons`、`evidence_source_profile` 和 JSON parse diagnostics；不读取原始素材，也不读取 `ProjectConfig.target_characters`。
 - `character_card_renderers.py`：从 CharaPicker JSON 生成 Markdown、HTML 和人类友好 JSON 分组；HTML 渲染负责转义用户文本且不依赖外部资源。
 - `character_card_formats.py`：把 CharaPicker JSON 映射到 Character Card V2 JSON 和 AstrBot 手动复制内容，无法映射的信息返回 warnings 或进入扩展字段。
-- `character_card_exporter.py`：把角色卡派生产物写入 `projects/{project_id}/output/character_cards/`。
+- `character_card_exporter.py`：把角色卡派生产物原子写入 `projects/{project_id}/output/character_cards/`，失败时保留已有完整导出。
 - `character_card_importer.py`：导入 CharaPicker JSON，校验格式并生成当前项目内的新 `card_id`。
 - `generator.py`：保留旧 `render_profile_markdown()` 兼容函数；主角色卡页面不再依赖它作为最终角色卡渲染入口。
 - `__init__.py`：标记 `core` 为 Python 包。

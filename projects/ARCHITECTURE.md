@@ -33,9 +33,9 @@
 - `{project_id}/knowledge_base/seasons/{season_id}/season_content.json`：单季完整结构化内容合并结果。
 - `{project_id}/knowledge_base/seasons/{season_id}/season_summary.json`：单季压缩摘要。
 - `{project_id}/knowledge_base/seasons/{season_id}/character_stage_states.json`：季内角色阶段状态。
-- `{project_id}/knowledge_base/character_cards/{card_id}/card.json`：正式 CharaPicker 角色卡母本。
+- `{project_id}/knowledge_base/character_cards/{card_id}/card.json`：正式 CharaPicker 角色卡母本；原子保存并在 `card.json.bak` 保留单份最近有效版本，损坏时只在用户确认后恢复。
 - `{project_id}/knowledge_base/character_cards/{card_id}/card.json` 中的 `source_context.source_runs` 与 `extensions["charapicker"]`：前者记录角色卡实际消费的 extraction run；后者保存 `compile_evidence_layers`、每条证据的来源 metadata、`alias_resolution`、`needs_review_reasons`、`conflict_groups`、`evidence_source_profile` 和 `parse_diagnostics`。这些字段用于解释证据来源、分层、别名校验、冲突复核和 AI JSON 修复情况，不替代顶层角色卡事实字段。
-- `{project_id}/knowledge_base/character_cards/{card_id}/cover.png`：角色卡裁剪后的 9:16 封面。
+- `{project_id}/knowledge_base/character_cards/{card_id}/cover.png`：角色卡裁剪后的 9:16 封面，编码完成后再原子发布，避免失败留下半文件；封面路径和裁剪参数仍以 `card.json` 为事实来源。
 - `{project_id}/knowledge_base/preview_character_cards/preview_card/card.json`：隔离的角色卡预览草稿，不进入正式海报墙扫描。
 - `{project_id}/output/character_cards/`：角色卡派生导出结果，包括 Markdown、HTML、CharaPicker JSON、Character Card V2 JSON 和 AstrBot 手动复制清单。
 
@@ -54,6 +54,7 @@
 - 派生路径由 raw 相对路径稳定寻址；`source_hash` 用于判断源内容是否变化，不参与目录命名。复用或 raw 清理前必须同时核对 manifest、派生文件大小和 SHA256 fingerprint。
 - 清理 `raw/` 前必须确保 `materials/` 中已有可用素材，并在 `config.json` 中记录已清理路径。
 - 用户素材、缓存、知识库和输出结果默认不应进入版本控制。
+- `config.json.bak`、`card.json.bak` 等单份恢复文件属于私有用户数据，不进入 Git、Release 包、日志或拒绝样例包。
 - 写入 JSON 时保持 UTF-8 和结构化格式。
 - 正式角色卡、预览草稿和导出产物路径必须隔离：正式卡只在 `knowledge_base/character_cards/`，预览草稿只在 `knowledge_base/preview_character_cards/`，导出只在 `output/character_cards/`。
 - `quality.warnings` 只保存用户可读 warning；结构化复核原因保留在 `extensions["charapicker"]["quality_checks"]["needs_review_reasons"]`。

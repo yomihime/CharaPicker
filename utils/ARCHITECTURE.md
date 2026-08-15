@@ -16,7 +16,7 @@
 ## 关键文件
 
 - `atomic_io.py`：提供同目录唯一临时文件、flush/fsync 和 `os.replace()` 组成的原子文本/JSON 写入，失败时保留旧文件并清理本次临时文件；D0 调用方可使用单份有效备份、损坏检测和显式恢复接口。
-- `i18n.py`：管理语言偏好、系统语言归一化、文案加载和 `t()` 翻译函数。
+- `i18n.py`：管理语言偏好、系统语言归一化、文案加载和 `t()` 翻译函数；`t_system()` 供全局配置尚不可读的启动错误直接按系统 locale 显示文案。
 - `app_metadata.py`：集中保存应用名、组织名、当前运行时版本/阶段和 HTTP User-Agent。
 - `runtime_health.py`：提供无网络、无用户数据写入的启动健康检查；验证 Qt、核心模块、四语资源、默认 prompt、图标和版本元数据，供源码与打包产物共同调用。
 - `progress_guard.py`：为 worker 信号提供单调进度守卫，把 100% 保留到业务成功已确认之后；失败或取消进入终态后不再发出完成进度。
@@ -32,7 +32,7 @@
 - `paths.py`：定义应用根目录、项目根目录和单个项目的标准目录结构。
 - `global_store.py`：提供全局用户数据和配置选项的原子读写中间件，默认使用根目录 `config.yaml`；保留单份最近有效备份，损坏主文件不会被默认值静默覆盖，恢复必须显式触发。
 - `proxy_preferences.py`：封装内置代理设置的默认值、归一化、读写和代理 URL 构造。
-- `state_manager.py`：保存、读取和列出项目配置，项目配置写入 `projects/{project_id}/config.json`。
+- `state_manager.py`：保存、读取和扫描项目配置；`projects/{project_id}/config.json` 原子写入并保留单份有效备份，扫描会分离健康配置与损坏问题，恢复只能显式触发。
 - `theme.py`：管理主题偏好，并调用 qfluentwidgets 应用亮色、暗色或系统主题。
 - `chunker.py`：提供兼容旧调用的固定长度分块，以及保留起止 offset、段落边界、重叠范围、最大 chunk 数和截断 warning 的文本预算分块。
 - `env_manager.py`：提供 conda 命令前缀、llama.cpp/whisper.cpp 二进制发现和可用性检测。
