@@ -134,7 +134,7 @@ class UpdateArchiveTests(unittest.TestCase):
             _extract_update_archive(archive_path, extract_dir)
             payload_dir = _resolve_update_payload_dir(extract_dir)
 
-            self.assertEqual(payload_dir, extract_dir / "CharaPicker")
+            self.assertEqual(payload_dir, (extract_dir / "CharaPicker").resolve())
             self.assertEqual(
                 (payload_dir / "CharaPicker.exe").read_bytes(),
                 b"new",
@@ -153,7 +153,7 @@ class UpdateArchiveTests(unittest.TestCase):
 
             _extract_update_archive(archive_path, extract_dir)
 
-            self.assertEqual(_resolve_update_payload_dir(extract_dir), extract_dir)
+            self.assertEqual(_resolve_update_payload_dir(extract_dir), extract_dir.resolve())
 
     def test_payload_resolver_accepts_arbitrary_wrapper_name(self) -> None:
         with tempfile.TemporaryDirectory() as temp_name:
@@ -169,7 +169,7 @@ class UpdateArchiveTests(unittest.TestCase):
 
             self.assertEqual(
                 _resolve_update_payload_dir(extract_dir),
-                extract_dir / "portable-build",
+                (extract_dir / "portable-build").resolve(),
             )
 
     def test_payload_resolver_rejects_files_outside_wrapper(self) -> None:

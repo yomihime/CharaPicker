@@ -65,6 +65,7 @@ def validate_markdown_links(
     root = root.resolve()
     errors: list[str] = []
     for path in files if files is not None else tracked_markdown_files(root):
+        path = path.resolve()
         content = path.read_text(encoding="utf-8")
         for line_number, raw_target in _targets_outside_fences(content):
             relative_target = _relative_target(raw_target)
