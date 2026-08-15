@@ -91,6 +91,7 @@ from utils.ai_model_middleware import (
     ModelCallRequest,
     ModelMessage,
     ModelCallError,
+    PromptNotFoundError,
     build_model_call_request,
     call_video_model,
     prompt_attribution,
@@ -1400,6 +1401,11 @@ class Extractor(QObject):
         if prompt_purpose:
             try:
                 attribution = prompt_attribution(prompt_purpose)
+            except PromptNotFoundError:
+                LOGGER.debug(
+                    "Prompt attribution is unavailable for a promptless operation; purpose=%s",
+                    prompt_purpose,
+                )
             except Exception:  # noqa: BLE001
                 LOGGER.warning(
                     "Prompt attribution could not be resolved; purpose=%s",
