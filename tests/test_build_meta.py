@@ -110,8 +110,18 @@ class BuildMetadataTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("Get-FileHash", workflow)
         self.assertIn("release/*.sha256", workflow)
+        self.assertIn("release/build-info.json", workflow)
+
+    def test_release_workflow_separates_publish_permissions(self) -> None:
+        workflow = (ROOT_DIR / ".github" / "workflows" / "build.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("needs: quality", workflow)
+        self.assertIn("runs-on: windows-2022", workflow)
+        self.assertIn('python-version: "3.12.10"', workflow)
+        self.assertEqual(workflow.count("contents: write"), 1)
 
     def test_batch_uses_normalized_release_packager(self) -> None:
         batch = (ROOT_DIR / "build.bat").read_text(encoding="utf-8")

@@ -1,35 +1,95 @@
 name: Build
 
 on:
-  workflow_dispatch:
+  pull_request:
   push:
+    branches:
+      - main
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONHASHSEED: "0"
 
 jobs:
-  windows-build:
-    name: Windows Build
-    runs-on: windows-latest
+  quality:
+    name: Quality Gates
+    runs-on: windows-2022
+    timeout-minutes: 30
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
-          python-version: "3.12"
+          python-version: "3.12.10"
+          cache: pip
+          cache-dependency-path: requirements-release-windows-py312.txt
 
-      - name: Install dependencies
+      - name: Install locked release environment
+        run: python -m pip install -r requirements-release-windows-py312.txt
+
+      - name: Validate dependency graph
+        run: python -m pip check
+
+      - name: Run Ruff
+        run: python -m ruff check .
+
+      - name: Run unified offline regression
+        run: python scripts/validate_multi_material_regression.py
+
+      - name: Compile Python sources
+        run: >-
+          python -m compileall -q core gui utils scripts tests main.py app_updater.py
+
+  windows-build:
+    name: Windows Build
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    needs: quality
+    runs-on: windows-2022
+    timeout-minutes: 60
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12.10"
+          cache: pip
+          cache-dependency-path: requirements-release-windows-py312.txt
+
+      - name: Install locked release environment
+        run: python -m pip install -r requirements-release-windows-py312.txt
+
+      - name: Set reproducible build time
+        shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-          python -m pip install pyinstaller
+          $epoch = git show -s --format=%ct HEAD
+          if ($epoch -notmatch '^\d+$') {
+            throw "Unable to resolve SOURCE_DATE_EPOCH from the checked-out commit."
+          }
+          "SOURCE_DATE_EPOCH=$epoch" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build package
         shell: pwsh
@@ -39,13 +99,8 @@ jobs:
             $buildArgs += "--tag=$env:GITHUB_REF_NAME"
           }
           & .\build.bat @buildArgs
-
-      - name: Generate release checksums
-        shell: pwsh
-        run: |
-          Get-ChildItem -LiteralPath release -Filter *.zip | ForEach-Object {
-            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            "$hash  $($_.Name)" | Set-Content -LiteralPath "$($_.FullName).sha256" -Encoding ascii
+          if ($LASTEXITCODE -ne 0) {
+            throw "build.bat failed with exit code $LASTEXITCODE."
           }
 
       - name: Prepare release notes
@@ -94,23 +149,42 @@ jobs:
           Set-Content -LiteralPath release_notes.md -Value $body -Encoding UTF8
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: charapicker-windows-build
           path: |
             release/*.zip
             release/*.sha256
+            release/build-info.json
+            release_notes.md
           if-no-files-found: error
+          retention-days: 14
 
-      - name: Publish GitHub Release Assets
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
+  publish-release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: windows-build
+    runs-on: windows-2022
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download verified build artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: charapicker-windows-build
+          path: release-assets
+
+      - name: Publish GitHub Release assets
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: ${{ github.ref_name }}
           files: |
-            release/*.zip
-            release/*.sha256
-          body_path: release_notes.md
+            release-assets/release/*.zip
+            release-assets/release/*.sha256
+            release-assets/release/build-info.json
+          body_path: release-assets/release_notes.md
           generate_release_notes: true
           fail_on_unmatched_files: true
           prerelease: ${{ contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
