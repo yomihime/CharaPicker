@@ -2046,6 +2046,16 @@ class ProjectPage(QWidget):
     def current_project(self) -> ProjectConfig | None:
         return self._selected_project()
 
+    def replace_projects(self, projects: list[ProjectConfig]) -> None:
+        current = self._selected_project()
+        current_project_id = current.project_id if current is not None else ""
+        self.projects = list(projects)
+        self._refresh_project_combo()
+        for index, project in enumerate(self.projects):
+            if project.project_id == current_project_id:
+                self.project_combo.setCurrentIndex(index)
+                break
+
     def _has_project(self) -> bool:
         return bool(self.projects)
 

@@ -859,5 +859,16 @@
   "recovery.global.noBackup": "无法读取全局配置：\n{path}\n\n没有可用备份。原文件已保留，应用不会创建空配置覆盖它。请先修复或移走该文件，再重新启动。",
   "recovery.global.restoreFailed": "无法从备份恢复全局配置。原文件已保留。\n\n配置：{path}\n备份：{backup_path}",
   "recovery.action.restore": "恢复备份",
-  "recovery.action.exit": "退出应用"
+  "recovery.action.exit": "退出应用",
+  "recovery.action.keep": "暂不恢复",
+  "recovery.action.close": "关闭",
+  "recovery.project.title": "项目配置损坏",
+  "recovery.card.title": "角色卡数据损坏",
+  "recovery.item.projectConfig": "项目配置",
+  "recovery.item.characterCard": "角色卡",
+  "recovery.item.backupAvailable": "无法读取{item}：\n{path}\n\n检测到有效备份：\n{backup_path}\n\n是否用该备份恢复？只有确认恢复后，损坏文件才会被替换。",
+  "recovery.item.noBackup": "无法读取{item}：\n{path}\n\n没有可用备份。原文件已保留，也不会被空数据覆盖。你可以继续使用其他数据，稍后手动检查此文件。",
+  "recovery.item.restoreFailed": "无法从备份恢复{item}。原文件已保留。\n\n数据：{path}\n备份：{backup_path}",
+  "recovery.restored.title": "数据已恢复",
+  "recovery.item.restored": "{item}已从备份恢复：{path}"
 }

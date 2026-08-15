@@ -859,5 +859,16 @@
   "recovery.global.noBackup": "無法讀取全域設定：\n{path}\n\n沒有可用的備份。原檔案已保留，應用程式不會建立空設定覆蓋它。請先修復或移走此檔案，再重新啟動。",
   "recovery.global.restoreFailed": "無法從備份復原全域設定。原檔案已保留。\n\n設定：{path}\n備份：{backup_path}",
   "recovery.action.restore": "復原備份",
-  "recovery.action.exit": "結束應用程式"
+  "recovery.action.exit": "結束應用程式",
+  "recovery.action.keep": "暫不復原",
+  "recovery.action.close": "關閉",
+  "recovery.project.title": "專案設定損毀",
+  "recovery.card.title": "角色卡資料損毀",
+  "recovery.item.projectConfig": "專案設定",
+  "recovery.item.characterCard": "角色卡",
+  "recovery.item.backupAvailable": "無法讀取{item}：\n{path}\n\n偵測到有效備份：\n{backup_path}\n\n要使用此備份復原嗎？只有確認復原後，損毀檔案才會被取代。",
+  "recovery.item.noBackup": "無法讀取{item}：\n{path}\n\n沒有可用的備份。原檔案已保留，也不會被空資料覆蓋。你可以繼續使用其他資料，稍後手動檢查此檔案。",
+  "recovery.item.restoreFailed": "無法從備份復原{item}。原檔案已保留。\n\n資料：{path}\n備份：{backup_path}",
+  "recovery.restored.title": "資料已復原",
+  "recovery.item.restored": "{item}已從備份復原：{path}"
 }

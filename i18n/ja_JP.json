@@ -859,5 +859,16 @@
   "recovery.global.noBackup": "全体設定を読み取れません：\n{path}\n\n有効なバックアップがありません。元のファイルは保持され、空の設定で上書きされることはありません。ファイルを修復または移動してから、アプリを再起動してください。",
   "recovery.global.restoreFailed": "バックアップから全体設定を復元できません。元のファイルは保持されています。\n\n設定：{path}\nバックアップ：{backup_path}",
   "recovery.action.restore": "バックアップを復元",
-  "recovery.action.exit": "アプリを終了"
+  "recovery.action.exit": "アプリを終了",
+  "recovery.action.keep": "今は復元しない",
+  "recovery.action.close": "閉じる",
+  "recovery.project.title": "プロジェクト設定が破損しています",
+  "recovery.card.title": "キャラクターカードのデータが破損しています",
+  "recovery.item.projectConfig": "プロジェクト設定",
+  "recovery.item.characterCard": "キャラクターカード",
+  "recovery.item.backupAvailable": "{item}を読み取れません：\n{path}\n\n有効なバックアップがあります：\n{backup_path}\n\nこのバックアップから復元しますか？確認後にのみ、破損したファイルを置き換えます。",
+  "recovery.item.noBackup": "{item}を読み取れません：\n{path}\n\n有効なバックアップがありません。元のファイルは保持され、空のデータで上書きされることもありません。他のデータは引き続き使用でき、このファイルは後で手動で確認できます。",
+  "recovery.item.restoreFailed": "バックアップから{item}を復元できません。元のファイルは保持されています。\n\nデータ：{path}\nバックアップ：{backup_path}",
+  "recovery.restored.title": "データを復元しました",
+  "recovery.item.restored": "{item}をバックアップから復元しました：{path}"
 }

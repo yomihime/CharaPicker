@@ -6,11 +6,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from core.models import ProjectConfig
+from utils.atomic_io import DataCorruptionError
 from utils.cloud_model_presets import CloudModelPreset, load_cloud_model_presets
 from utils.env_manager import WhisperStatus, has_llamacpp_binary, whisper_status
 from utils.ffmpeg_tool import DeviceOption, has_ffmpeg_binary, list_available_device_options
 from utils.local_model_catalog import list_local_model_candidates
-from utils.state_manager import list_project_configs
+from utils.state_manager import scan_project_configs
 
 
 LOGGER = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ StartupProgressCallback = Callable[[str, int], None]
 @dataclass(slots=True)
 class StartupWarmupSnapshot:
     project_configs: list[ProjectConfig] = field(default_factory=list)
+    project_config_issues: list[DataCorruptionError] = field(default_factory=list)
     ffmpeg_ready: bool = False
     encoder_options: list[DeviceOption] = field(default_factory=list)
     llamacpp_ready: bool = False
@@ -32,7 +34,9 @@ def warmup_startup_context(progress: StartupProgressCallback | None = None) -> S
     snapshot = StartupWarmupSnapshot()
 
     _emit_progress(progress, "startup.status.boot", 12)
-    snapshot.project_configs = list_project_configs()
+    project_scan = scan_project_configs()
+    snapshot.project_configs = project_scan.configs
+    snapshot.project_config_issues = project_scan.issues
 
     _emit_progress(progress, "startup.status.theme", 34)
     snapshot.encoder_options = list_available_device_options()
@@ -49,8 +53,10 @@ def warmup_startup_context(progress: StartupProgressCallback | None = None) -> S
 
     _emit_progress(progress, "startup.status.workspace", 88)
     LOGGER.info(
-        "Startup warmup completed; projects=%s ffmpeg_ready=%s encoder_options=%s llamacpp_ready=%s whisper_ready=%s local_models=%s cloud_presets=%s",
+        "Startup warmup completed; projects=%s project_config_issues=%s ffmpeg_ready=%s "
+        "encoder_options=%s llamacpp_ready=%s whisper_ready=%s local_models=%s cloud_presets=%s",
         len(snapshot.project_configs),
+        len(snapshot.project_config_issues),
         snapshot.ffmpeg_ready,
         len(snapshot.encoder_options),
         snapshot.llamacpp_ready,
