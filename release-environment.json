@@ -5,6 +5,7 @@
   "runner": "windows-2022",
   "python": "3.12.10",
   "lock_file": "requirements-release-windows-py312.txt",
+  "dependency_inventory": "release-dependency-inventory.json",
   "pyinstaller": "6.20.0",
   "ruff": "0.15.12",
   "python_hash_seed": "0",

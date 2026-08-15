@@ -50,6 +50,7 @@ def load_target_config(path: Path) -> dict[str, Any]:
         "runner",
         "python",
         "lock_file",
+        "dependency_inventory",
         "pyinstaller",
         "ruff",
         "python_hash_seed",
@@ -74,6 +75,40 @@ def parse_release_lock(path: Path) -> list[dict[str, str]]:
     if not entries:
         raise ValueError(f"release lock has no packages: {path.name}")
     return entries
+
+
+def load_dependency_inventory(
+    path: Path,
+    *,
+    lock_path: Path,
+    lock_entries: list[dict[str, str]],
+) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        raise ValueError(f"release dependency inventory has an invalid schema: {path.name}")
+    release_lock = payload.get("release_lock")
+    if not isinstance(release_lock, dict):
+        raise ValueError(f"release dependency inventory has no release lock: {path.name}")
+    if release_lock.get("file") != lock_path.name:
+        raise ValueError(f"release dependency inventory names the wrong lock: {path.name}")
+    if release_lock.get("sha256") != sha256_file(lock_path):
+        raise ValueError(f"release dependency inventory lock hash is stale: {path.name}")
+    packages = payload.get("packages")
+    if not isinstance(packages, list):
+        raise ValueError(f"release dependency inventory has no package list: {path.name}")
+    expected_versions = {
+        canonicalize_package_name(entry["name"]): entry["version"] for entry in lock_entries
+    }
+    actual_versions = {
+        canonicalize_package_name(str(package.get("name") or "")): str(
+            package.get("version") or ""
+        )
+        for package in packages
+        if isinstance(package, dict)
+    }
+    if actual_versions != expected_versions:
+        raise ValueError(f"release dependency inventory differs from the lock: {path.name}")
+    return payload
 
 
 def canonicalize_package_name(name: str) -> str:
@@ -253,6 +288,12 @@ def build_release_package(
         )
     lock_path = ROOT_DIR / str(target["lock_file"])
     lock_entries = parse_release_lock(lock_path)
+    inventory_path = ROOT_DIR / str(target["dependency_inventory"])
+    inventory = load_dependency_inventory(
+        inventory_path,
+        lock_path=lock_path,
+        lock_entries=lock_entries,
+    )
     dependencies = collect_dependency_inventory(
         lock_entries,
         require_lock_match=require_lock_match,
@@ -263,6 +304,8 @@ def build_release_package(
     archive_digest = sha256_file(archive_path)
     checksum_path = archive_path.with_name(f"{archive_path.name}.sha256")
     checksum_path.write_text(f"{archive_digest}  {archive_path.name}\n", encoding="ascii")
+    published_inventory_path = archive_path.parent / "dependency-inventory.json"
+    shutil.copyfile(inventory_path, published_inventory_path)
 
     commit_sha = commit or os.environ.get("GITHUB_SHA", "") or _command_output(
         "git", "rev-parse", "HEAD"
@@ -306,6 +349,11 @@ def build_release_package(
             "file": lock_path.name,
             "sha256": sha256_file(lock_path),
             "hash_checking": True,
+        },
+        "dependency_inventory": {
+            "file": published_inventory_path.name,
+            "sha256": sha256_file(published_inventory_path),
+            "package_count": len(inventory["packages"]),
         },
         "dependencies": dependencies,
         "package": {

@@ -225,6 +225,7 @@ def _validate_build_info(
     build_info_path: Path,
     archive_path: Path,
     checksum_path: Path,
+    dependency_inventory_path: Path,
     archive_digest: str,
     actual_files: list[dict[str, str | int]],
     repository_root: Path,
@@ -314,6 +315,50 @@ def _validate_build_info(
     if release_lock.get("hash_checking") is not True:
         errors.append("build-info must record release lock hash checking")
 
+    inventory_info = (
+        payload.get("dependency_inventory")
+        if isinstance(payload.get("dependency_inventory"), dict)
+        else {}
+    )
+    if inventory_info.get("file") != dependency_inventory_path.name:
+        errors.append("build-info dependency inventory name does not match the artifact")
+    if not dependency_inventory_path.is_file():
+        errors.append(f"release dependency inventory is missing: {dependency_inventory_path.name}")
+    else:
+        try:
+            inventory = json.loads(dependency_inventory_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            errors.append("release dependency inventory is invalid JSON")
+        else:
+            if not isinstance(inventory, dict) or inventory.get("schema_version") != 1:
+                errors.append("release dependency inventory schema_version must be 1")
+            if _manifest_contains_private_path(inventory):
+                errors.append("release dependency inventory contains an absolute private path")
+            packages = inventory.get("packages") if isinstance(inventory, dict) else None
+            if not isinstance(packages, list):
+                errors.append("release dependency inventory packages must be a list")
+            elif inventory_info.get("package_count") != len(packages):
+                errors.append("build-info dependency inventory package count does not match")
+            inventory_lock = inventory.get("release_lock", {})
+            if not isinstance(inventory_lock, dict) or inventory_lock.get("sha256") != release_lock.get(
+                "sha256"
+            ):
+                errors.append("release dependency inventory lock hash does not match build-info")
+        if inventory_info.get("sha256") != sha256_file(dependency_inventory_path):
+            errors.append("build-info dependency inventory SHA-256 does not match the artifact")
+
+        target_config_path = repository_root / "release-environment.json"
+        try:
+            target_config = json.loads(target_config_path.read_text(encoding="utf-8"))
+            source_inventory_path = repository_root / str(target_config["dependency_inventory"])
+        except (OSError, KeyError, json.JSONDecodeError, TypeError):
+            errors.append("repository release environment does not name a dependency inventory")
+        else:
+            if not source_inventory_path.is_file():
+                errors.append("repository release dependency inventory is missing")
+            elif sha256_file(source_inventory_path) != sha256_file(dependency_inventory_path):
+                errors.append("published dependency inventory differs from the repository source")
+
     trust = payload.get("trust") if isinstance(payload.get("trust"), dict) else {}
     for key in ("signed", "signature_verified", "attestation_generated"):
         if not isinstance(trust.get(key), bool):
@@ -328,11 +373,15 @@ def validate_release_artifact(
     *,
     checksum_path: Path | None = None,
     build_info_path: Path | None = None,
+    dependency_inventory_path: Path | None = None,
     repository_root: Path = ROOT_DIR,
 ) -> list[str]:
     archive_path = archive_path.resolve()
     checksum_path = (checksum_path or archive_path.with_name(f"{archive_path.name}.sha256")).resolve()
     build_info_path = (build_info_path or archive_path.parent / "build-info.json").resolve()
+    dependency_inventory_path = (
+        dependency_inventory_path or archive_path.parent / "dependency-inventory.json"
+    ).resolve()
     if not archive_path.is_file():
         return [f"release archive is missing: {archive_path}"]
 
@@ -352,6 +401,7 @@ def validate_release_artifact(
             build_info_path=build_info_path,
             archive_path=archive_path,
             checksum_path=checksum_path,
+            dependency_inventory_path=dependency_inventory_path,
             archive_digest=archive_digest,
             actual_files=actual_files,
             repository_root=repository_root.resolve(),
@@ -407,6 +457,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--archive", type=Path)
     parser.add_argument("--checksum", type=Path)
     parser.add_argument("--build-info", type=Path)
+    parser.add_argument("--dependency-inventory", type=Path)
     parser.add_argument("--run-health-check", action="store_true")
     return parser.parse_args(argv)
 
@@ -420,6 +471,7 @@ def main(argv: list[str]) -> int:
         ns.archive,
         checksum_path=ns.checksum,
         build_info_path=ns.build_info,
+        dependency_inventory_path=ns.dependency_inventory,
     )
     if not errors and ns.run_health_check:
         errors.extend(run_packaged_health_check(ns.archive.resolve()))

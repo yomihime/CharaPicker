@@ -29,6 +29,20 @@ class ReleasePackagingTests(unittest.TestCase):
             "example==1.0 --hash=sha256:" + "a" * 64 + "\n",
             encoding="utf-8",
         )
+        inventory_path = root / "release-dependency-inventory.json"
+        inventory_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "release_lock": {
+                        "file": lock_path.name,
+                        "sha256": sha256_file(lock_path),
+                    },
+                    "packages": [{"name": "example", "version": "1.0"}],
+                }
+            ),
+            encoding="utf-8",
+        )
         target_config = root / "release-environment.json"
         target_config.write_text(
             json.dumps(
@@ -39,6 +53,7 @@ class ReleasePackagingTests(unittest.TestCase):
                     "runner": "windows-2022",
                     "python": "3.12.10",
                     "lock_file": str(lock_path),
+                    "dependency_inventory": str(inventory_path),
                     "pyinstaller": "6.20.0",
                     "ruff": "0.15.12",
                     "python_hash_seed": "0",
@@ -91,6 +106,12 @@ class ReleasePackagingTests(unittest.TestCase):
             self.assertEqual(
                 checksum.read_text(encoding="ascii"),
                 f"{sha256_file(archive)}  {archive.name}\n",
+            )
+            published_inventory = archive.parent / "dependency-inventory.json"
+            self.assertTrue(published_inventory.is_file())
+            self.assertEqual(
+                payload["dependency_inventory"]["sha256"],
+                sha256_file(published_inventory),
             )
 
             with zipfile.ZipFile(archive) as packaged:

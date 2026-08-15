@@ -47,6 +47,9 @@ jobs:
       - name: Validate dependency graph
         run: python -m pip check
 
+      - name: Audit locked dependency inventory
+        run: python scripts/validate_release_dependencies.py --verify-installed
+
       - name: Run Ruff
         run: python -m ruff check .
 
@@ -171,6 +174,7 @@ jobs:
             release/*.zip
             release/*.sha256
             release/build-info.json
+            release/dependency-inventory.json
             release_notes.md
           if-no-files-found: error
           retention-days: 14
@@ -199,6 +203,7 @@ jobs:
             release-assets/release/*.zip
             release-assets/release/*.sha256
             release-assets/release/build-info.json
+            release-assets/release/dependency-inventory.json
           body_path: release-assets/release_notes.md
           generate_release_notes: true
           fail_on_unmatched_files: true

@@ -35,6 +35,20 @@ class ReleaseArtifactTests(unittest.TestCase):
             "example==1.0 --hash=sha256:" + "a" * 64 + "\n",
             encoding="utf-8",
         )
+        inventory_path = root / "release-dependency-inventory.json"
+        inventory_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "release_lock": {
+                        "file": lock_path.name,
+                        "sha256": sha256_file(lock_path),
+                    },
+                    "packages": [{"name": "example", "version": "1.0"}],
+                }
+            ),
+            encoding="utf-8",
+        )
         target_config = root / "release-environment.json"
         target_config.write_text(
             json.dumps(
@@ -45,6 +59,7 @@ class ReleaseArtifactTests(unittest.TestCase):
                     "runner": "windows-2022",
                     "python": "3.12.10",
                     "lock_file": str(lock_path),
+                    "dependency_inventory": str(inventory_path),
                     "pyinstaller": "6.20.0",
                     "ruff": "0.15.12",
                     "python_hash_seed": "0",

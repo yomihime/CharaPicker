@@ -35,6 +35,7 @@ set "STAGE_DIR=%RELEASE_DIR%\%APP_NAME%"
 set "ZIP_PATH=%RELEASE_DIR%\%ZIP_NAME%"
 set "CHECKSUM_PATH=%ZIP_PATH%.sha256"
 set "BUILD_INFO_PATH=%RELEASE_DIR%\build-info.json"
+set "DEPENDENCY_INVENTORY_PATH=%RELEASE_DIR%\dependency-inventory.json"
 
 if not exist "%RELEASE_DIR%" mkdir "%RELEASE_DIR%"
 
@@ -53,6 +54,7 @@ if exist "%STAGE_DIR%" rmdir /s /q "%STAGE_DIR%"
 if exist "%ZIP_PATH%" del /q "%ZIP_PATH%"
 if exist "%CHECKSUM_PATH%" del /q "%CHECKSUM_PATH%"
 if exist "%BUILD_INFO_PATH%" del /q "%BUILD_INFO_PATH%"
+if exist "%DEPENDENCY_INVENTORY_PATH%" del /q "%DEPENDENCY_INVENTORY_PATH%"
 
 echo [1/5] Building one-folder package with main.spec...
 echo Version: v%VERSION_TAG%
@@ -101,6 +103,7 @@ echo [5/5] Done.
 echo Output: %ZIP_PATH%
 echo Checksum: %CHECKSUM_PATH%
 echo Build info: %BUILD_INFO_PATH%
+echo Dependency inventory: %DEPENDENCY_INVENTORY_PATH%
 popd >nul
 exit /b 0
 
