@@ -31,6 +31,7 @@ REQUIRED_PACKAGE_FILES = (
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
 )
+SOURCE_REPOSITORY = "yomihime/CharaPicker"
 
 
 def sha256_file(path: Path) -> str:
@@ -109,6 +110,61 @@ def load_dependency_inventory(
     if actual_versions != expected_versions:
         raise ValueError(f"release dependency inventory differs from the lock: {path.name}")
     return payload
+
+
+def load_signature_report(
+    path: Path,
+    *,
+    package_files: list[dict[str, str | int]],
+) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        raise ValueError(f"release signature report has an invalid schema: {path.name}")
+    if payload.get("policy") != "unsigned" or payload.get("inspection_passed") is not True:
+        raise ValueError(f"release signature report did not pass unsigned policy: {path.name}")
+    raw_entries = payload.get("executables")
+    if not isinstance(raw_entries, list):
+        raise ValueError(f"release signature report has no executable list: {path.name}")
+
+    package_by_name = {
+        Path(str(item["path"])).name: item
+        for item in package_files
+        if Path(str(item["path"])).suffix.casefold() == ".exe"
+    }
+    expected_names = {"CharaPicker.exe", "CharaPickerUpdater.exe"}
+    entries: list[dict[str, Any]] = []
+    for raw_entry in raw_entries:
+        if not isinstance(raw_entry, dict):
+            raise ValueError(f"release signature report contains an invalid entry: {path.name}")
+        name = str(raw_entry.get("name") or "")
+        package_entry = package_by_name.get(name)
+        if name not in expected_names or package_entry is None:
+            raise ValueError(f"release signature report names an unexpected executable: {name}")
+        if raw_entry.get("sha256") != package_entry.get("sha256"):
+            raise ValueError(f"release signature report hash mismatch: {name}")
+        if (
+            raw_entry.get("status") != "NotSigned"
+            or raw_entry.get("signed") is not False
+            or raw_entry.get("signature_verified") is not False
+            or raw_entry.get("signer_subject") is not None
+            or raw_entry.get("timestamp_subject") is not None
+        ):
+            raise ValueError(f"release signature report contradicts unsigned policy: {name}")
+        entries.append(dict(raw_entry))
+    if {entry["name"] for entry in entries} != expected_names:
+        raise ValueError(f"release signature report does not cover required executables: {path.name}")
+    entries.sort(key=lambda entry: entry["name"].casefold())
+    return {
+        "signature_policy": "unsigned",
+        "signature_inspection_passed": True,
+        "signed": False,
+        "signature_verified": False,
+        "executables": entries,
+        "attestation_generated": False,
+        "attestation_provider": None,
+        "attestation_id": None,
+        "attestation_url": None,
+    }
 
 
 def canonicalize_package_name(name: str) -> str:
@@ -262,6 +318,7 @@ def build_release_package(
     stage_dir: Path,
     archive_path: Path,
     build_info_path: Path,
+    signature_report_path: Path,
     target_config_path: Path,
     version: str,
     stage: str,
@@ -300,6 +357,7 @@ def build_release_package(
     )
 
     package_files = collect_package_files(stage_dir)
+    trust = load_signature_report(signature_report_path.resolve(), package_files=package_files)
     write_normalized_zip(stage_dir, archive_path, source_date_epoch)
     archive_digest = sha256_file(archive_path)
     checksum_path = archive_path.with_name(f"{archive_path.name}.sha256")
@@ -323,6 +381,7 @@ def build_release_package(
             "version_tag": version_tag,
         },
         "source": {
+            "repository": SOURCE_REPOSITORY,
             "commit": commit_sha,
             "tag": tag or None,
             "source_date_epoch": source_date_epoch,
@@ -375,11 +434,7 @@ def build_release_package(
                 "sha256": sha256_file(checksum_path),
             },
         },
-        "trust": {
-            "signed": False,
-            "signature_verified": False,
-            "attestation_generated": False,
-        },
+        "trust": trust,
     }
     build_info_path.parent.mkdir(parents=True, exist_ok=True)
     build_info_path.write_text(
@@ -394,6 +449,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--stage-dir", type=Path, required=True)
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--build-info", type=Path, required=True)
+    parser.add_argument("--signature-report", type=Path, required=True)
     parser.add_argument("--target-config", type=Path, default=DEFAULT_TARGET_CONFIG)
     parser.add_argument("--version", required=True)
     parser.add_argument("--stage", required=True)
@@ -413,6 +469,7 @@ def main(argv: list[str]) -> int:
         stage_dir=ns.stage_dir,
         archive_path=ns.archive,
         build_info_path=ns.build_info,
+        signature_report_path=ns.signature_report,
         target_config_path=ns.target_config,
         version=ns.version,
         stage=ns.stage,

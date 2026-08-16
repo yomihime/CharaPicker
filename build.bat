@@ -36,6 +36,7 @@ set "ZIP_PATH=%RELEASE_DIR%\%ZIP_NAME%"
 set "CHECKSUM_PATH=%ZIP_PATH%.sha256"
 set "BUILD_INFO_PATH=%RELEASE_DIR%\build-info.json"
 set "DEPENDENCY_INVENTORY_PATH=%RELEASE_DIR%\dependency-inventory.json"
+set "SIGNATURE_REPORT_PATH=%RELEASE_DIR%\signature-report.json"
 
 if not exist "%RELEASE_DIR%" mkdir "%RELEASE_DIR%"
 
@@ -55,8 +56,9 @@ if exist "%ZIP_PATH%" del /q "%ZIP_PATH%"
 if exist "%CHECKSUM_PATH%" del /q "%CHECKSUM_PATH%"
 if exist "%BUILD_INFO_PATH%" del /q "%BUILD_INFO_PATH%"
 if exist "%DEPENDENCY_INVENTORY_PATH%" del /q "%DEPENDENCY_INVENTORY_PATH%"
+if exist "%SIGNATURE_REPORT_PATH%" del /q "%SIGNATURE_REPORT_PATH%"
 
-echo [1/5] Building one-folder package with main.spec...
+echo [1/6] Building one-folder package with main.spec...
 echo Version: v%VERSION_TAG%
 echo Stage: %STAGE%
 echo Platform: %PLATFORM_TAG%
@@ -66,14 +68,14 @@ if "%LOCAL_BUILD%"=="1" echo Build mode: local
 %PYTHON_CMD% -m PyInstaller --noconfirm --clean main.spec
 if errorlevel 1 goto :error
 
-echo [2/5] Building standalone update helper with updater.spec...
+echo [2/6] Building standalone update helper with updater.spec...
 %PYTHON_CMD% -m PyInstaller --noconfirm --clean updater.spec
 if errorlevel 1 goto :error
 if not exist "%DIST_DIR%\%APP_NAME%Updater.exe" goto :error
 copy /y "%DIST_DIR%\%APP_NAME%Updater.exe" "%DIST_DIR%\%APP_NAME%\%APP_NAME%Updater.exe" >nul
 if errorlevel 1 goto :error
 
-echo [3/5] Preparing release folder...
+echo [3/6] Preparing release folder...
 mkdir "%STAGE_DIR%"
 xcopy /e /i /y "%DIST_DIR%\%APP_NAME%\*" "%STAGE_DIR%\" >nul
 if errorlevel 1 goto :error
@@ -82,13 +84,22 @@ for %%F in (README.md LICENSE THIRD_PARTY_NOTICES.md) do (
   if exist "%ROOT_DIR%%%F" copy /y "%ROOT_DIR%%%F" "%STAGE_DIR%\%%F" >nul
 )
 
-echo [4/5] Creating normalized archive and build manifest...
+echo [4/6] Inspecting Windows executable signatures...
+%PYTHON_CMD% scripts\inspect_release_signatures.py ^
+  --expect unsigned ^
+  --executable "%STAGE_DIR%\%APP_NAME%.exe" ^
+  --executable "%STAGE_DIR%\%APP_NAME%Updater.exe" ^
+  --output "%SIGNATURE_REPORT_PATH%"
+if errorlevel 1 goto :error
+
+echo [5/6] Creating normalized archive and build manifest...
 set "LOCK_MATCH_ARG=--require-lock-match"
 if "%LOCAL_BUILD%"=="1" set "LOCK_MATCH_ARG="
 %PYTHON_CMD% scripts\package_release.py ^
   --stage-dir "%STAGE_DIR%" ^
   --archive "%ZIP_PATH%" ^
   --build-info "%BUILD_INFO_PATH%" ^
+  --signature-report "%SIGNATURE_REPORT_PATH%" ^
   --version "%VERSION%" ^
   --stage "%STAGE%" ^
   --version-tag "%VERSION_TAG%" ^
@@ -99,7 +110,7 @@ if "%LOCAL_BUILD%"=="1" set "LOCK_MATCH_ARG="
   %LOCK_MATCH_ARG%
 if errorlevel 1 goto :error
 
-echo [5/5] Done.
+echo [6/6] Done.
 echo Output: %ZIP_PATH%
 echo Checksum: %CHECKSUM_PATH%
 echo Build info: %BUILD_INFO_PATH%

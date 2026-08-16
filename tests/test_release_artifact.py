@@ -73,10 +73,35 @@ class ReleaseArtifactTests(unittest.TestCase):
         release = root / "release"
         archive = release / "CharaPicker-v1.0.0-local-windows-x64.zip"
         build_info = release / "build-info.json"
+        signature_report = release / "signature-report.json"
+        signature_report.parent.mkdir(parents=True, exist_ok=True)
+        signature_report.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "policy": "unsigned",
+                    "inspection_passed": True,
+                    "executables": [
+                        {
+                            "name": name,
+                            "sha256": sha256_file(stage / name),
+                            "status": "NotSigned",
+                            "signed": False,
+                            "signature_verified": False,
+                            "signer_subject": None,
+                            "timestamp_subject": None,
+                        }
+                        for name in ("CharaPicker.exe", "CharaPickerUpdater.exe")
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
         build_release_package(
             stage_dir=stage,
             archive_path=archive,
             build_info_path=build_info,
+            signature_report_path=signature_report,
             target_config_path=target_config,
             version="1.0.0",
             stage="local",
@@ -158,6 +183,50 @@ class ReleaseArtifactTests(unittest.TestCase):
             )
 
             self.assertTrue(any("missing required file: CharaPicker/LICENSE" in error for error in errors))
+
+    def test_unsigned_trust_claim_must_match_executable_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive, checksum, build_info = self._build_fixture(root)
+            payload = json.loads(build_info.read_text(encoding="utf-8"))
+            payload["trust"]["executables"][0]["signed"] = True
+            payload["trust"]["executables"][0]["status"] = "Valid"
+            build_info.write_text(json.dumps(payload), encoding="utf-8")
+
+            errors = validate_release_artifact(
+                archive,
+                checksum_path=checksum,
+                build_info_path=build_info,
+                repository_root=root,
+            )
+
+            self.assertTrue(any("contradicts unsigned policy" in error for error in errors))
+
+    def test_attested_release_requires_valid_github_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive, checksum, build_info = self._build_fixture(root)
+            payload = json.loads(build_info.read_text(encoding="utf-8"))
+            payload["trust"].update(
+                {
+                    "attestation_generated": True,
+                    "attestation_provider": "github",
+                    "attestation_id": "12345",
+                    "attestation_url": (
+                        "https://github.com/yomihime/CharaPicker/attestations/67890"
+                    ),
+                }
+            )
+            build_info.write_text(json.dumps(payload), encoding="utf-8")
+
+            errors = validate_release_artifact(
+                archive,
+                checksum_path=checksum,
+                build_info_path=build_info,
+                repository_root=root,
+            )
+
+            self.assertTrue(any("attestation URL is invalid" in error for error in errors))
 
 
 if __name__ == "__main__":

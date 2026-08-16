@@ -112,6 +112,7 @@ class BuildMetadataTests(unittest.TestCase):
 
         self.assertIn("release/*.sha256", workflow)
         self.assertIn("release/build-info.json", workflow)
+        self.assertIn("scripts/prepare_release_notes.py", workflow)
 
     def test_release_workflow_separates_publish_permissions(self) -> None:
         workflow = (ROOT_DIR / ".github" / "workflows" / "build.yml").read_text(
@@ -119,14 +120,30 @@ class BuildMetadataTests(unittest.TestCase):
         )
 
         self.assertIn("needs: quality", workflow)
+        self.assertIn("needs: windows-build", workflow)
+        self.assertIn("needs: attest-release", workflow)
         self.assertIn("runs-on: windows-2022", workflow)
         self.assertIn('python-version: "3.12.10"', workflow)
         self.assertEqual(workflow.count("contents: write"), 1)
+        self.assertEqual(workflow.count("id-token: write"), 1)
+        self.assertEqual(workflow.count("attestations: write"), 1)
+
+    def test_release_workflow_attests_package_and_final_manifest(self) -> None:
+        workflow = (ROOT_DIR / ".github" / "workflows" / "build.yml").read_text(
+            encoding="utf-8"
+        )
+
+        action_ref = "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6"
+        self.assertEqual(workflow.count(action_ref), 2)
+        self.assertIn("scripts/record_release_attestation.py", workflow)
+        self.assertIn("name: charapicker-attested-release", workflow)
 
     def test_batch_uses_normalized_release_packager(self) -> None:
         batch = (ROOT_DIR / "build.bat").read_text(encoding="utf-8")
 
         self.assertIn("scripts\\package_release.py", batch)
+        self.assertIn("scripts\\inspect_release_signatures.py", batch)
+        self.assertIn("--signature-report", batch)
         self.assertIn('set "PYTHONHASHSEED=0"', batch)
         self.assertNotIn("Compress-Archive", batch)
 

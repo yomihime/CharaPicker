@@ -68,10 +68,35 @@ class ReleasePackagingTests(unittest.TestCase):
         stage_dir, target_config = self._fixture(root)
         archive = root / "release" / "CharaPicker-v1.0.0-rc-windows-x64.zip"
         build_info = root / "release" / "build-info.json"
+        signature_report = root / "release" / "signature-report.json"
+        signature_report.parent.mkdir(parents=True, exist_ok=True)
+        signature_report.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "policy": "unsigned",
+                    "inspection_passed": True,
+                    "executables": [
+                        {
+                            "name": name,
+                            "sha256": sha256_file(stage_dir / name),
+                            "status": "NotSigned",
+                            "signed": False,
+                            "signature_verified": False,
+                            "signer_subject": None,
+                            "timestamp_subject": None,
+                        }
+                        for name in ("CharaPicker.exe", "CharaPickerUpdater.exe")
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
         payload = build_release_package(
             stage_dir=stage_dir,
             archive_path=archive,
             build_info_path=build_info,
+            signature_report_path=signature_report,
             target_config_path=target_config,
             version="1.0.0",
             stage="rc",

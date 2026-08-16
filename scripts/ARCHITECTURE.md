@@ -14,7 +14,10 @@
 ## 关键文件
 
 - `build_meta.py`：解析命令行参数、Git tag、平台和架构，输出 `VERSION`、`STAGE`、`VERSION_TAG`、`PLATFORM_TAG`、`ARCH_TAG` 等构建变量；默认版本和阶段来自 `utils.app_metadata`。非本地构建必须与应用源码版本、阶段一致，正式版 `VERSION_TAG` 不包含 `release` 后缀。
-- `package_release.py`：按 `SOURCE_DATE_EPOCH` 规范化 ZIP 成员顺序与时间，生成同名 SHA-256 和无绝对路径、无环境变量值的 `build-info.json`；正式构建还会核对实际安装版本与 Release 锁文件。
+- `package_release.py`：按 `SOURCE_DATE_EPOCH` 规范化 ZIP 成员顺序与时间，生成同名 SHA-256 和无绝对路径、无环境变量值的 `build-info.json`；正式构建还会核对实际安装版本、Release 锁文件和预先生成的 Windows 可执行文件签名状态报告。
+- `inspect_release_signatures.py`：通过固定 PowerShell 脚本调用 `Get-AuthenticodeSignature`，按文件名记录主程序和更新器的 SHA-256、签名状态、签名主体与时间戳主体。当前仅实现无证书策略：两个文件都必须为 `NotSigned`，否则构建失败。
+- `record_release_attestation.py`：在 GitHub package attestation 成功后，把与官方仓库匹配的 attestation ID/URL 原子写入最终 `build-info.json`；拒绝提前声明、重复记录或跨仓库 URL。
+- `prepare_release_notes.py`：从 `CHANGELOG.md` 抽取 tag 对应版本段落，并附加官方分发入口、未签名披露、SHA-256 比较命令和 GitHub provenance 验证命令。
 - `validate_extraction_plan_models.py`：验证四媒体类型、内容形态、素材引用、unit、派生成果、evidence、source trace 和正式 run plan 的模型边界。
 - `validate_extraction_plan_builder.py`：验证旧视频扫描结果进入 `FormalExtractionRunPlan`、稳定 ID、run 持久化和旧 manifest 观察索引边界。
 - `validate_video_unit_handler.py`：验证视频 unit 时长预算、模型请求变量和正式视频 handler 边界。
@@ -33,7 +36,7 @@
 - `validate_i18n_keys.py`：验证四份 i18n JSON 的 key 集合一致。
 - `validate_markdown_links.py`：扫描已跟踪 Markdown 文件中代码围栏外的相对链接和图片路径，拒绝缺失目标或逃逸仓库根目录的链接。
 - `validate_release_readiness.py`：只读校验 tag、源码/构建版本、CHANGELOG、发布目标、Action 固定引用、CI 权限链、更新资产命名和禁止跟踪的运行时/私钥路径；正式版额外检查四语 README 状态标记。
-- `validate_release_artifact.py`：构建后校验 ZIP 单根目录、必需文件与资源、禁止路径、规范化成员、SHA-256、`build-info.json` 和锁文件，并可在含空格及非 ASCII 的隔离路径运行打包态健康检查。
+- `validate_release_artifact.py`：构建后校验 ZIP 单根目录、必需文件与资源、禁止路径、规范化成员、SHA-256、`build-info.json`、锁文件、两个可执行文件的签名状态与 attestation ID/URL 结构，并可在含空格及非 ASCII 的隔离路径运行打包态健康检查。
 - `validate_release_dependencies.py`：校验开发依赖声明、Windows Release 锁、机器可读依赖/许可证库存、实际安装版本和第三方声明覆盖；也可从锁定环境重新生成库存供审查。
 - `validate_multi_material_regression.py`：统一运行除自身外的全部 `validate_*.py`，随后执行 `tests/` 的 unittest discovery；不调用真实模型，也不把用户项目作为固定输入。
 - `preflight_real_multi_material_acceptance.py`：对用户明确指定的单个项目执行只读真实验收预检，只输出媒体类型、内容形态、handler、unit 和 unsupported reason 计数；可通过 `--preset-name` 加载已配置预设并执行具体模型能力过滤，但不输出密钥/endpoint、不写知识库、不调用模型、不打印素材路径。
@@ -43,6 +46,7 @@
 - `build.bat` 调用 `scripts/build_meta.py` 获取版本标签、平台和架构，再动态拼接 zip 文件名。
 - `utils/app_metadata.py` 提供构建元数据默认版本和运行时 User-Agent 使用的同一份版本/阶段来源。
 - `.github/workflows/build.yml` 间接通过 `build.bat` 使用该脚本。
+- `.github/workflows/build.yml` 在 tag 上调用 `record_release_attestation.py` 与 `prepare_release_notes.py`，并用固定 SHA 的官方 action 生成 provenance。
 - 发布产物仍写入根目录 `release/`，不写入 `scripts/`。
 
 ## 维护注意事项
