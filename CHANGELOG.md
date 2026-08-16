@@ -6,6 +6,41 @@
 
 ## 未发布
 
+## v1.0.0-rc.2 - 2026-08-16
+
+### 新增
+
+- 为项目配置、全局配置和角色卡保留最近一次有效备份；启动或打开项目遇到主文件损坏时，
+  可在界面中确认后恢复备份，恢复前仍会保留损坏文件用于排查。
+- 新增统一的发布就绪、依赖锁、仓库约束、Markdown 链接、发布包结构和打包态健康检查，
+  并把这些检查接入 GitHub Actions 质量门禁。
+- 发布包新增 `build-info.json` 与 `dependency-inventory.json`，记录源码 commit、构建目标、
+  工具链、锁定依赖、包内文件摘要和可执行文件签名状态。
+
+### 改进
+
+- 配置、知识库、角色卡、拒绝样例、封面、导出文件、更新交接文件和二进制下载改用原子写入
+  或原子发布，降低中断、崩溃或磁盘写入失败留下半成品的风险。
+- 模型失败现在区分安全拒绝、能力不支持、认证、限流、网络、解析和未知错误；拒绝样例保留
+  prompt 版本、请求上下文和证据来源，减少把普通故障误判为安全拒绝。
+- 自动更新、FFmpeg、llama.cpp 与 Whisper 运行时下载增加来源、大小、SHA-256 和落盘后的完整性
+  校验；Whisper 模型文件改为固定清单，原生音频请求增加大小上限。
+
+### 构建
+
+- Windows x64 发布环境固定到指定 Python patch、PyInstaller、Ruff 和带 hash 的依赖锁，
+  ZIP 使用规范化时间与顺序生成，便于复核同一输入的构建结果。
+- tag 发布形成“质量门禁 -> Windows 构建 -> GitHub artifact attestation -> GitHub Release”
+  的串行链路；ZIP、checksum、依赖库存和最终构建清单均进入 provenance 校验范围。
+- 发布前实际检查 `CharaPicker.exe` 与 `CharaPickerUpdater.exe` 的 Authenticode 状态；Release
+  正文会自动附加 SHA-256 与 GitHub provenance 验证命令以及必要的信任边界说明。
+
+### 已知限制
+
+- 当前 Windows 二进制仍未使用 Authenticode 证书签名，系统可能显示未知发布者或
+  SmartScreen 信誉提示。SHA-256 只校验下载字节，GitHub artifact attestation 只证明
+  GitHub Actions 构建来源，两者都不等同于 Windows 发布者签名。
+
 ## v1.0.0-rc - 2026-07-29
 
 ### 新增
