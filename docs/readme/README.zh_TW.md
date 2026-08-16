@@ -16,7 +16,8 @@ CharaPicker（拾卡姬）是一個個人實驗性質的桌面工具。它嘗試
 
 ## 目前狀態
 
-- 仍處在 beta 階段，功能、資料結構和提取效果還會繼續調整。
+- 目前處於 1.0 RC（發布候選）階段，正在驗證首個穩定基線；它還不是最終穩定版，提取品質和少量資料契約仍可能調整。
+- 官方二進位目前只發布 Windows x64 套件；從原始碼執行支援 Python `>=3.10`，正式發布包使用鎖定的 Windows 建置環境。
 - 最新發布包與每個版本的變更請看 [GitHub Releases](https://github.com/yomihime/CharaPicker/releases) 和 [更新日誌](../../CHANGELOG.md)。
 
 ## 現在能做什麼
@@ -24,7 +25,7 @@ CharaPicker（拾卡姬）是一個個人實驗性質的桌面工具。它嘗試
 - 建立專案、導入素材，並把原始素材保留在 `raw/`，處理後的入口放到 `materials/`。
 - 掃描影片、圖片、音訊和文字四類素材，生成預覽或正式提取 run plan。
 - 對 ZIP、CBZ、EPUB、文字型 PDF、7z、RAR、CBR 做受控預處理，再交給既有文字或圖片鏈路。
-- 透過統一模型中介層呼叫 OpenAI-compatible 後端，並記錄 token usage。
+- 透過統一模型中介層呼叫 OpenAI-compatible 或 DashScope 雲端後端，並記錄 token usage。
 - 在洞察流面板看到提取過程中的關鍵事件，而不是只看日誌。
 - 在角色卡頁面管理專案內角色卡：建立、編輯、封面裁剪、預覽、編譯、匯入和匯出。
 - 從正式知識庫編譯 CharaPicker JSON，並匯出 Markdown、HTML、Character Card V2 JSON 和 AstrBot 手動複製清單。
@@ -34,11 +35,22 @@ CharaPicker（拾卡姬）是一個個人實驗性質的桌面工具。它嘗試
 - 真實素材提取品質還在打磨，尤其是跨集、跨媒體和長文本上下文。
 - 角色卡衝突消解、品質評估和證據取捨仍需要更多樣本驗證。
 - `facts.json`、`targeted_insights.json` 等早期知識庫檔案還沒有形成穩定的自動寫入閉環。
-- 大模型輸出有成本、失敗率和幻覺風險；重要結果需要人工複核。
+- 雲端模型呼叫會產生費用，也可能失敗、拒絕或產生幻覺；重要角色事實需要人工複核。
+- 本機模型執行入口尚未真正接線；下載器、執行時探測或介面占位不等於已支援本機推理。
+
+## 資料、隱私與更新
+
+- `projects/` 是使用者資料根目錄。應用程式會為關鍵設定和角色卡保留一份最近有效備份，並在偵測到損壞時提供恢復入口，但這不是完整備份方案；重要升級前仍應自行複製 `projects/` 和 `config.yaml`。
+- 更新器會盡量保留 `projects/`、`config.yaml`、`log/`、`bin/` 和 `models/`，並在啟動確認失敗時回復舊版；斷電、磁碟故障或手動移動檔案仍可能超出自動恢復範圍。
+- `config.yaml` 可能包含 API Key，目前儲存在本機應用程式目錄，未使用系統認證資料庫加密。請勿分享該檔案，也不要將它提交到版本控制。
+- 傳送給雲端模型的素材會離開本機，並受所選供應商的計費、隱私和內容政策約束；請只處理你有權使用的素材。
+- 官方下載入口只有本專案的 [GitHub Releases](https://github.com/yomihime/CharaPicker/releases)。目前 Windows 二進位沒有 Authenticode 簽章，Windows 可能顯示未知發行者或 SmartScreen 提示。
+- 同名 `.sha256` 用於核對下載位元組；GitHub artifact attestation 用於核對 GitHub Actions 建置來源。兩者都不等同於 Windows 發行者簽章，詳細驗證命令見[打包與發布規範](../reference/release-packaging.zh_CN.md)。
 
 ## 環境需求
 
 - Python `>=3.10`
+- 官方 Windows x64 發布包不需要另外安裝 Python。
 - 主要依賴：
   - `PyQt6>=6.6`
   - `PyQt6-Fluent-Widgets>=1.5`
@@ -53,6 +65,8 @@ CharaPicker（拾卡姬）是一個個人實驗性質的桌面工具。它嘗試
 - 7z/RAR/CBR 需要本機 7-Zip。應用程式會檢查專案內 `bin/`、`PATH`、Windows 標準安裝目錄與 `CHARAPICKER_7ZIP_PATH`，不會自動下載 7-Zip。
 - 巢狀容器不會遞迴展開；原容器保留在 `raw/`，派生素材與來源映射分別寫入 `materials/derived_inputs/` 和預處理 manifest。
 - 通用 ZIP/7z/RAR 內的影片不會被展開；影片必須作為獨立素材明確導入。CBZ/CBR 繼續只接納漫畫圖片頁。
+- 直接影片預處理需要 FFmpeg；缺少時可以取消、略過全部影片並繼續其它素材，或下載受控的 FFmpeg 執行時後重試。
+- 音訊與影片的對白事實優先來自字幕或 Whisper transcript；原生音訊／影片理解只補充視聽線索，是否可用取決於供應商、API schema 和具體模型。
 
 ## 安裝
 
