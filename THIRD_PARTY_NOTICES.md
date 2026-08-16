@@ -51,6 +51,26 @@ not download it. If a release package bundles 7-Zip, it must also reproduce the
 license information shipped by that 7-Zip version and satisfy its applicable
 redistribution terms.
 
+## Optional Downloaded Runtime Components
+
+The following components are not bundled in the Windows release zip by
+default. CharaPicker downloads a pinned asset on demand, verifies its expected
+size and SHA-256 digest, and stores it in a local runtime directory. The license
+and redistribution terms published by each upstream project continue to
+control the downloaded component.
+
+| Component | Use | License noted by upstream | Upstream |
+| --- | --- | --- | --- |
+| Gyan FFmpeg Windows Essentials build | FFmpeg/FFprobe runtime for media processing | GPLv3 for the static Windows build currently selected by `res/runtime_downloads.json`; FFmpeg licensing depends on the enabled components and build configuration | https://www.gyan.dev/ffmpeg/builds/ and https://ffmpeg.org/legal.html |
+| whisper.cpp | Optional local transcription runtime | MIT | https://github.com/ggml-org/whisper.cpp |
+| llama.cpp | Optional runtime downloaded by the current model-management UI; CharaPicker local inference is not wired yet | MIT | https://github.com/ggml-org/llama.cpp |
+| Whisper GGML model files | Optional converted Whisper model weights used by whisper.cpp | MIT as identified by the selected upstream model repository and the original OpenAI Whisper distribution | https://huggingface.co/ggerganov/whisper.cpp and https://github.com/openai/whisper |
+
+The pinned versions, source revisions, download URLs, expected sizes, and
+SHA-256 digests are maintained in `res/runtime_downloads.json`. That integrity
+metadata identifies the bytes CharaPicker accepts; it does not replace an
+upstream license or grant additional redistribution rights.
+
 ## Runtime Assets
 
 | Asset | Use | Notice |
@@ -65,6 +85,9 @@ redistribution terms.
   PyQt6-Fluent-Widgets, Qt, PyInstaller, or any runtime package.
 - When bundling 7-Zip, include its version-matched `License.txt` and re-check
   the LGPL, unRAR restriction, and bundled codec notices.
+- Before bundling or redistributing an optional downloaded runtime or model,
+  re-check the exact asset's license and included third-party notices, include
+  the version-matched license material, and update this document when needed.
 - For binary distribution with GPL components, make corresponding source and
   license information available in a way that satisfies the applicable GPL
   obligations.
