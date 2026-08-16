@@ -215,6 +215,8 @@ class AboutPage(QWidget):
             t("about.notice.review"),
             t("about.notice.copyright"),
             t("about.notice.thirdParty"),
+            t("about.notice.privacy"),
+            t("about.notice.releaseTrust"),
         ]
         for notice in notices:
             label = BodyLabel(f"- {notice}", notice_card)

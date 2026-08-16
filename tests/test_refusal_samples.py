@@ -265,7 +265,7 @@ class RefusalSampleTests(unittest.TestCase):
         self.assertTrue(record["prompt_tuning_candidate"])
         self.assertTrue(record["requires_manual_review"])
         self.assertEqual(record["schema_version"], 2)
-        self.assertEqual(record["default_prompt_resource_version"], 1)
+        self.assertEqual(record["default_prompt_resource_version"], 2)
         self.assertEqual(record["effective_prompt_source"], "default")
         self.assertEqual(
             record["prompt_component_sources"],

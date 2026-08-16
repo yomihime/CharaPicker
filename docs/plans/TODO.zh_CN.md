@@ -4,7 +4,7 @@
 
 ## 当前状态摘要
 
-路线 01 的提取质量基线、路线 02 的正式提取架构重构、路线 03 的多内容形态实现与真实验收，以及更多输入格式专项计划已经按顺序完成。当前没有独立 Extract Once 覆盖缺口；后续如真实素材暴露新的阻断问题，应先核对 [多内容形态完成记录](../archive/03-multi-material-coverage-plan.completed.zh_CN.md) 和 [更多输入格式完成记录](../archive/input-format-support-plan.completed.zh_CN.md)，再建立专项任务。
+路线 01 的提取质量基线、路线 02 的正式提取架构重构、路线 03 的多内容形态实现与真实验收，以及更多输入格式专项计划已经按顺序完成。RC 到 Release 收口已发布 `v1.0.0-rc.2` 检查点，自动验证、数据耐久、拒绝分类、下载/请求保护和分发信誉基线均已进入主线；当前仍按 [RC 到 Release 收口计划](rc-to-release-hardening-plan.zh_CN.md) 完成 B06 和稳定版人工验收。当前没有独立 Extract Once 覆盖缺口；后续如真实素材暴露新的阻断问题，应先核对 [多内容形态完成记录](../archive/03-multi-material-coverage-plan.completed.zh_CN.md) 和 [更多输入格式完成记录](../archive/input-format-support-plan.completed.zh_CN.md)，再建立专项任务。
 
 未完成内容按用途分为三类：持续跟踪、功能候选、加固与清理。这里是候选池和跟踪池，不表示所有条目都会进入后续版本；进入具体版本前仍按实际需要取舍，并以当前代码复核为准。规模只表示粗略改动幅度。
 
@@ -31,14 +31,13 @@
 
 | 顺序 | 待办 | 优先级 | 规模 | 主要验收点 |
 | --- | --- | --- | --- | --- |
-| 10 | 增加自更新下载包大小上限 | 中 | 小/中 | 在现有 HTTPS、精确资产名、SHA-256 校验、成员数量上限和解压后体积上限之外，增加下载阶段的压缩包体积限制和用户可读错误。 |
-| 11 | 增加原生音频理解的大文件请求体保护 | 中 | 小/中 | native audio/video 补充 handler 在构造请求前限制或解释大文件风险；首选 transcript 路径不受影响。 |
-| 12 | 明确目录导入递归深度策略 | 低 | 中 | 根据真实素材目录形态决定是否增加递归深度限制、提示或配置项；当前继续按既有导入规则处理。 |
-| 13 | 清理 i18n 重复 key 和遗留占位文案 | 低 | 小 | 四个 i18n JSON 中 `project.inputFormat.7z` 存在重复 key；`project.processing.placeholder.*` 仍写“真实转码/分段下一步接入”，但 FFmpeg 管线已经接入，应删除未引用文案或改成当前事实。 |
-| 14 | 补充模型页图片与视频测试素材来源记录 | 低 | 小 | 如后续需要更完整素材声明，补充原始 URL；或替换为新的自由素材并更新 `docs/reference/asset-material-declaration.zh_CN.md`。 |
+| 10 | 明确目录导入递归深度策略 | 低 | 中 | 根据真实素材目录形态决定是否增加递归深度限制、提示或配置项；当前继续按既有导入规则处理。 |
+| 11 | 补充模型页图片与视频测试素材来源记录 | 低 | 小 | 如后续需要更完整素材声明，补充原始 URL；或替换为新的自由素材并更新 `docs/reference/asset-material-declaration.zh_CN.md`。 |
 
 ## 已完成并移出队列
 
+- RC 下载与请求保护完成：更新 ZIP、FFmpeg、whisper.cpp、llama.cpp 和 Whisper 模型使用受控来源、大小与 SHA-256 校验；原生音频请求在编码前执行大小保护。
+- RC i18n 清理完成：重复 key 和已过期素材处理占位文案已移除，四语发布、更新、运行时和信任边界文案完成对齐并受自动门禁保护。
 - 打包运行根目录修复完成：frozen/packaged Windows one-folder 运行时以 `CharaPicker.exe` 所在目录作为 `APP_ROOT`，自更新 relaunch cwd 同步使用安装目录；相关单测、Ruff 和统一离线回归已通过。
 - 路线 01 提取质量与可观测性基础实施完成，正式提取回归、失败策略和可观察状态已建立。
 - 路线 02 多媒体平级接入前重构完成：正式提取以 `FormalExtractionRunPlan` 为主索引，顶层媒体类型固定为 `video`、`image`、`audio`、`text`，transcript 作为 text 型派生成果处理。

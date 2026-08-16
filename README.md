@@ -20,7 +20,8 @@ CharaPicker（拾卡姬）是一个个人实验性质的桌面工具。它尝试
 
 ## 当前状态
 
-- 仍处在 beta 阶段，功能、数据结构和提取效果还会继续调整。
+- 当前处于 1.0 RC（发布候选）阶段，正在验证首个稳定基线；它还不是最终稳定版，提取质量和少量数据契约仍可能调整。
+- 官方二进制目前只发布 Windows x64 包；源码运行支持 Python `>=3.10`，正式发布包使用锁定的 Windows 构建环境。
 - 最新发布包和每个版本的变化请看 [GitHub Releases](https://github.com/yomihime/CharaPicker/releases) 与 [更新日志](CHANGELOG.md)。
 
 ## 现在能做什么
@@ -28,7 +29,7 @@ CharaPicker（拾卡姬）是一个个人实验性质的桌面工具。它尝试
 - 建项目、导入素材，并把原始素材保留在 `raw/`，处理后的入口放到 `materials/`。
 - 扫描视频、图片、音频和文本四类素材，生成预览或正式提取 run plan。
 - 对 ZIP、CBZ、EPUB、文本型 PDF、7z、RAR、CBR 做受控预处理，再交给现有文本或图片链路。
-- 通过统一模型中间件调用 OpenAI-compatible 后端，并记录 token usage。
+- 通过统一模型中间件调用 OpenAI-compatible 或 DashScope 云端后端，并记录 token usage。
 - 在洞察流面板里看到提取过程中的关键事件，而不是只看日志。
 - 在角色卡页面管理项目内角色卡：创建、编辑、封面裁剪、预览、编译、导入和导出。
 - 从正式知识库编译 CharaPicker JSON，并导出 Markdown、HTML、Character Card V2 JSON 和 AstrBot 手动复制清单。
@@ -38,11 +39,22 @@ CharaPicker（拾卡姬）是一个个人实验性质的桌面工具。它尝试
 - 真实素材提取质量还在打磨，尤其是跨集、跨媒体和长文本上下文。
 - 角色卡冲突消解、质量评估和证据取舍仍需要更多样本验证。
 - `facts.json`、`targeted_insights.json` 等早期知识库文件还没有形成稳定的自动写入闭环。
-- 大模型输出有成本、失败率和幻觉风险；重要结果需要人工复核。
+- 云端模型调用会产生费用，也可能失败、拒绝或产生幻觉；重要角色事实需要人工复核。
+- 本地模型执行入口尚未真正接线；下载器、运行时探测或界面占位不等于已经支持本地推理。
+
+## 数据、隐私与更新
+
+- `projects/` 是用户数据根目录。应用会对关键配置和角色卡保留一份最近有效备份，并在检测到损坏时提供恢复入口，但这不是完整备份方案；重要升级前仍应自行复制 `projects/` 和 `config.yaml`。
+- 更新器会尽量保留 `projects/`、`config.yaml`、`log/`、`bin/` 和 `models/`，并在启动确认失败时回滚；断电、磁盘故障或手工移动文件仍可能超出自动恢复范围。
+- `config.yaml` 可能包含 API Key，目前保存在本地应用目录，没有使用系统凭据库加密。不要分享该文件，也不要把它提交到版本控制。
+- 发送给云端模型的素材会离开本机，并受所选供应商的计费、隐私和内容策略约束；请只处理你有权使用的素材。
+- 官方下载入口只有本项目的 [GitHub Releases](https://github.com/yomihime/CharaPicker/releases)。当前 Windows 二进制没有 Authenticode 签名，Windows 可能显示未知发布者或 SmartScreen 提示。
+- 同名 `.sha256` 用于核对下载字节；GitHub artifact attestation 用于核对 GitHub Actions 构建来源。两者都不等同于 Windows 发布者签名，详细验证命令见[打包与发布规范](docs/reference/release-packaging.zh_CN.md)。
 
 ## 环境要求
 
 - Python `>=3.10`
+- 官方 Windows x64 发布包不需要另行安装 Python。
 - 主要依赖：
   - `PyQt6>=6.6`
   - `PyQt6-Fluent-Widgets>=1.5`
@@ -58,6 +70,7 @@ CharaPicker（拾卡姬）是一个个人实验性质的桌面工具。它尝试
 - 嵌套容器不会递归展开，只记录 warning；原容器保留在 `raw/`，派生素材和来源映射分别进入 `materials/derived_inputs/` 与预处理 manifest。
 - 通用 ZIP/7z/RAR 内的视频不会被展开；视频必须作为独立素材显式导入。CBZ/CBR 继续只接纳漫画图片页。
 - 非原始处理方案只在选中了直接视频时需要 FFmpeg。缺少 FFmpeg 时可取消、忽略全部视频并继续处理其它素材，或下载 FFmpeg 后自动执行。
+- 音视频对白事实优先来自字幕或 Whisper transcript；原生音视频理解只补充视听线索，且是否可用取决于供应商、API schema 和具体模型。
 
 ## 安装
 

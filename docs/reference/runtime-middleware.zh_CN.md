@@ -214,6 +214,8 @@ FFmpeg、whisper.cpp、Whisper 模型和 llama.cpp 的自动下载资产由 `res
 边界：
 
 - 默认 prompt 资源放在 `res/default_prompts.json`。
+- 当前默认 prompt 资源版本为 2。面向原始内容和派生内容的 purpose 会明确任务是虚构作品的中立理解、结构化索引、合并或档案编译，而不是续写、角色扮演或操作性建议；遇到敏感情节时只保留连续性、角色状态、关系变化和证据定位需要的高层事实，不渲染、不扩写、不提供可操作细节。
+- 上述边界用于减少合法结构化提取被误判为创作请求的概率，不承诺消除供应商策略拒绝，也不得加入忽略、绕过、关闭或隐藏安全策略的指令。离线测试只验证默认模板契约、JSON 结构和版本归因；真实供应商、真实模型和用户自定义 override 的效果仍需使用已获授权样例复核。
 - 用户覆盖 prompt 由 `utils/prompt_preferences.py` 管理，空内容不覆盖默认 prompt。
 - prompt 正文不得硬编码在 `core`、`gui` 或其他业务模块中；新增 prompt purpose 时维护 `res/default_prompts.json`，由 `utils/ai_model_middleware.py` 统一加载、套用用户覆盖并渲染变量。
 - `core`、`gui` 和其他上层模块不得绕过中间件直连模型后端。

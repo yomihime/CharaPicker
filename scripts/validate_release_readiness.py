@@ -46,10 +46,22 @@ RUNTIME_ROOT_ALLOWLIST = {
 }
 PRIVATE_FILE_SUFFIXES = (".bak", ".key", ".p12", ".pem", ".pfx")
 FINAL_README_CONTRACTS = {
-    "README.md": ("首个稳定基线", "仍处在 beta 阶段"),
-    "docs/readme/README.zh_TW.md": ("首個穩定基線", "仍處在 beta 階段"),
-    "docs/readme/README.en_US.md": ("first stable baseline", "Still in beta"),
-    "docs/readme/README.ja_JP.md": ("最初の安定版ベースライン", "まだ beta 段階"),
+    "README.md": (
+        "首个稳定基线",
+        (("beta", "仍处在 beta 阶段"), ("RC", "当前处于 1.0 RC")),
+    ),
+    "docs/readme/README.zh_TW.md": (
+        "首個穩定基線",
+        (("beta", "仍處在 beta 階段"), ("RC", "目前處於 1.0 RC")),
+    ),
+    "docs/readme/README.en_US.md": (
+        "first stable baseline",
+        (("beta", "Still in beta"), ("RC", "Currently in the 1.0 RC")),
+    ),
+    "docs/readme/README.ja_JP.md": (
+        "最初の安定版ベースライン",
+        (("beta", "まだ beta 段階"), ("RC", "現在は 1.0 RC")),
+    ),
 }
 
 
@@ -115,7 +127,7 @@ def _validate_tracked_paths(tracked: set[str]) -> list[str]:
 
 def _validate_final_readmes(root: Path) -> list[str]:
     errors: list[str] = []
-    for relative, (required_marker, forbidden_marker) in FINAL_README_CONTRACTS.items():
+    for relative, (required_marker, forbidden_markers) in FINAL_README_CONTRACTS.items():
         path = root / relative
         if not path.is_file():
             errors.append(f"final release README is missing: {relative}")
@@ -123,8 +135,11 @@ def _validate_final_readmes(root: Path) -> list[str]:
         content = path.read_text(encoding="utf-8")
         if required_marker.casefold() not in content.casefold():
             errors.append(f"final release status marker is missing from {relative}: {required_marker}")
-        if forbidden_marker.casefold() in content.casefold():
-            errors.append(f"stale beta status remains in {relative}: {forbidden_marker}")
+        for stage, forbidden_marker in forbidden_markers:
+            if forbidden_marker.casefold() in content.casefold():
+                errors.append(
+                    f"stale {stage} status remains in {relative}: {forbidden_marker}"
+                )
     return errors
 
 
