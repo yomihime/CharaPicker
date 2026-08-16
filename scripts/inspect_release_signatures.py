@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -51,7 +52,7 @@ def sha256_file(path: Path) -> str:
 def inspect_release_signatures(
     executables: list[Path],
     *,
-    powershell: str = "powershell.exe",
+    powershell: str | None = None,
 ) -> list[dict[str, Any]]:
     resolved = [path.resolve() for path in executables]
     if not resolved:
@@ -60,7 +61,12 @@ def inspect_release_signatures(
     if missing:
         raise ReleaseSignatureError(f"release executables are missing: {sorted(missing)}")
 
+    powershell_executable = resolve_powershell_executable(powershell)
     environment = os.environ.copy()
+    if Path(powershell_executable).name.casefold() == "powershell.exe":
+        # A parent PowerShell 7 session may export module directories that are
+        # incompatible with Windows PowerShell 5.1. Let 5.1 rebuild its inbox path.
+        environment.pop("PSModulePath", None)
     environment[POWERSHELL_PATHS_ENV] = json.dumps(
         [str(path) for path in resolved],
         ensure_ascii=True,
@@ -68,7 +74,7 @@ def inspect_release_signatures(
     try:
         completed = subprocess.run(
             [
-                powershell,
+                powershell_executable,
                 "-NoLogo",
                 "-NoProfile",
                 "-NonInteractive",
@@ -83,8 +89,16 @@ def inspect_release_signatures(
             encoding="utf-8-sig",
             env=environment,
         )
-    except (OSError, subprocess.CalledProcessError) as exc:
-        raise ReleaseSignatureError("Authenticode inspection failed") from exc
+    except OSError as exc:
+        raise ReleaseSignatureError("Authenticode inspection could not start PowerShell") from exc
+    except subprocess.CalledProcessError as exc:
+        detail = " ".join((exc.stderr or "").split())
+        if len(detail) > 300:
+            detail = f"{detail[:297]}..."
+        suffix = f": {detail}" if detail else ""
+        raise ReleaseSignatureError(
+            f"Authenticode inspection failed with exit code {exc.returncode}{suffix}"
+        ) from exc
 
     try:
         raw_payload = json.loads(completed.stdout)
@@ -113,6 +127,23 @@ def inspect_release_signatures(
             }
         )
     return entries
+
+
+def resolve_powershell_executable(powershell: str | None = None) -> str:
+    if powershell:
+        return powershell
+
+    system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+    candidates = (
+        "pwsh.exe",
+        str(system_root / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"),
+        "powershell.exe",
+    )
+    for candidate in candidates:
+        resolved = shutil.which(candidate)
+        if resolved:
+            return resolved
+    raise ReleaseSignatureError("PowerShell is required for Authenticode inspection")
 
 
 def build_signature_report(entries: list[dict[str, Any]], *, expected: str) -> dict[str, Any]:
