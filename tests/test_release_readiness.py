@@ -85,7 +85,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         errors = validate_repository(tag="v1.0.0", tracked_files={"README.md"})
 
         self.assertTrue(any("APP_RELEASE_STAGE" in error for error in errors))
-        self.assertTrue(any("stale beta status" in error for error in errors))
+        self.assertTrue(any("stale RC status" in error for error in errors))
 
 
 if __name__ == "__main__":
