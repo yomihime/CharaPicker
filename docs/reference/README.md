@@ -23,7 +23,7 @@
 | 文件 | 用途 | 状态 |
 | --- | --- | --- |
 | `documentation-maintenance.zh_CN.md` | README、多语言文档、架构说明、计划和归档维护规则 | 长期维护规则 |
-| `release-packaging.zh_CN.md` | PyInstaller、版本阶段、发布包结构和 CI 发布规范 | 发布参考 |
+| `release-packaging.zh_CN.md` | uv/Python 工具链、PyInstaller、版本阶段、发布包结构和 CI 发布规范 | 发布参考 |
 | `asset-material-declaration.zh_CN.md` | 随包测试素材、图标资源等来源与授权声明 | 声明材料 |
 
 ## 维护规则

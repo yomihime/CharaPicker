@@ -20,7 +20,7 @@
 - `reference/extraction-workflow.*.md`：面向用户和研究者的提取工作流技术说明，多语言版本。
 - `reference/product-design-guidelines.zh_CN.md`：产品定位、产品语气、UI/i18n/资源规范、InsightStreamPanel 和混合媒体成本控制规范。
 - `reference/runtime-middleware.zh_CN.md`：全局存储、日志、弹窗、启动预热、素材处理、网络代理和 AI 模型调用中间件的设计边界。
-- `reference/release-packaging.zh_CN.md`：PyInstaller、版本阶段、发布包结构和 CI 发布规范。
+- `reference/release-packaging.zh_CN.md`：uv/Python 构建环境、PyInstaller、版本阶段、发布包结构和 CI 发布规范。
 - `reference/documentation-maintenance.zh_CN.md`：README、多语言文档、ARCHITECTURE.md 和计划类文档维护规则。
 - `plans/`：仍在执行或持续跟踪的任务队列、长期路线和专项计划。
 - `plans/TODO.zh_CN.md`：当前剩余任务总表；路线 01、路线 02、路线 03 和真实预览后续覆盖已经移入归档。
