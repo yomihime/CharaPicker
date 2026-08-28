@@ -6,7 +6,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.validate_release_dependencies import ROOT_DIR, validate_release_dependencies
+from scripts.validate_release_dependencies import (
+    ROOT_DIR,
+    compare_installed_release_environment,
+    validate_release_dependencies,
+)
 
 
 class ReleaseDependencyTests(unittest.TestCase):
@@ -61,6 +65,30 @@ class ReleaseDependencyTests(unittest.TestCase):
             errors = validate_release_dependencies(root)
 
             self.assertTrue(any("must use LF line endings" in error for error in errors))
+
+    def test_installed_release_environment_reports_toolchain_and_lock_drift(self) -> None:
+        target = {
+            "platform": "windows",
+            "architecture": "x64",
+            "python": "3.12.10",
+            "uv": "0.12.7",
+            "pyinstaller": "6.20.0",
+            "python_hash_seed": "0",
+        }
+
+        errors = compare_installed_release_environment(
+            target,
+            {"example": "1.0"},
+            installed_versions={"example": "2.0", "pyinstaller": "6.19.0"},
+            platform_tag="windows",
+            architecture="x64",
+            python_version="3.12.9",
+            uv_version="0.12.6",
+            python_hash_seed=None,
+        )
+
+        self.assertTrue(any("release toolchain does not match target" in error for error in errors))
+        self.assertTrue(any("installed dependency versions differ" in error for error in errors))
 
 
 if __name__ == "__main__":
