@@ -112,7 +112,7 @@ Authenticode 证书取舍，以及最终 `v1.0.0` tag 与 GitHub Release 授权�
 
 | 主题 | 当前状态 | Release 目标 |
 | --- | --- | --- |
-| 用户文档 | 四语 README 和发布相关 UI 文案已对齐 1.0 RC 能力、限制、数据、费用与未签名边界；`AGENTS.md` 快照仍待用户授权后更新 | 真人复核自然度，并在稳定 tag 前准备最终 `v1.0.0` changelog/Release 文案 |
+| 用户文档 | 四语 README、发布相关 UI 文案和 `AGENTS.md` 长期快照已对齐 1.0 RC 能力、限制、数据、费用、uv 开发构建环境与未签名边界 | 真人复核自然度，并在稳定 tag 前准备最终 `v1.0.0` changelog/Release 文案 |
 | 数据耐久性 | 关键事实与可再生产物已迁移到原子写入；关键配置和正式角色卡保留单份有效备份与确认恢复路径 | 使用隔离旧项目完成人工打开、保存、重启与恢复验收 |
 | 构建可复现性 | 官方 Release 已固定 Python patch、PyInstaller、Ruff、带 hash 依赖、action commit 和构建清单；RC.2 锁定构建通过 | 稳定 tag 继续复用同一门禁，并复核构建输入未漂移 |
 | 签名与分发信誉 | RC.2 已发布 SHA-256、构建/依赖清单和 GitHub artifact attestation，并明确披露 Windows 程序未使用 Authenticode | 维护者决定稳定版是否接受未签名分发；有证书时再启用 Authenticode 与时间戳路径 |
@@ -778,16 +778,16 @@ GitHub 官方说明 artifact attestation 用于建立二进制等构建产物的
 基础验证：
 
 ```powershell
-conda run -n CharaPicker python scripts\validate_multi_material_regression.py
-conda run -n CharaPicker python -m ruff check .
-conda run -n CharaPicker python -m compileall -q core gui utils scripts tests main.py app_updater.py
+uv run --locked python scripts\validate_multi_material_regression.py
+uv run --locked ruff check .
+uv run --locked python -m compileall -q core gui utils scripts tests main.py app_updater.py
 ```
 
 横向自动化实施后增加：
 
 ```powershell
-conda run -n CharaPicker python scripts\validate_release_readiness.py
-conda run -n CharaPicker python scripts\validate_release_artifact.py --archive release\<archive>.zip
+uv run --locked python scripts\validate_release_readiness.py
+uv run --locked python scripts\validate_release_artifact.py --archive release\<archive>.zip
 ```
 
 专项验证至少包含：

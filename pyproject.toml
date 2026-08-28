@@ -18,6 +18,18 @@ dependencies = [
     "PySocks>=1.7.1",
 ]
 
+[dependency-groups]
+dev = [
+    "pip==26.0.1",
+    "pyinstaller==6.20.0",
+    "ruff==0.15.12",
+    "setuptools==84.0.0",
+    "wheel==0.46.3",
+]
+
+[tool.uv]
+required-version = "==0.12.7"
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

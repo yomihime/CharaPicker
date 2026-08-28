@@ -70,19 +70,22 @@ CharaPicker は、個人実験として作っているデスクトップツー�
 
 ## インストール
 
+まず [uv](https://docs.astral.sh/uv/getting-started/installation/) をインストールし、ロック済み環境を同期します：
+
 ```powershell
-python -m pip install -r requirements.txt
+uv sync --locked
 ```
 
 ## 実行
 
 ```powershell
-python main.py
+uv run --locked python main.py
 ```
 
 ## ビルド
 
 ```powershell
+uv sync --locked
 build.bat
 ```
 

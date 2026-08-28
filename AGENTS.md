@@ -6,7 +6,7 @@ This file is the default long-term project context for Codex in this repository.
 
 CharaPicker（拾卡姬）是一个 Python 桌面应用，用于从番剧、漫画、广播剧/音频、视频、图片或文本素材中提取角色相关信息，并生成结构化角色档案与洞察。
 
-当前阶段是 `v0.5.0-beta` 开发中：仓库已有可运行的 PyQt6 + qfluentwidgets UI 骨架、项目配置、素材导入/处理、云端模型预设、洞察流面板、通用预览链路、多内容形态正式提取基础链路和角色卡页面。角色卡页已承担项目内角色卡管理、CharaPicker JSON 母本、封面裁剪、预览、编译、导入和导出；真实素材提取质量、知识库质量、角色卡冲突消解和质量评估仍在持续完善。
+当前处于 `v1.0.0-rc.2` 之后的 1.0 Release Candidate 收口阶段：仓库已有可运行的 PyQt6 + qfluentwidgets 应用、项目配置、素材导入/处理、云端模型预设、洞察流面板、通用预览链路、多内容形态正式提取链路、角色卡页面、自动更新与 Windows 发布门禁。角色卡页已承担项目内角色卡管理、CharaPicker JSON 母本、封面裁剪、预览、编译、导入和导出；真实素材提取质量、知识库质量、角色卡冲突消解和质量评估仍在持续完善。
 
 当前主线方向是把 Extract Once 工作流和角色卡编译链路做实：让素材处理结果可靠进入 `projects/{project_id}/knowledge_base/`，后续角色卡生成优先读取结构化 JSON，而不是反复分析原始素材。
 
@@ -78,17 +78,17 @@ CharaPicker（拾卡姬）是一个 Python 桌面应用，用于从番剧、漫�
 
 ## 5. Development commands
 
-主要开发环境偏向 Anaconda，默认环境名是 `CharaPicker`。日常命令可优先包一层 `conda run -n CharaPicker ...`。
+开发与构建环境统一由 uv 管理。`.python-version` 固定日常 Python patch，`uv.lock` 固定跨平台开发依赖；首次进入仓库或锁文件更新后运行 `uv sync --locked`，日常命令通过 `uv run --locked ...` 执行。
 
-- Install: `python -m pip install -r requirements.txt`
-- Dev: `python main.py`
+- Install / Sync: `uv sync --locked`
+- Dev: `uv run --locked python main.py`
 - Build: `build.bat`
-- Build examples: `build.bat --tag=v0.3.0-alpha`、`build.bat --version=0.3.0 --stage=alpha`、`build.bat --local`
-- Lint: `pyproject.toml` 配置了 Ruff（`line-length = 100`，`target-version = "py310"`），但 `requirements.txt` 未声明 Ruff；若环境中已安装，可运行 `python -m ruff check .`
+- Build examples: `build.bat --tag=vX.Y.Z-beta`、`build.bat --version=X.Y.Z --stage=beta`、`build.bat --local`
+- Lint: `uv run --locked ruff check .`
 - Typecheck: 仓库未发现独立 typecheck 配置或固定命令。
-- Test: 统一离线回归优先运行 `conda run -n CharaPicker python scripts\validate_multi_material_regression.py`，它会串起多内容形态验证脚本和 `tests/` 单测发现。可按改动范围单独运行 `scripts/validate_i18n_keys.py`、`scripts/validate_native_media_insight_handler.py` 等轻量脚本。
+- Test: 统一离线回归优先运行 `uv run --locked python scripts\validate_multi_material_regression.py`，它会串起多内容形态验证脚本和 `tests/` 单测发现。可按改动范围通过 `uv run --locked python scripts/<script>.py` 单独运行 `scripts/validate_i18n_keys.py`、`scripts/validate_native_media_insight_handler.py` 等轻量脚本。
 
-本仓库没有发现 `package.json`、lockfile 或 `tsconfig`；不要按 JS/TS 项目假设工作流。
+本仓库没有 `package.json` 或 `tsconfig`；不要按 JS/TS 项目假设工作流。Python 依赖与工具配置以 `pyproject.toml` 为维护入口，日常环境以 `uv.lock` 为锁定依据；官方 Windows Release 继续使用独立的带 hash 精确锁作为发布审计输入。
 
 ## 6. Working rules for Codex
 

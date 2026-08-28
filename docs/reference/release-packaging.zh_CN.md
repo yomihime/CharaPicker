@@ -10,6 +10,8 @@
 build.bat
 ```
 
+源码开发与构建环境由 uv 管理。首次构建前运行 `uv sync --locked`；`build.bat` 只通过 `uv run --no-sync` 使用已同步的项目 `.venv`，不会退回 Conda、系统 Python 或临时安装依赖。
+
 常用参数：
 
 ```powershell
@@ -137,7 +139,7 @@ CharaPicker-v1.0.0-windows-x64.zip
 
 ## 7. CI 关系
 
-GitHub Actions 只负责编排构建，不承载应用运行逻辑。当前 Windows workflow 会安装依赖和 PyInstaller，运行 `build.bat`，为每个 `release/*.zip` 生成同名 `.sha256`，上传两类产物，并在 tag 触发时发布 Release 附件。自动更新只接受 ZIP 与同名 SHA-256 文件同时存在的 Windows x64 Release。
+GitHub Actions 只负责编排构建，不承载应用运行逻辑。当前 Windows workflow 使用固定 commit 的 `astral-sh/setup-uv` 安装固定 uv 与 Python 3.12.10，以 `uv pip sync` 从 `requirements-release-windows-py312.txt` 建立带 hash 的精确发布环境，再运行 `build.bat`。`uv.lock` 服务于日常跨平台开发；Windows Release 哈希锁继续作为官方构建与依赖库存审计输入。workflow 为每个 `release/*.zip` 生成同名 `.sha256`，上传两类产物，并在 tag 触发时发布 Release 附件。自动更新只接受 ZIP 与同名 SHA-256 文件同时存在的 Windows x64 Release。
 
 自动更新流程还必须满足以下约束：
 

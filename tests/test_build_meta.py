@@ -147,6 +147,18 @@ class BuildMetadataTests(unittest.TestCase):
         self.assertIn('set "PYTHONHASHSEED=0"', batch)
         self.assertNotIn("Compress-Archive", batch)
 
+    def test_build_uses_uv_project_environment(self) -> None:
+        batch = (ROOT_DIR / "build.bat").read_text(encoding="utf-8")
+        workflow = (ROOT_DIR / ".github" / "workflows" / "build.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('set "PYTHON_CMD=uv run --no-sync python"', batch)
+        self.assertIn("uv sync --locked", batch)
+        self.assertIn("astral-sh/setup-uv@", workflow)
+        self.assertIn("uv pip sync requirements-release-windows-py312.txt", workflow)
+        self.assertNotIn("python -m pip install -r", workflow)
+
     def test_about_version_messages_use_runtime_placeholder(self) -> None:
         for locale in ("zh_CN", "zh_TW", "en_US", "ja_JP"):
             payload = json.loads(

@@ -13,9 +13,22 @@ set "ARCH_TAG=x64"
 set "LOCAL_BUILD=0"
 set "TAG_SOURCE="
 set "RAW_TAG="
-set "PYTHON_CMD=python"
+set "PYTHON_CMD=uv run --no-sync python"
 set "SOURCE_DATE_EPOCH="
 set "PYTHONHASHSEED=0"
+
+where uv >nul 2>&1
+if errorlevel 1 (
+  echo uv is required to build CharaPicker.
+  echo Install it from: https://docs.astral.sh/uv/getting-started/installation/
+  goto :error
+)
+
+if not exist "%ROOT_DIR%.venv\Scripts\python.exe" (
+  echo The project environment is missing.
+  echo Run: uv sync --locked
+  goto :error
+)
 
 for /f "usebackq tokens=1,* delims==" %%A in (`%PYTHON_CMD% scripts\build_meta.py %*`) do (
   if /i "%%A"=="ERROR" (
@@ -42,8 +55,8 @@ if not exist "%RELEASE_DIR%" mkdir "%RELEASE_DIR%"
 
 %PYTHON_CMD% -c "import PyInstaller" >nul 2>&1
 if errorlevel 1 (
-  echo PyInstaller is missing in current Python environment.
-  echo Install with: python -m pip install pyinstaller
+  echo PyInstaller is missing from the uv project environment.
+  echo Run: uv sync --locked
   goto :error
 )
 

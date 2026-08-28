@@ -33,6 +33,7 @@ README 不应把实验项目包装成成熟产品。涉及大模型输出、素�
 - 当前基础语种为简体中文、繁体中文、英语和日语。
 - 简体中文是默认维护语言；其他语言文档可以作为补充版本存在。
 - 修改多语言用户文档时，应注意不同语言版本是否需要同步。根 README 中的项目性质声明、运行命令、构建入口、主要限制和许可证信息属于需要同步检查的内容。
+- 开发环境、Python patch 或依赖管理方式变化时，应同步检查四语 README、根目录与相关子目录 `ARCHITECTURE.md`、`AGENTS.md`、发布规范和当前有效计划；uv 项目以 `pyproject.toml`、`.python-version` 与 `uv.lock` 为日常环境依据，Windows Release 精确锁仍按发布规范单独维护。
 
 ## 4. ARCHITECTURE.md 规范
 
