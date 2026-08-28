@@ -15,6 +15,7 @@
 
 - `build_meta.py`：解析命令行参数、Git tag、平台和架构，输出 `VERSION`、`STAGE`、`VERSION_TAG`、`PLATFORM_TAG`、`ARCH_TAG` 等构建变量；默认版本和阶段来自 `utils.app_metadata`。非本地构建必须与应用源码版本、阶段一致，正式版 `VERSION_TAG` 不包含 `release` 后缀。
 - `package_release.py`：按 `SOURCE_DATE_EPOCH` 规范化 ZIP 成员顺序与时间，生成同名 SHA-256 和无绝对路径、无环境变量值的 `build-info.json`；正式构建还会核对 Python、uv、PyInstaller、实际安装版本、Release 锁文件和预先生成的 Windows 可执行文件签名状态报告。
+- `run_pyinstaller_isolated.py`：以当前项目 Python 启动 PyInstaller，但只向子进程提供虚拟环境、基础 Python 与 Windows 系统目录组成的受控 `PATH`，避免宿主机工具目录中的 DLL 或 UPX 污染正式构建。
 - `inspect_release_signatures.py`：通过固定 PowerShell 脚本调用 `Get-AuthenticodeSignature`，按文件名记录主程序和更新器的 SHA-256、签名状态、签名主体与时间戳主体。当前仅实现无证书策略：两个文件都必须为 `NotSigned`，否则构建失败。
 - `record_release_attestation.py`：在 GitHub package attestation 成功后，把与官方仓库匹配的 attestation ID/URL 原子写入最终 `build-info.json`；拒绝提前声明、重复记录或跨仓库 URL。
 - `prepare_release_notes.py`：从 `CHANGELOG.md` 抽取 tag 对应版本段落，并附加官方分发入口、未签名披露、SHA-256 比较命令和 GitHub provenance 验证命令。
@@ -47,6 +48,7 @@
 - `utils/app_metadata.py` 提供构建元数据默认版本和运行时 User-Agent 使用的同一份版本/阶段来源。
 - `.github/workflows/build.yml` 间接通过 `build.bat` 使用该脚本。
 - `.github/workflows/build.yml` 通过固定版本 uv 建立 `.venv`，再由 `build.bat` 使用 `uv run --no-sync` 调用本目录脚本。
+- `build.bat` 只在两个 PyInstaller 子进程中使用隔离后的 `PATH`；构建元数据、签名检查、Git 与发布清单仍使用调用者原环境。
 - `.github/workflows/build.yml` 在 tag 上调用 `record_release_attestation.py` 与 `prepare_release_notes.py`，并用固定 SHA 的官方 action 生成 provenance。
 - 发布产物仍写入根目录 `release/`，不写入 `scripts/`。
 

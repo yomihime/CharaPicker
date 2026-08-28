@@ -78,11 +78,11 @@ echo Platform: %PLATFORM_TAG%
 echo Arch: %ARCH_TAG%
 if defined RAW_TAG echo Tag: %RAW_TAG% (%TAG_SOURCE%)
 if "%LOCAL_BUILD%"=="1" echo Build mode: local
-%PYTHON_CMD% -m PyInstaller --noconfirm --clean main.spec
+%PYTHON_CMD% scripts\run_pyinstaller_isolated.py main.spec
 if errorlevel 1 goto :error
 
 echo [2/6] Building standalone update helper with updater.spec...
-%PYTHON_CMD% -m PyInstaller --noconfirm --clean updater.spec
+%PYTHON_CMD% scripts\run_pyinstaller_isolated.py updater.spec
 if errorlevel 1 goto :error
 if not exist "%DIST_DIR%\%APP_NAME%Updater.exe" goto :error
 copy /y "%DIST_DIR%\%APP_NAME%Updater.exe" "%DIST_DIR%\%APP_NAME%\%APP_NAME%Updater.exe" >nul
