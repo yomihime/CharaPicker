@@ -161,6 +161,14 @@ class BuildMetadataTests(unittest.TestCase):
         self.assertIn("uv pip sync requirements-release-windows-py312.txt", workflow)
         self.assertNotIn("python -m pip install -r", workflow)
 
+    def test_release_lock_is_checked_before_pyinstaller(self) -> None:
+        batch = (ROOT_DIR / "build.bat").read_text(encoding="utf-8")
+
+        preflight = "scripts\\validate_release_dependencies.py --verify-installed"
+        first_pyinstaller = "scripts\\run_pyinstaller_isolated.py main.spec"
+        self.assertIn('if "%LOCAL_BUILD%"=="0"', batch)
+        self.assertLess(batch.index(preflight), batch.index(first_pyinstaller))
+
     def test_about_version_messages_use_runtime_placeholder(self) -> None:
         for locale in ("zh_CN", "zh_TW", "en_US", "ja_JP"):
             payload = json.loads(
