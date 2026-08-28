@@ -20,7 +20,7 @@ build.bat --version=X.Y.Z --stage=beta
 build.bat --local
 ```
 
-打包脚本通过 `scripts/build_meta.py` 解析版本、阶段、平台和架构，并调用 PyInstaller。未显式传入版本或 tag 时，默认版本和阶段来自 `utils/app_metadata.py`，与运行时 HTTP User-Agent 使用同一份应用元数据。除本地构建外，解析结果必须与应用源码版本、阶段一致，否则应在进入 PyInstaller 前失败。
+打包脚本通过 `scripts/build_meta.py` 解析版本、阶段、平台和架构，并调用 PyInstaller。未显式传入版本或 tag 时，默认版本和阶段来自 `utils/app_metadata.py`，与运行时 HTTP User-Agent 使用同一份应用元数据。除本地构建外，解析结果必须与应用源码版本、阶段一致，并在清理旧产物和进入 PyInstaller 前核对 Windows Release 锁、目标平台、Python、uv、PyInstaller 和固定环境参数；任一不匹配都应快速失败。`--local` 保持日常开发环境构建语义，不要求匹配 Windows Release 锁。
 
 ## 2. PyInstaller 约束
 
@@ -140,7 +140,7 @@ CharaPicker-v1.0.0-windows-x64.zip
 
 ## 7. CI 关系
 
-GitHub Actions 只负责编排构建，不承载应用运行逻辑。当前 Windows workflow 使用固定 commit 的 `astral-sh/setup-uv` 安装固定 uv 与 Python 3.12.10，以 `uv pip sync` 从 `requirements-release-windows-py312.txt` 建立带 hash 的精确发布环境，再运行 `build.bat`。`uv.lock` 服务于日常跨平台开发；Windows Release 哈希锁继续作为官方构建与依赖库存审计输入。workflow 为每个 `release/*.zip` 生成同名 `.sha256`，上传两类产物，并在 tag 触发时发布 Release 附件。自动更新只接受 ZIP 与同名 SHA-256 文件同时存在的 Windows x64 Release。
+GitHub Actions 只负责编排构建，不承载应用运行逻辑。当前 Windows workflow 使用固定 commit 的 `astral-sh/setup-uv` 安装固定 uv 与 Python 3.12.10，以 `uv pip sync` 从 `requirements-release-windows-py312.txt` 建立带 hash 的精确发布环境，再运行 `build.bat`。`build.bat` 在 PyInstaller 前复核该 job 的实际环境，打包结束时再由发布清单逻辑防御性复核一次。`uv.lock` 服务于日常跨平台开发；Windows Release 哈希锁继续作为官方构建与依赖库存审计输入。workflow 为每个 `release/*.zip` 生成同名 `.sha256`，上传两类产物，并在 tag 触发时发布 Release 附件。自动更新只接受 ZIP 与同名 SHA-256 文件同时存在的 Windows x64 Release。
 
 自动更新流程还必须满足以下约束：
 

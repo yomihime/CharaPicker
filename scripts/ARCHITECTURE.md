@@ -38,7 +38,7 @@
 - `validate_markdown_links.py`：扫描已跟踪 Markdown 文件中代码围栏外的相对链接和图片路径，拒绝缺失目标或逃逸仓库根目录的链接。
 - `validate_release_readiness.py`：只读校验 tag、源码/构建版本、CHANGELOG、发布目标、固定 uv/Python 版本、Action 固定引用、CI 权限链、更新资产命名和禁止跟踪的运行时/私钥路径；正式版额外检查四语 README 状态标记。
 - `validate_release_artifact.py`：构建后校验 ZIP 单根目录、必需文件与资源、禁止路径、规范化成员、SHA-256、`build-info.json`、Python/uv 工具链、锁文件、两个可执行文件的签名状态与 attestation ID/URL 结构，并可在含空格及非 ASCII 的隔离路径运行打包态健康检查。
-- `validate_release_dependencies.py`：校验开发依赖声明、Windows Release 锁、机器可读依赖/许可证库存、实际安装版本和第三方声明覆盖；也可从锁定环境重新生成库存供审查。
+- `validate_release_dependencies.py`：校验开发依赖声明、Windows Release 锁、机器可读依赖/许可证库存、实际安装版本、目标平台与工具链和第三方声明覆盖；也可从锁定环境重新生成库存供审查。正式构建在 PyInstaller 前调用该入口，包尾仍保留发布清单复核。
 - `validate_multi_material_regression.py`：统一运行除自身外的全部 `validate_*.py`，随后执行 `tests/` 的 unittest discovery；不调用真实模型，也不把用户项目作为固定输入。
 - `preflight_real_multi_material_acceptance.py`：对用户明确指定的单个项目执行只读真实验收预检，只输出媒体类型、内容形态、handler、unit 和 unsupported reason 计数；可通过 `--preset-name` 加载已配置预设并执行具体模型能力过滤，但不输出密钥/endpoint、不写知识库、不调用模型、不打印素材路径。
 
@@ -49,6 +49,7 @@
 - `.github/workflows/build.yml` 间接通过 `build.bat` 使用该脚本。
 - `.github/workflows/build.yml` 通过固定版本 uv 建立 `.venv`，再由 `build.bat` 使用 `uv run --no-sync` 调用本目录脚本。
 - `build.bat` 只在两个 PyInstaller 子进程中使用隔离后的 `PATH`；构建元数据、签名检查、Git 与发布清单仍使用调用者原环境。
+- 非本地构建在清理旧产物和启动 PyInstaller 前必须通过 Release 锁与目标工具链预检；`--local` 保持开发环境构建语义，不要求匹配 Windows Release 锁。
 - `.github/workflows/build.yml` 在 tag 上调用 `record_release_attestation.py` 与 `prepare_release_notes.py`，并用固定 SHA 的官方 action 生成 provenance。
 - 发布产物仍写入根目录 `release/`，不写入 `scripts/`。
 
