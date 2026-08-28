@@ -5,7 +5,10 @@ import argparse
 import hashlib
 import importlib.metadata
 import json
+import os
+import platform
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -87,6 +90,85 @@ def _installed_distributions() -> dict[str, importlib.metadata.Distribution]:
         for distribution in importlib.metadata.distributions()
         if distribution.metadata.get("Name")
     }
+
+
+def _uv_version() -> str:
+    try:
+        completed = subprocess.run(
+            ["uv", "--version"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return ""
+    match = re.fullmatch(r"uv\s+(?P<version>[^\s]+)(?:\s+.*)?", completed.stdout.strip())
+    return match.group("version") if match else ""
+
+
+def _architecture_tag(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized in {"amd64", "x86_64"}:
+        return "x64"
+    if normalized in {"arm64", "aarch64"}:
+        return "arm64"
+    return normalized or "unknown"
+
+
+def compare_installed_release_environment(
+    target: dict[str, Any],
+    lock_versions: dict[str, str],
+    *,
+    installed_versions: dict[str, str],
+    platform_tag: str,
+    architecture: str,
+    python_version: str,
+    uv_version: str,
+    python_hash_seed: str | None,
+) -> list[str]:
+    actual_toolchain = {
+        "platform": platform_tag,
+        "architecture": architecture,
+        "python": python_version,
+        "uv": uv_version,
+        "pyinstaller": installed_versions.get("pyinstaller", ""),
+        "python_hash_seed": python_hash_seed or "",
+    }
+    toolchain_mismatches = [
+        f"{name}: expected={target.get(name, 'missing')} actual={value or 'missing'}"
+        for name, value in actual_toolchain.items()
+        if str(target.get(name, "")) != str(value)
+    ]
+    errors: list[str] = []
+    if toolchain_mismatches:
+        errors.append("release toolchain does not match target:\n" + "\n".join(toolchain_mismatches))
+
+    lock_mismatches = sorted(
+        f"{name}: locked={version} installed={installed_versions.get(name, 'missing')}"
+        for name, version in lock_versions.items()
+        if installed_versions.get(name) != version
+    )
+    if lock_mismatches:
+        errors.append("installed dependency versions differ from release lock:\n" + "\n".join(lock_mismatches))
+    return errors
+
+
+def validate_installed_release_environment(
+    target: dict[str, Any], lock_versions: dict[str, str]
+) -> list[str]:
+    installed_versions = {
+        name: distribution.version for name, distribution in _installed_distributions().items()
+    }
+    return compare_installed_release_environment(
+        target,
+        lock_versions,
+        installed_versions=installed_versions,
+        platform_tag=platform.system().lower(),
+        architecture=_architecture_tag(platform.machine()),
+        python_version=platform.python_version(),
+        uv_version=_uv_version(),
+        python_hash_seed=os.environ.get("PYTHONHASHSEED"),
+    )
 
 
 def _license_metadata(distribution: importlib.metadata.Distribution) -> tuple[str, list[str]]:
@@ -249,16 +331,7 @@ def validate_release_dependencies(
         )
 
     if verify_installed:
-        installed = {
-            name: distribution.version for name, distribution in _installed_distributions().items()
-        }
-        mismatches = sorted(
-            f"{name}: locked={version} installed={installed.get(name, 'missing')}"
-            for name, version in lock_versions.items()
-            if installed.get(name) != version
-        )
-        if mismatches:
-            errors.append("installed dependency versions differ from release lock:\n" + "\n".join(mismatches))
+        errors.extend(validate_installed_release_environment(target, lock_versions))
     return errors
 
 

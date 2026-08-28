@@ -51,6 +51,12 @@ set "BUILD_INFO_PATH=%RELEASE_DIR%\build-info.json"
 set "DEPENDENCY_INVENTORY_PATH=%RELEASE_DIR%\dependency-inventory.json"
 set "SIGNATURE_REPORT_PATH=%RELEASE_DIR%\signature-report.json"
 
+if "%LOCAL_BUILD%"=="0" (
+  echo Validating locked release environment before PyInstaller...
+  %PYTHON_CMD% scripts\validate_release_dependencies.py --verify-installed
+  if errorlevel 1 goto :error
+)
+
 if not exist "%RELEASE_DIR%" mkdir "%RELEASE_DIR%"
 
 %PYTHON_CMD% -c "import PyInstaller" >nul 2>&1
