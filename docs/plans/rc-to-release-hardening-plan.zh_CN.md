@@ -5,7 +5,7 @@
 - 计划阶段：`v1.0.0-rc` 到 `v1.0.0` Release 的执行中专项。
 - 当前检查点：`v1.0.0-rc.2` 已于 2026-08-16 发布；B00-B05 已合并并删除分支，B06 正在执行。
 - 可用性：继续作为 RC 到稳定版的执行与人工验收入口；RC.2 发布不等同于稳定版放行。
-- 最近整理日期：2026-08-16。
+- 最近整理日期：2026-08-28。
 - 当前代码事实优先级：当前源码与构建配置 > `ARCHITECTURE.md` 与稳定参考文档 > 本计划与 TODO。
 
 ### 当前执行检查点
@@ -19,6 +19,7 @@
 | B04 | 已完成（PR #22） | 更新包、外部运行时、Whisper 模型与原生音频请求大小和完整性保护落地。 |
 | B05 | 已完成（PR #23） | 未签名披露、签名状态检查、SHA-256 和 GitHub artifact attestation 链路落地。 |
 | RC.2 | 已发布（PR #24） | 锁定 Windows 构建、质量门禁、provenance 和 GitHub Release 发布均通过。 |
+| RC.2 后续构建加固 | 已完成实现（PR #27、#28） | PyInstaller 子进程隔离宿主机 `PATH`，正式构建在清理产物和打包前复核 Release 锁与目标工具链；最终验收要求在包含本记录的 `main` 上手动运行一次 Windows Build，结果以 GitHub Actions 为准。 |
 | B06 | 执行中 | 四语用户文档、默认 Prompt v2、发布相关 i18n 和第三方许可边界正在收口。 |
 
 稳定版前仍需维护者完成或明确接受：真人 Windows/UI 与更新保留试用、经授权真实样例的 Prompt 复核、
@@ -309,7 +310,8 @@ pip 官方将精确版本 pin、hash-checking 和 wheelhouse 作为逐级增强�
 Ruff
   -> 统一离线回归
   -> 锁定环境安装
-  -> PyInstaller 构建
+  -> Release 锁与目标工具链预检
+  -> 隔离宿主 PATH 的 PyInstaller 构建
   -> 可选 Authenticode 签名
   -> 签名/结构验证
   -> 规范化压缩
