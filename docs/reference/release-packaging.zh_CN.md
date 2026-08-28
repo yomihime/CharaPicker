@@ -30,6 +30,7 @@ build.bat --local
 - 打包后的主程序运行根目录必须以 `CharaPicker.exe` 所在目录为准，不能依赖启动进程的当前工作目录。快捷方式、终端、文件管理器和自更新 relaunch 都可能提供不同 cwd；`config.yaml`、`projects/`、`log/`、`bin/`、`models/` 和运行资源路径不得因此漂移。
 - `main.spec` 负责收集 `i18n/`、`res/` 和 qfluentwidgets 资源。
 - `updater.spec` 只构建独立更新辅助程序，不收集 PyQt6 或 qfluentwidgets。
+- 两个 spec 都通过 `scripts/run_pyinstaller_isolated.py` 启动。PyInstaller 子进程的 `PATH` 只保留项目虚拟环境、基础 Python 和必要的 Windows 系统目录，不继承宿主机其它工具目录，避免外部 DLL 或 UPX 改变收集结果；该隔离不改变后续 uv、Git、签名检查和发布清单所用环境。
 - 发布前应清理旧的 `build/`、`dist/CharaPicker/`、`release/CharaPicker/` 和目标 zip。
 
 ## 3. 发布包结构
