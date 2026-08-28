@@ -280,6 +280,10 @@ def _validate_build_info(
     toolchain = payload.get("toolchain") if isinstance(payload.get("toolchain"), dict) else {}
     if application.get("stage") != "local" and toolchain.get("python") != target.get("python"):
         errors.append("build-info Python toolchain does not match the release target")
+    if not isinstance(toolchain.get("uv"), str) or not toolchain.get("uv"):
+        errors.append("build-info must record the uv toolchain version")
+    elif application.get("stage") != "local" and toolchain.get("uv") != target.get("uv"):
+        errors.append("build-info uv toolchain does not match the release target")
 
     artifacts = payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {}
     archive_info = artifacts.get("archive") if isinstance(artifacts.get("archive"), dict) else {}

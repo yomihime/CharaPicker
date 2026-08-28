@@ -70,19 +70,22 @@ It is not mature commercial software, and it is not something I would treat as a
 
 ## Install
 
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then sync the locked environment:
+
 ```powershell
-python -m pip install -r requirements.txt
+uv sync --locked
 ```
 
 ## Run
 
 ```powershell
-python main.py
+uv run --locked python main.py
 ```
 
 ## Build
 
 ```powershell
+uv sync --locked
 build.bat
 ```
 

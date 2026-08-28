@@ -190,6 +190,7 @@ def validate_repository(
     for expected in (
         f"runs-on: {target['runner']}",
         f'python-version: "{target["python"]}"',
+        f'version: "{target["uv"]}"',
         str(target["lock_file"]),
     ):
         if expected not in workflow:

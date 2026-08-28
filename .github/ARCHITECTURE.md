@@ -14,11 +14,12 @@
 
 ## 关键文件
 
-- `workflows/build.yml`：RC/Release 门禁与 Windows 构建工作流。PR 和 `main` push 执行质量门禁；手动触发与 `v*` tag 在门禁后执行锁定 Windows 构建。tag 构建再通过独立最小权限 job attest ZIP/checksum/依赖库存与最终 `build-info.json`，最后发布已 attested 的 Release artifact。
+- `workflows/build.yml`：RC/Release 门禁与 Windows 构建工作流。PR 和 `main` push 执行质量门禁；手动触发与 `v*` tag 在门禁后通过固定版本 uv 同步带 hash 的 Windows Release 环境并构建。tag 构建再通过独立最小权限 job attest ZIP/checksum/依赖库存与最终 `build-info.json`，最后发布已 attested 的 Release artifact。
 
 ## 与其他目录的关系
 
 - 调用根目录 `build.bat` 执行打包；tag 构建会显式传入当前 tag，确保版本阶段与发布 tag 对齐。
+- 质量与构建 job 使用固定 commit 的 `astral-sh/setup-uv`、固定 uv 版本和 Python 3.12.10；依赖继续从 Windows Release 哈希锁精确同步。
 - `build.bat` 调用 `scripts/build_meta.py` 生成版本、阶段、平台和架构信息。
 - `build.bat` 调用 `scripts/inspect_release_signatures.py` 检查主程序与更新器的实际 Authenticode 状态，再由 `scripts/package_release.py` 写入构建清单。
 - 打包过程读取 `main.spec`、`i18n/`、`res/` 和应用源码。

@@ -59,6 +59,7 @@ class ReleaseArtifactTests(unittest.TestCase):
                     "architecture": "x64",
                     "runner": "windows-2022",
                     "python": "3.12.10",
+                    "uv": "0.12.7",
                     "lock_file": str(lock_path),
                     "dependency_inventory": str(inventory_path),
                     "pyinstaller": "6.20.0",

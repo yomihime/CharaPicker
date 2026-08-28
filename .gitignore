@@ -19,6 +19,8 @@ projects/*
 !projects/ARCHITECTURE.md
 .ruff_cache/
 .pytest_cache/
+.venv/
+.uv-cache*/
 .tmp_*/
 
 # Local notes and logs

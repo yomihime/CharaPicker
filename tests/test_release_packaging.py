@@ -52,6 +52,7 @@ class ReleasePackagingTests(unittest.TestCase):
                     "architecture": "x64",
                     "runner": "windows-2022",
                     "python": "3.12.10",
+                    "uv": "0.12.7",
                     "lock_file": str(lock_path),
                     "dependency_inventory": str(inventory_path),
                     "pyinstaller": "6.20.0",
@@ -124,6 +125,7 @@ class ReleasePackagingTests(unittest.TestCase):
             serialized = build_info.read_text(encoding="utf-8")
             self.assertNotIn(str(Path(tmp).resolve()), serialized)
             self.assertEqual(payload["source"]["source_date_epoch"], 1700000000)
+            self.assertRegex(payload["toolchain"]["uv"], r"^\d+\.\d+\.\d+$")
             self.assertEqual(payload["package"]["root"], "CharaPicker")
             self.assertEqual(payload["artifacts"]["archive"]["sha256"], sha256_file(archive))
             checksum = archive.with_name(f"{archive.name}.sha256")

@@ -16,12 +16,14 @@
 ## 根目录关键文件
 
 - `main.py`：应用入口。创建 `QApplication`，应用主题偏好，并启动启动控制器。
-- `requirements.txt`：运行依赖声明。
-- `pyproject.toml`：项目和工具配置。
+- `pyproject.toml`：运行依赖、开发/构建依赖组以及 Ruff、uv 等项目工具配置的唯一维护入口。
+- `uv.lock` / `.python-version`：跨平台依赖锁与日常开发 Python 版本固定文件；本地开发通过 `uv sync --locked` 建立 `.venv`。
+- `requirements.txt`：从源码运行时的传统 pip 兼容声明；直接运行依赖集合必须与 `pyproject.toml` 保持一致。
+- `requirements-release-windows-py312.txt`：官方 Windows x64 构建的带 hash 精确锁，作为 uv 同步与发布审计输入。
 - `config.yaml`：本地全局配置文件，由 `utils/global_store.py` 读写，包含用户偏好和模型预设等私有配置，默认不提交。
 - `main.spec`：PyInstaller 文件夹式打包配置，收集 `i18n/`、`res/` 和 qfluentwidgets 资源。
 - `app_updater.py` / `updater.spec`：独立更新辅助程序及其 one-file 打包配置；主程序退出后执行目录替换、用户运行时数据保留、启动确认和失败回滚。
-- `build.bat`：Windows 打包入口。调用 `scripts/build_meta.py`，分别构建主程序与更新辅助程序，整理 `release/CharaPicker/` 并压缩 zip。
+- `build.bat`：Windows 打包入口。只使用已同步的 uv 项目环境，调用 `scripts/build_meta.py`，分别构建主程序与更新辅助程序，整理 `release/CharaPicker/` 并压缩 zip。
 - `README.md`：GitHub 首页说明，要求使用简体中文。
 - `CHANGELOG.md`：版本更新日志。tag 发布前维护对应版本小节，GitHub Release 正文从这里抽取。
 - `AGENTS.md`：Codex 默认自动加载的长期项目指导文件，不依赖 `.codex/`。

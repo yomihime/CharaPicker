@@ -70,19 +70,22 @@ CharaPicker（拾卡姬）是一個個人實驗性質的桌面工具。它嘗試
 
 ## 安裝
 
+先安裝 [uv](https://docs.astral.sh/uv/getting-started/installation/)，再同步鎖定環境：
+
 ```powershell
-python -m pip install -r requirements.txt
+uv sync --locked
 ```
 
 ## 執行
 
 ```powershell
-python main.py
+uv run --locked python main.py
 ```
 
 ## 建置
 
 ```powershell
+uv sync --locked
 build.bat
 ```
 

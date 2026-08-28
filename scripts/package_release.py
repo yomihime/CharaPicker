@@ -50,6 +50,7 @@ def load_target_config(path: Path) -> dict[str, Any]:
         "architecture",
         "runner",
         "python",
+        "uv",
         "lock_file",
         "dependency_inventory",
         "pyinstaller",
@@ -211,6 +212,7 @@ def validate_release_environment(
         "platform": platform_tag,
         "architecture": architecture,
         "python": platform.python_version(),
+        "uv": uv_version(),
         "pyinstaller": importlib.metadata.version("pyinstaller"),
         "python_hash_seed": os.environ.get("PYTHONHASHSEED"),
     }
@@ -305,6 +307,12 @@ def _command_output(*args: str) -> str:
     return completed.stdout.strip()
 
 
+def uv_version() -> str:
+    output = _command_output("uv", "--version")
+    match = re.fullmatch(r"uv\s+(?P<version>[^\s]+)(?:\s+.*)?", output)
+    return match.group("version") if match else ""
+
+
 def _package_file(files: list[dict[str, str | int]], relative: str) -> dict[str, str | int]:
     expected = f"CharaPicker/{relative}"
     for item in files:
@@ -392,6 +400,7 @@ def build_release_package(
             "architecture": architecture,
             "runner": target["runner"],
             "python": target["python"],
+            "uv": target["uv"],
         },
         "runner": {
             "image_os": os.environ.get("ImageOS"),
@@ -400,6 +409,7 @@ def build_release_package(
         },
         "toolchain": {
             "python": platform.python_version(),
+            "uv": uv_version(),
             "pip": importlib.metadata.version("pip"),
             "pyinstaller": importlib.metadata.version("pyinstaller"),
             "python_hash_seed": os.environ.get("PYTHONHASHSEED"),

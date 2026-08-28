@@ -4,6 +4,7 @@
   "architecture": "x64",
   "runner": "windows-2022",
   "python": "3.12.10",
+  "uv": "0.12.7",
   "lock_file": "requirements-release-windows-py312.txt",
   "dependency_inventory": "release-dependency-inventory.json",
   "pyinstaller": "6.20.0",
