@@ -4,7 +4,7 @@
 
 ## 当前状态摘要
 
-路线 01 的提取质量基线、路线 02 的正式提取架构重构、路线 03 的多内容形态实现与真实验收，以及更多输入格式专项计划已经按顺序完成。RC 到 Release 收口已完成 B00-B06，自动验证、数据耐久、拒绝分类、下载/请求保护和分发信誉基线均已进入主线；维护者已接受跳过 RC.3 与未签名分发风险，当前按 [RC 到 Release 收口计划](rc-to-release-hardening-plan.zh_CN.md) 执行 B07，准备 `v1.0.0` 稳定版。当前没有独立 Extract Once 覆盖缺口；后续如真实素材暴露新的阻断问题，应先核对 [多内容形态完成记录](../archive/03-multi-material-coverage-plan.completed.zh_CN.md) 和 [更多输入格式完成记录](../archive/input-format-support-plan.completed.zh_CN.md)，再建立专项任务。
+路线 01 的提取质量基线、路线 02 的正式提取架构重构、路线 03 的多内容形态实现与真实验收，以及更多输入格式专项计划已经按顺序完成。RC 到 Release 收口已完成 B00-B07，自动验证、数据耐久、拒绝分类、下载/请求保护和分发信誉基线均已进入主线；维护者已接受跳过 RC.3 与未签名分发风险，并授权按 [RC 到 Release 收口计划](rc-to-release-hardening-plan.zh_CN.md) 发布 `v1.0.0` 稳定版。当前没有独立 Extract Once 覆盖缺口；后续如真实素材暴露新的阻断问题，应先核对 [多内容形态完成记录](../archive/03-multi-material-coverage-plan.completed.zh_CN.md) 和 [更多输入格式完成记录](../archive/input-format-support-plan.completed.zh_CN.md)，再建立专项任务。
 
 未完成内容按用途分为三类：持续跟踪、功能候选、加固与清理。这里是候选池和跟踪池，不表示所有条目都会进入后续版本；进入具体版本前仍按实际需要取舍，并以当前代码复核为准。规模只表示粗略改动幅度。
 
