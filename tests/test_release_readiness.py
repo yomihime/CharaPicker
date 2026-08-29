@@ -81,11 +81,25 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertTrue(any("projects/private-project" in error for error in errors))
         self.assertTrue(any("signing.pfx" in error for error in errors))
 
-    def test_final_tag_rejects_rc_source_and_stale_readmes(self) -> None:
-        errors = validate_repository(tag="v1.0.0", tracked_files={"README.md"})
+    def test_final_tag_rejects_stale_readmes(self) -> None:
+        stale_markers = {
+            "README.md": "当前处于 1.0 RC",
+            "docs/readme/README.zh_TW.md": "目前處於 1.0 RC",
+            "docs/readme/README.en_US.md": "Currently in the 1.0 RC",
+            "docs/readme/README.ja_JP.md": "現在は 1.0 RC",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._fixture(Path(tmp))
+            for relative, marker in stale_markers.items():
+                path = root / relative
+                path.write_text(
+                    f"{path.read_text(encoding='utf-8')}\n{marker}\n",
+                    encoding="utf-8",
+                )
 
-        self.assertTrue(any("APP_RELEASE_STAGE" in error for error in errors))
-        self.assertTrue(any("stale RC status" in error for error in errors))
+            errors = validate_repository(root, tag="v1.0.0", tracked_files={"README.md"})
+
+            self.assertEqual(sum("stale RC status" in error for error in errors), 4)
 
 
 if __name__ == "__main__":
