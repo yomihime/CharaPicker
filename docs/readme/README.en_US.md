@@ -16,7 +16,7 @@ It is not mature commercial software, and it is not something I would treat as a
 
 ## Current Status
 
-- Currently in the 1.0 RC (release candidate) stage and validating the first stable baseline. This is not the final stable release; extraction quality and a small number of data contracts may still change.
+- Version 1.0 is the first stable baseline: the current workflows, data boundaries, and upgrade path now form a sustainable version. Extraction quality on real materials and some advanced quality judgments still require human review.
 - Official binaries are currently Windows x64 only. Running from source supports Python `>=3.10`; release packages use a locked Windows build environment.
 - For the latest build and version notes, see [GitHub Releases](https://github.com/yomihime/CharaPicker/releases) and the [Changelog](../../CHANGELOG.md).
 
