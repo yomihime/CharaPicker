@@ -6,8 +6,8 @@ pushd "%ROOT_DIR%" >nul
 
 set "APP_NAME=CharaPicker"
 set "VERSION=1.0.0"
-set "STAGE=rc.2"
-set "VERSION_TAG=1.0.0-rc.2"
+set "STAGE=release"
+set "VERSION_TAG=1.0.0"
 set "PLATFORM_TAG=windows"
 set "ARCH_TAG=x64"
 set "LOCAL_BUILD=0"
