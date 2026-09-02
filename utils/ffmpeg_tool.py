@@ -13,7 +13,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from core.models import SourceProcessingConfig, SourceProcessingPreset, SourceSegmentMode
-from utils.env_manager import BIN_ROOT
+from utils.runtime_layout import (
+    BIN_ROOT,
+    FFMPEG_DIRECTORY_NAME,
+    iter_runtime_binary_candidates,
+)
 from utils.ffmpeg_detection import (
     detect_cpu_name as _detect_cpu_name,
     detect_video_device_names as _detect_video_device_names,
@@ -80,15 +84,15 @@ class _DeviceCapability:
 
 
 def find_ffmpeg_binary(bin_root: Path = BIN_ROOT) -> Path | None:
-    for file_name in FFMPEG_CANDIDATES:
-        candidate = bin_root / file_name
-        if candidate.is_file():
-            return candidate
-    for file_name in FFMPEG_CANDIDATES:
-        for candidate in bin_root.rglob(file_name):
-            if candidate.is_file():
-                return candidate
-    return None
+    return next(
+        iter_runtime_binary_candidates(
+            bin_root,
+            FFMPEG_DIRECTORY_NAME,
+            FFMPEG_CANDIDATES,
+            legacy_directory_prefixes=("ffmpeg",),
+        ),
+        None,
+    )
 
 
 def is_ffmpeg_binary_usable(binary_path: Path) -> bool:
@@ -108,14 +112,14 @@ def is_ffmpeg_binary_usable(binary_path: Path) -> bool:
 
 
 def find_usable_ffmpeg_binary(bin_root: Path = BIN_ROOT) -> Path | None:
-    for file_name in FFMPEG_CANDIDATES:
-        candidate = bin_root / file_name
-        if candidate.is_file() and is_ffmpeg_binary_usable(candidate):
+    for candidate in iter_runtime_binary_candidates(
+        bin_root,
+        FFMPEG_DIRECTORY_NAME,
+        FFMPEG_CANDIDATES,
+        legacy_directory_prefixes=("ffmpeg",),
+    ):
+        if is_ffmpeg_binary_usable(candidate):
             return candidate
-    for file_name in FFMPEG_CANDIDATES:
-        for candidate in bin_root.rglob(file_name):
-            if candidate.is_file() and is_ffmpeg_binary_usable(candidate):
-                return candidate
     return None
 
 

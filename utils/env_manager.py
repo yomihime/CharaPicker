@@ -7,15 +7,23 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from utils.global_store import get_global_value, set_global_value
-from utils.paths import APP_ROOT
+from utils.runtime_layout import (
+    BIN_ROOT as RUNTIME_BIN_ROOT,
+    LLAMACPP_DIRECTORY_NAME,
+    MODELS_ROOT as RUNTIME_MODELS_ROOT,
+    WHISPERCPP_DIRECTORY_NAME,
+    WHISPERCPP_ROOT as RUNTIME_WHISPERCPP_ROOT,
+    WHISPER_MODEL_ROOT as RUNTIME_WHISPER_MODEL_ROOT,
+    iter_runtime_binary_candidates,
+)
 from utils.subprocess_utils import no_window_creation_flags
 
 LOGGER = logging.getLogger(__name__)
 CONDA_ENV_NAME = "CharaPicker"
-BIN_ROOT = APP_ROOT / "bin"
-MODELS_ROOT = APP_ROOT / "models"
-WHISPERCPP_ROOT = BIN_ROOT / "whisper.cpp"
-WHISPER_MODEL_ROOT = MODELS_ROOT / "whisper"
+BIN_ROOT = RUNTIME_BIN_ROOT
+MODELS_ROOT = RUNTIME_MODELS_ROOT
+WHISPERCPP_ROOT = RUNTIME_WHISPERCPP_ROOT
+WHISPER_MODEL_ROOT = RUNTIME_WHISPER_MODEL_ROOT
 WHISPER_RUNTIME_PATH_KEY = "tools/whispercpp/runtimePath"
 WHISPER_MODEL_NAME_KEY = "tools/whispercpp/modelName"
 LLAMACPP_CANDIDATES = (
@@ -78,14 +86,14 @@ def conda_run_prefix() -> list[str]:
 
 
 def find_llamacpp_binary(bin_root: Path = BIN_ROOT) -> Path | None:
-    for file_name in LLAMACPP_CANDIDATES:
-        candidate = bin_root / file_name
-        if _path_is_file(candidate):
+    for candidate in iter_runtime_binary_candidates(
+        bin_root,
+        LLAMACPP_DIRECTORY_NAME,
+        LLAMACPP_CANDIDATES,
+        legacy_directory_prefixes=("llama", "llamacpp"),
+    ):
+        if not _is_ambiguous_root_binary(candidate, bin_root):
             return candidate
-    for file_name in LLAMACPP_CANDIDATES:
-        for candidate in _safe_rglob(bin_root, file_name):
-            if _path_is_file(candidate):
-                return candidate
     return None
 
 
@@ -106,14 +114,16 @@ def is_llamacpp_binary_usable(binary_path: Path) -> bool:
 
 
 def find_usable_llamacpp_binary(bin_root: Path = BIN_ROOT) -> Path | None:
-    for file_name in LLAMACPP_CANDIDATES:
-        candidate = bin_root / file_name
-        if _path_is_file(candidate) and is_llamacpp_binary_usable(candidate):
+    for candidate in iter_runtime_binary_candidates(
+        bin_root,
+        LLAMACPP_DIRECTORY_NAME,
+        LLAMACPP_CANDIDATES,
+        legacy_directory_prefixes=("llama", "llamacpp"),
+    ):
+        if not _is_ambiguous_root_binary(candidate, bin_root) and is_llamacpp_binary_usable(
+            candidate
+        ):
             return candidate
-    for file_name in LLAMACPP_CANDIDATES:
-        for candidate in _safe_rglob(bin_root, file_name):
-            if _path_is_file(candidate) and is_llamacpp_binary_usable(candidate):
-                return candidate
     return None
 
 
@@ -156,20 +166,14 @@ def find_whisper_runtime_binary(bin_root: Path = BIN_ROOT) -> Path | None:
     if bin_root == BIN_ROOT and custom_path is not None and _path_is_file(custom_path):
         return custom_path
 
-    search_roots = [WHISPERCPP_ROOT if bin_root == BIN_ROOT else bin_root / "whisper.cpp", bin_root]
-    for search_root in search_roots:
-        for file_name in WHISPERCPP_CANDIDATES:
-            candidate = search_root / file_name
-            if _path_is_file(candidate):
-                return candidate
-
-    for search_root in search_roots:
-        if not _path_exists(search_root):
-            continue
-        for file_name in WHISPERCPP_CANDIDATES:
-            for candidate in _safe_rglob(search_root, file_name):
-                if _path_is_file(candidate):
-                    return candidate
+    for candidate in iter_runtime_binary_candidates(
+        bin_root,
+        WHISPERCPP_DIRECTORY_NAME,
+        WHISPERCPP_CANDIDATES,
+        legacy_directory_prefixes=("whisper",),
+    ):
+        if not _is_ambiguous_root_binary(candidate, bin_root):
+            return candidate
     return None
 
 
@@ -200,20 +204,16 @@ def find_usable_whisper_runtime_binary(bin_root: Path = BIN_ROOT) -> Path | None
     ):
         return custom_path
 
-    search_roots = [WHISPERCPP_ROOT if bin_root == BIN_ROOT else bin_root / "whisper.cpp", bin_root]
-    for search_root in search_roots:
-        for file_name in WHISPERCPP_CANDIDATES:
-            candidate = search_root / file_name
-            if _path_is_file(candidate) and is_whisper_runtime_usable(candidate):
-                return candidate
-
-    for search_root in search_roots:
-        if not _path_exists(search_root):
-            continue
-        for file_name in WHISPERCPP_CANDIDATES:
-            for candidate in _safe_rglob(search_root, file_name):
-                if _path_is_file(candidate) and is_whisper_runtime_usable(candidate):
-                    return candidate
+    for candidate in iter_runtime_binary_candidates(
+        bin_root,
+        WHISPERCPP_DIRECTORY_NAME,
+        WHISPERCPP_CANDIDATES,
+        legacy_directory_prefixes=("whisper",),
+    ):
+        if not _is_ambiguous_root_binary(candidate, bin_root) and is_whisper_runtime_usable(
+            candidate
+        ):
+            return candidate
     return None
 
 
@@ -254,3 +254,7 @@ def whisper_status(bin_root: Path = BIN_ROOT, model_root: Path = WHISPER_MODEL_R
         runtime_ready=runtime_path is not None,
         model_ready=model_path is not None,
     )
+
+
+def _is_ambiguous_root_binary(candidate: Path, bin_root: Path) -> bool:
+    return candidate.parent == bin_root and candidate.name.casefold() in {"main", "main.exe"}

@@ -21,6 +21,7 @@
 - `runtime_health.py`：提供无网络、无用户数据写入的启动健康检查；验证 Qt、核心模块、四语资源、默认 prompt、图标和版本元数据，供源码与打包产物共同调用。
 - `progress_guard.py`：为 worker 信号提供单调进度守卫，把 100% 保留到业务成功已确认之后；失败或取消进入终态后不再发出完成进度。
 - `subprocess_utils.py`：集中提供跨平台子进程启动标志；Windows 下运行 PowerShell、FFmpeg、Whisper、llama.cpp、7-Zip 等命令行工具时使用无窗口模式，避免无控制台打包程序反复弹出终端窗口。
+- `runtime_layout.py`：集中定义 `bin/{tool}/{version}/{package_id}/` 运行时目录契约和受限候选扫描；受管目录优先，根目录或工具名前缀目录只作为旧安装兼容，禁止跨工具递归误认同名可执行文件。
 - `media_types.py`：集中保存视频、图片、音频、文本后缀，以及直接素材和容器输入格式的独立支持档位；容器 profile 不新增顶层媒体类型，也不进入直接素材后缀集合。当前 `.zip`、`.cbz`、`.epub`、`.pdf`、`.7z`、`.rar`、`.cbr` 均已启用。
 - `material_preprocessing.py`：定义容器输入预处理请求、结果、warning、派生材料记录、容器 entry 摘要和 manifest v1 协议，统一负责安全路径校验、取消检查、临时目录、原子落盘、按 raw 相对路径隔离的稳定派生路径、manifest 索引、派生文件大小/SHA256 完整性检查、复用判断和生命周期清理，不依赖 `core` 或 `gui`。高频只读状态查询通过稳定 manifest 路径执行文件存在/大小轻量校验；复用、正式扫描和 raw 清理等强一致性决策继续执行 SHA256 校验。
 - `zip_material_preprocessor.py`：在预处理边界内使用标准库列举和流式展开 ZIP entry，提供 ZIP/CBZ/EPUB 共用的数量、大小、压缩比、加密和路径安全校验；通用 ZIP 只保留图片、音频和文本白名单叶子，容器内视频返回 `container_video_requires_explicit_import`，CBZ 只接纳图片并按自然顺序派生为单一页目录；不负责项目导入或 UI 状态。
@@ -45,10 +46,10 @@
 - `download_integrity.py`：为更新包和外部运行时提供 staging 流式下载、可信大小、`Content-Length`、实际字节、SHA-256、取消检查和失败清理的共用边界。
 - `runtime_downloads.py`：加载并验证 `res/runtime_downloads.json` 中经审查的运行时资产清单，限制 HTTPS host、固定 revision、文件名、大小上限和 SHA-256；运行时不自动信任 `latest` 或 `/main/`。
 - `app_update.py`：应用更新协议入口；负责 GitHub Release 版本与 Windows x64 资产筛选、固定下载来源、测试版偏好、压缩包/checksum 独立大小上限、SHA-256 与 ZIP 安全校验、平铺或唯一单层包装 payload 解析、更新请求准备和新版启动确认。实际安装目录替换由独立更新器执行。
-- `llamacpp_downloader.py`：按受审查清单下载、校验并安装 llama.cpp 运行时到 `bin/`。
-- `whispercpp_downloader.py`：按受审查清单下载、校验并安装 whisper.cpp 运行时到 `bin/whisper.cpp/`，下载 Whisper 模型到 `models/whisper/`；已有模型仅在大小和 SHA-256 均匹配时复用。
+- `llamacpp_downloader.py`：按受审查清单下载、校验并原子安装 llama.cpp 运行时到 `bin/llama.cpp/{version}/win-x64-cpu/`。
+- `whispercpp_downloader.py`：按受审查清单下载、校验并原子安装 whisper.cpp 运行时到 `bin/whisper.cpp/{version}/{package_id}/`，下载 Whisper 模型到 `models/whisper/`；已有模型仅在大小和 SHA-256 均匹配时复用。
 - `audio_transcription.py`：封装本地 whisper.cpp episode 转写、音频/视频输入准备、缓存命中判断和 `episode_transcript.json` 写入；缓存键覆盖素材指纹、运行时、模型和语言，日志不记录完整转写文本。
-- `ffmpeg_downloader.py`：按受审查清单下载、校验并安装 FFmpeg 运行时到 `bin/`。
+- `ffmpeg_downloader.py`：按受审查清单下载、校验并原子安装 FFmpeg 运行时到 `bin/ffmpeg/{version}/win-x64/`。
 - `source_importer.py`：把直接素材或已启用容器按项目目录规则原子复制到 `projects/{project_id}/raw`，计算 raw 目标，并通过预处理 manifest 协调 raw 清理、素材移除和 stale 派生产物清理；容器不得进入普通 materials link 分支。
 - `source_status.py`：计算项目页需要的素材显示名、raw/materials 或预处理 manifest 映射、项目内素材列表和素材状态；状态刷新只执行 manifest 结构、文件存在和大小检查，不在 GUI 主线程计算派生文件 SHA256。
 - `material_processing_middleware.py`：统一接收上层的素材处理请求，把 raw 拆成直接视频、直接非视频、已启用容器和 unsupported 四类；容器先预处理，直接非视频走 source importer，只有非原始方案中的直接视频进入 FFmpeg。FFmpeg 缺失策略由调用方显式选择 `error` 或 `skip_video`，并由 middleware 在执行点再次校验。
