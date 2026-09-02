@@ -23,6 +23,7 @@ def collect_runtime_health() -> dict[str, Any]:
     from utils.ai_model_middleware import load_default_prompts
     from utils.app_metadata import APP_NAME, APP_VERSION_TAG, format_version_tag
     from utils.i18n import SUPPORTED_LOCALES, load_messages
+    from utils.paths import RESOURCE_ROOT
     from utils.runtime_downloads import load_runtime_download_manifest
 
     errors: list[str] = []
@@ -62,6 +63,15 @@ def collect_runtime_health() -> dict[str, Any]:
     if not APP_ICON_PATH.is_file() or icon.isNull():
         errors.append("application icon resource is missing or unreadable")
 
+    model_test_media = (
+        RESOURCE_ROOT / "test_media" / "model_test_input.jpg",
+        RESOURCE_ROOT / "test_media" / "model_test_input.wav",
+        RESOURCE_ROOT / "test_media" / "model_test_input.mp4",
+    )
+    model_test_media_count = sum(path.is_file() for path in model_test_media)
+    if model_test_media_count != len(model_test_media):
+        errors.append("model test media resources are missing or unreadable")
+
     from utils.app_metadata import APP_RELEASE_STAGE, APP_VERSION
 
     expected_version_tag = format_version_tag(APP_VERSION, APP_RELEASE_STAGE)
@@ -81,6 +91,7 @@ def collect_runtime_health() -> dict[str, Any]:
         "locales": locale_counts,
         "prompt_count": prompt_count,
         "runtime_asset_count": runtime_asset_count,
+        "model_test_media_count": model_test_media_count,
         "errors": errors,
     }
 

@@ -15,6 +15,18 @@ def _resolve_app_root() -> Path:
 
 
 APP_ROOT = _resolve_app_root()
+
+
+def _resolve_resource_root() -> Path:
+    if getattr(sys, "frozen", False):
+        bundle_root = getattr(sys, "_MEIPASS", "")
+        if bundle_root:
+            return Path(bundle_root).resolve() / "res"
+        return _resolve_app_root() / "_internal" / "res"
+    return _resolve_app_root() / "res"
+
+
+RESOURCE_ROOT = _resolve_resource_root()
 PROJECTS_ROOT = APP_ROOT / "projects"
 LOGS_ROOT = APP_ROOT / "log"
 

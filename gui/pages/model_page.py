@@ -90,7 +90,7 @@ from utils.model_preferences import (
     set_last_model_page_mode,
 )
 from utils.network_middleware import sanitize_url
-from utils.paths import APP_ROOT
+from utils.paths import APP_ROOT, RESOURCE_ROOT
 from utils.ffmpeg_tool import FfmpegProcessError, probe_video_duration_seconds
 from utils.ai_model_middleware import (
     ModelMiddlewareError,
@@ -103,7 +103,7 @@ from utils.ai_model_middleware import (
 )
 
 
-TEST_MEDIA_ROOT = APP_ROOT / "res" / "test_media"
+TEST_MEDIA_ROOT = RESOURCE_ROOT / "test_media"
 IMAGE_TEST_ASSET = TEST_MEDIA_ROOT / "model_test_input.jpg"
 AUDIO_TEST_ASSET = TEST_MEDIA_ROOT / "model_test_input.wav"
 VIDEO_TEST_ASSET = TEST_MEDIA_ROOT / "model_test_input.mp4"
