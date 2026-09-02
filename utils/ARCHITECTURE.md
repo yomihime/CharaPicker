@@ -45,7 +45,7 @@
 - `network_middleware.py`：统一应用内 HTTP(S) 请求、代理读取、连通性测试、URL/错误脱敏和 DashScope 临时代理环境。
 - `download_integrity.py`：为更新包和外部运行时提供 staging 流式下载、可信大小、`Content-Length`、实际字节、SHA-256、取消检查和失败清理的共用边界。
 - `runtime_downloads.py`：加载并验证 `res/runtime_downloads.json` 中经审查的运行时资产清单，限制 HTTPS host、固定 revision、文件名、大小上限和 SHA-256；运行时不自动信任 `latest` 或 `/main/`。
-- `app_update.py`：应用更新协议入口；负责 GitHub Release 版本与 Windows x64 资产筛选、固定下载来源、测试版偏好、压缩包/checksum 独立大小上限、SHA-256 与 ZIP 安全校验、平铺或唯一单层包装 payload 解析、更新请求准备和新版启动确认。实际安装目录替换由独立更新器执行。
+- `app_update.py`：应用更新协议入口；负责 GitHub Release 版本与 Windows x64 资产筛选、固定下载来源、测试版偏好、压缩包/checksum 独立大小上限、SHA-256 与 ZIP 安全校验、平铺或唯一单层包装 payload 解析、更新请求准备和新版启动确认。实际程序文件备份与覆盖由独立更新器执行。
 - `llamacpp_downloader.py`：按受审查清单下载、校验并原子安装 llama.cpp 运行时到 `bin/llama.cpp/{version}/win-x64-cpu/`。
 - `whispercpp_downloader.py`：按受审查清单下载、校验并原子安装 whisper.cpp 运行时到 `bin/whisper.cpp/{version}/{package_id}/`，下载 Whisper 模型到 `models/whisper/`；已有模型仅在大小和 SHA-256 均匹配时复用。
 - `audio_transcription.py`：封装本地 whisper.cpp episode 转写、音频/视频输入准备、缓存命中判断和 `episode_transcript.json` 写入；缓存键覆盖素材指纹、运行时、模型和语言，日志不记录完整转写文本。

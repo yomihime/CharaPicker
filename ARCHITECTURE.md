@@ -22,7 +22,7 @@
 - `requirements-release-windows-py312.txt`：官方 Windows x64 构建的带 hash 精确锁，作为 uv 同步与发布审计输入。
 - `config.yaml`：本地全局配置文件，由 `utils/global_store.py` 读写，包含用户偏好和模型预设等私有配置，默认不提交。
 - `main.spec`：PyInstaller 文件夹式打包配置，收集 `i18n/`、`res/` 和 qfluentwidgets 资源。
-- `app_updater.py` / `updater.spec`：独立更新辅助程序及其 one-file 打包配置；主程序退出后执行目录替换、用户运行时数据保留、启动确认和失败回滚。
+- `app_updater.py` / `updater.spec`：独立更新辅助程序及其 one-file 打包配置；主程序退出后备份将被覆盖的程序项、保留已验证下载包，并把新版 payload 直接覆盖到原安装目录。便携版更新不自动回滚，用户运行时数据保持原位。
 - `build.bat`：Windows 打包入口。只使用已同步的 uv 项目环境，调用 `scripts/build_meta.py`，分别构建主程序与更新辅助程序，整理 `release/CharaPicker/` 并压缩 zip。
 - `README.md`：GitHub 首页说明，要求使用简体中文。
 - `CHANGELOG.md`：版本更新日志。tag 发布前维护对应版本小节，GitHub Release 正文从这里抽取。

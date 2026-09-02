@@ -292,7 +292,7 @@ class UpdateLaunchTests(unittest.TestCase):
                         prepared,
                         current_pid=1234,
                         failure_title="Update failed",
-                        failure_message="Rollback required",
+                        failure_message="Manual recovery required",
                     )
 
             self.assertEqual(request_path.read_text(encoding="utf-8"), "previous request")
@@ -343,7 +343,7 @@ class UpdateLaunchTests(unittest.TestCase):
                         prepared,
                         current_pid=1234,
                         failure_title="Update failed",
-                        failure_message="Rollback required",
+                        failure_message="Manual recovery required",
                     )
             finally:
                 os.chdir(original_cwd)
@@ -352,6 +352,8 @@ class UpdateLaunchTests(unittest.TestCase):
             self.assertEqual(request["install_dir"], str(install_dir))
             self.assertEqual(request["relaunch_cwd"], str(install_dir))
             self.assertNotEqual(request["relaunch_cwd"], str(external_cwd.resolve()))
+            self.assertNotIn("backup_dir", request)
+            self.assertNotIn("preserve", request)
 
 
 if __name__ == "__main__":

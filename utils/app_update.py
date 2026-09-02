@@ -40,7 +40,6 @@ UPDATE_PRERELEASES_KEY = "updates/include_prereleases"
 UPDATE_ACK_ENV = "CHARAPICKER_UPDATE_ACK_PATH"
 UPDATE_RUNNER_NAME = "CharaPickerUpdater.exe"
 UPDATE_ASSET_SUFFIX = "windows-x64.zip"
-PRESERVED_RUNTIME_PATHS = ("projects", "config.yaml", "log", "bin", "models")
 MAX_UPDATE_ARCHIVE_MEMBERS = 100_000
 MAX_UPDATE_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_UPDATE_CHECKSUM_BYTES = 64 * 1024
@@ -309,7 +308,6 @@ def launch_prepared_update(
 ) -> None:
     install_dir = packaged_install_dir()
     token = uuid.uuid4().hex
-    backup_dir = install_dir.parent / f".{APP_NAME.lower()}-backup-{token}"
     ack_path = prepared.workspace / "startup-ack"
     request_path = prepared.workspace / "update-request.json"
     updater_copy = Path(tempfile.gettempdir()) / f"{APP_NAME}Updater-{token}.exe"
@@ -321,12 +319,10 @@ def launch_prepared_update(
         "install_dir": str(install_dir),
         "payload_dir": str(prepared.payload_dir),
         "workspace": str(prepared.workspace),
-        "backup_dir": str(backup_dir),
         "ack_path": str(ack_path),
         "log_path": str(log_path),
         "executable_name": f"{APP_NAME}.exe",
         "relaunch_cwd": str(install_dir),
-        "preserve": list(PRESERVED_RUNTIME_PATHS),
         "failure_title": failure_title,
         "failure_message": failure_message,
     }

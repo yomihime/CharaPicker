@@ -16,7 +16,17 @@ from typing import Any
 WAIT_TIMEOUT_SECONDS = 180
 POLL_INTERVAL_SECONDS = 0.25
 UPDATE_ACK_ENV = "CHARAPICKER_UPDATE_ACK_PATH"
-ALLOWED_PRESERVED_PATHS = {"projects", "config.yaml", "log", "bin", "models"}
+UPDATE_BACKUP_DIR_NAME = "update_backup"
+UPDATE_DOWNLOAD_DIR_NAME = "download"
+PROTECTED_RUNTIME_NAMES = {
+    "projects",
+    "config.yaml",
+    "log",
+    "bin",
+    "models",
+    UPDATE_BACKUP_DIR_NAME,
+    UPDATE_DOWNLOAD_DIR_NAME,
+}
 
 
 class UpdaterError(RuntimeError):
@@ -64,18 +74,15 @@ def _apply_update(request: dict[str, Any], request_path: Path, log_path: Path) -
     install_dir = _required_path(request, "install_dir")
     payload_dir = _required_path(request, "payload_dir")
     workspace = _required_path(request, "workspace")
-    backup_dir = _required_path(request, "backup_dir")
     ack_path = _required_path(request, "ack_path")
     relaunch_cwd = _required_path(request, "relaunch_cwd")
     executable_name = str(request.get("executable_name") or "").strip()
-    preserve = _preserved_paths(request.get("preserve"))
 
     _validate_layout(
         request_path=request_path,
         install_dir=install_dir,
         payload_dir=payload_dir,
         workspace=workspace,
-        backup_dir=backup_dir,
         relaunch_cwd=relaunch_cwd,
         executable_name=executable_name,
     )
@@ -83,14 +90,17 @@ def _apply_update(request: dict[str, Any], request_path: Path, log_path: Path) -
     if not _wait_for_process_exit(current_pid, WAIT_TIMEOUT_SECONDS):
         raise UpdaterError("The running application did not exit in time.")
 
-    installed_new_version = False
     new_process: subprocess.Popen[bytes] | None = None
     try:
-        install_dir.rename(backup_dir)
-        _write_log(log_path, f"Backed up installation to {backup_dir}")
-        payload_dir.rename(install_dir)
-        installed_new_version = True
-        _move_preserved_paths(backup_dir, install_dir, preserve)
+        download_dir = install_dir / UPDATE_DOWNLOAD_DIR_NAME
+        backup_dir = install_dir / UPDATE_BACKUP_DIR_NAME
+        _retain_update_downloads(workspace, download_dir)
+        _write_log(log_path, f"Retained verified update artifacts in {download_dir}")
+        _backup_replaced_paths(payload_dir, install_dir, backup_dir)
+        _write_log(log_path, f"Backed up replaced program paths to {backup_dir}")
+        _write_log(log_path, f"Overlaying update payload into {install_dir}")
+        shutil.copytree(payload_dir, install_dir, dirs_exist_ok=True)
+        _write_log(log_path, "Update payload copied into installation directory")
 
         executable = install_dir / executable_name
         if not executable.is_file():
@@ -107,20 +117,10 @@ def _apply_update(request: dict[str, Any], request_path: Path, log_path: Path) -
         if not _wait_for_startup_ack(new_process, ack_path, WAIT_TIMEOUT_SECONDS):
             raise UpdaterError("The updated application did not start successfully.")
     except Exception:
-        _write_log(log_path, "Rolling back update")
+        _write_log(log_path, "Update failed; automatic rollback is not available")
         _stop_process(new_process)
-        _rollback(
-            install_dir=install_dir,
-            backup_dir=backup_dir,
-            workspace=workspace,
-            preserve=preserve,
-            installed_new_version=installed_new_version,
-            executable_name=executable_name,
-            relaunch_cwd=relaunch_cwd,
-        )
         raise
 
-    shutil.rmtree(backup_dir, ignore_errors=True)
     _write_log(log_path, "Update completed successfully")
     shutil.rmtree(workspace, ignore_errors=True)
 
@@ -131,7 +131,6 @@ def _validate_layout(
     install_dir: Path,
     payload_dir: Path,
     workspace: Path,
-    backup_dir: Path,
     relaunch_cwd: Path,
     executable_name: str,
 ) -> None:
@@ -145,53 +144,54 @@ def _validate_layout(
         raise UpdaterError("The update payload directory is invalid.")
     if not (payload_dir / executable_name).is_file():
         raise UpdaterError("The update payload is incomplete.")
-    if install_dir.parent != workspace.parent or install_dir.parent != backup_dir.parent:
-        raise UpdaterError("Update paths must share the installation parent directory.")
-    if not relaunch_cwd.is_dir():
+    payload_names = {item.name.casefold(): item.name for item in payload_dir.iterdir()}
+    protected_payload_names = {
+        payload_names[name.casefold()]
+        for name in PROTECTED_RUNTIME_NAMES
+        if name.casefold() in payload_names
+    }
+    if protected_payload_names:
+        names = ", ".join(sorted(protected_payload_names))
+        raise UpdaterError(f"The update payload contains protected runtime data: {names}")
+    if install_dir.parent != workspace.parent:
+        raise UpdaterError("The update workspace must share the installation parent directory.")
+    if relaunch_cwd != install_dir or not relaunch_cwd.is_dir():
         raise UpdaterError("The application working directory is invalid.")
+
+
+def _retain_update_downloads(workspace: Path, download_dir: Path) -> None:
+    artifacts = sorted(
+        path
+        for path in workspace.iterdir()
+        if path.is_file()
+        and (
+            path.suffix.lower() == ".zip"
+            or path.name.lower().endswith(".zip.sha256")
+        )
+    )
+    if not artifacts:
+        return
+    download_dir.mkdir(parents=True, exist_ok=True)
+    for source in artifacts:
+        shutil.copy2(source, download_dir / source.name)
+
+
+def _backup_replaced_paths(payload_dir: Path, install_dir: Path, backup_dir: Path) -> None:
     if backup_dir.exists():
-        raise UpdaterError("The update backup directory already exists.")
-
-
-def _rollback(
-    *,
-    install_dir: Path,
-    backup_dir: Path,
-    workspace: Path,
-    preserve: tuple[str, ...],
-    installed_new_version: bool,
-    executable_name: str,
-    relaunch_cwd: Path,
-) -> None:
-    try:
-        if installed_new_version and install_dir.exists():
-            _move_preserved_paths(install_dir, backup_dir, preserve)
-            failed_dir = workspace / "failed-installation"
-            if failed_dir.exists():
-                shutil.rmtree(failed_dir, ignore_errors=True)
-            install_dir.rename(failed_dir)
-        if backup_dir.exists() and not install_dir.exists():
-            backup_dir.rename(install_dir)
-        old_executable = install_dir / executable_name
-        if old_executable.is_file():
-            subprocess.Popen([str(old_executable)], cwd=relaunch_cwd, close_fds=True)
-        shutil.rmtree(workspace, ignore_errors=True)
-    except Exception as exc:  # noqa: BLE001
-        raise UpdaterError(f"Automatic rollback failed: {exc}") from exc
-
-
-def _move_preserved_paths(source_root: Path, target_root: Path, names: tuple[str, ...]) -> None:
-    for name in names:
-        source = source_root / name
-        if not source.exists():
+        if backup_dir.is_dir():
+            shutil.rmtree(backup_dir)
+        else:
+            backup_dir.unlink()
+    backup_dir.mkdir(parents=True)
+    for payload_item in sorted(payload_dir.iterdir(), key=lambda path: path.name.casefold()):
+        installed_item = install_dir / payload_item.name
+        if not installed_item.exists():
             continue
-        target = target_root / name
-        if target.exists():
-            if target.is_dir():
-                shutil.rmtree(target)
-            else:
-                target.unlink()
-        shutil.move(str(source), str(target))
+        backup_item = backup_dir / payload_item.name
+        if installed_item.is_dir():
+            shutil.copytree(installed_item, backup_item)
+        else:
+            shutil.copy2(installed_item, backup_item)
 
 
 def _wait_for_process_exit(pid: int, timeout: float) -> bool:
@@ -252,21 +252,6 @@ def _required_path(payload: dict[str, Any], key: str) -> Path:
     if not value:
         raise UpdaterError(f"Missing {key}.")
     return Path(value).resolve()
-
-
-def _preserved_paths(value: Any) -> tuple[str, ...]:
-    if not isinstance(value, list):
-        raise UpdaterError("Invalid preserved path list.")
-    names: list[str] = []
-    for item in value:
-        name = str(item).strip()
-        path = Path(name)
-        if not name or path.is_absolute() or len(path.parts) != 1 or name in {".", ".."}:
-            raise UpdaterError("Invalid preserved path.")
-        if name not in ALLOWED_PRESERVED_PATHS:
-            raise UpdaterError("Unsupported preserved path.")
-        names.append(name)
-    return tuple(names)
 
 
 def _stop_process(process: subprocess.Popen[bytes] | None) -> None:

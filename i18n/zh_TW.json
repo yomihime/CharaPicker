@@ -716,7 +716,7 @@
   "about.update.download.progress.extract": "正在解壓縮並檢查更新包...",
   "about.update.download.progress.ready": "更新包準備完成，即將重新啟動...",
   "about.update.apply.failure.title": "CharaPicker 更新失敗",
-  "about.update.apply.failure.content": "無法安裝新版，已經嘗試還原並重新啟動原版本。",
+  "about.update.apply.failure.content": "無法完成更新，部分程式檔案可能已經被覆蓋。已驗證的更新套件保留在安裝目錄的 download 資料夾，覆蓋前的程式檔案保留在 update_backup 資料夾；請手動解壓縮更新套件並覆蓋安裝目錄。projects、設定和本機模型不會被主動刪除。",
   "about.update.size.unknown": "大小未知",
   "about.notice.title": "聲明",
   "about.notice.legalMaterial": "請僅匯入您擁有合法使用權的素材。",
