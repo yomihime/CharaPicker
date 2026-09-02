@@ -47,7 +47,7 @@ ZIP、CBZ、EPUB、文本型 PDF、7z、RAR 和 CBR 会先作为容器保存在 
 
 通用 ZIP/7z/RAR 只派生图片、音频和文本叶子；其中的视频返回 `container_video_requires_explicit_import`，不会进入 `materials/`。视频必须作为独立素材显式导入，CBZ/CBR 则继续保持仅图片页边界。非原始处理方案只有在存在直接视频时才需要 FFmpeg；缺少 FFmpeg 时，项目页允许取消、忽略全部视频并继续处理容器及其它直接素材，或下载 FFmpeg 后自动执行原请求。middleware 在真正处理视频前仍会复核工具状态，避免竞态绕过。
 
-导入和处理后，系统会在项目目录下维护可处理素材。正式提取开始时，系统会扫描 `materials/` 并生成 `FormalExtractionRunPlan`，写入 `knowledge_base/extraction_runs/{run_id}/plan.json`。run plan 记录 `MaterialRef`、`ExtractionUnit`、媒体类型、内容形态、派生成果和内部编号的映射；后续流程使用稳定编号，例如 `season_001`、`episode_001`、`chunk_0001`，不会反复依赖原始文件名推断。`source_manifest.json` 只作为旧观察索引或调试产物，不再作为正式提取输入契约。
+导入和处理后，系统会在项目目录下维护可处理素材。正式提取开始时，系统会扫描 `materials/` 并生成 `FormalExtractionRunPlan`，写入 `knowledge_base/extraction_runs/{run_id}/plan.json`。完整提取会沿用最近一次非 FAST 的线性 run 作为补全索引；洁净提取则在清理后建立新 run。run plan 记录 `MaterialRef`、`ExtractionUnit`、媒体类型、内容形态、派生成果和内部编号的映射；后续流程使用稳定编号，例如 `season_001`、`episode_001`、`chunk_0001`，不会反复依赖原始文件名推断。`source_manifest.json` 只作为旧观察索引或调试产物，不再作为正式提取输入契约。
 
 预览链路从同一份 run plan 构建通用候选，并按成本稳定选择：字幕/现成 transcript、普通文本、静态图片、需要先转写的音频、视频。预览最多生成 2 个 chunk，每个候选首轮只取 1 个；若某个候选失败或没有结果，会继续尝试后续素材，但总尝试数限制为 4，防止失败素材放大预览成本。不支持的 VTT/LRC、BMP/GIF 或模型能力不匹配会以带 `media_type`、`content_form`、`unit_id` 和来源路径的 warning 进入洞察流，不阻断其它候选。
 
@@ -115,7 +115,7 @@ flowchart TD
 
 当前正式提取入口有三种模式：
 
-- `完整提取`：执行高质量线性流程，按 season -> episode -> chunk 顺序串行提取。每个 chunk 会带入结构化历史上下文；每集、每季结束后用 AI 生成集级和季级产物。
+- `完整提取`：执行高质量线性补全流程，按 season -> episode -> chunk 顺序盘点正式产物。已有 JSON 必须可解析、身份与当前扫描一致、来源路径和可用指纹未变化；满足条件时直接复用，只对缺失、损坏或来源已变化的 chunk 调用模型。每个新提取 chunk 会带入结构化历史上下文；集/季产物输入未变化时同样复用，仅补齐缺失或受影响的聚合阶段。更换云模型不会自动令已有产物失效，需要全部使用新模型重做时应选择洁净提取。
 - `洁净提取`：先清理可重新生成的提取中间产物，再执行与完整提取相同的高质量线性流程。清理不会删除用户素材、导出结果或角色卡母本；成功写入新正式 run 后，已编译的正式角色卡会标记为需要重编译。
 - `快速提取`：视频 chunk 阶段按用户确认的并发数并行请求，不带上下文；全部视频 chunk 完成后，再用 AI 并发重整理 episode，最后重整理 season。当前文本、图片、audio transcript 和原生视听 handler 仍按正式串行路径处理，并在运行时发出 warning 说明回退。这个模式速度优先，偏差会明显更大。
 
@@ -166,7 +166,7 @@ PREVIOUS_SEASON_BACKGROUND
 
 提取结果会写入项目的 `knowledge_base`，并按季、集、chunk 分层保存。
 
-每次完整、洁净或快速提取都会生成新的 `extraction_run_id` 和 run plan。run plan 是正式提取的主索引，保存为 `knowledge_base/extraction_runs/{run_id}/plan.json`；chunk、episode 和 season 产物会记录该 run id，后续合并只读取当前 run 中 schema 合格的产物，避免失败重跑时混入旧结果。
+洁净或快速提取会生成新的 `extraction_run_id` 和 run plan；完整提取优先沿用最近一次非 FAST 的线性 run 并更新扫描计划，以便继续补全。run plan 是正式提取的主索引，保存为 `knowledge_base/extraction_runs/{run_id}/plan.json`。chunk、episode 和 season 产物会记录该 run id，后续合并仍只读取当前活动 run 中 schema 合格的产物。为兼容旧版本已经产生的多 run 混合知识库，完整提取可以接纳身份与来源校验通过的旧正式 chunk：提取事实不变，运行归属更新到当前活动 run，并在 `model_metadata.reused_from_run_ids` 保留原 run 来源；FAST run 的 chunk 不会被静默接纳为线性完整提取结果。
 
 正式产物通常还会记录：
 

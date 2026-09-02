@@ -70,6 +70,8 @@ class TextUnitExecutionResult:
     chunks: list[ChunkExtractionResult]
     warnings: list[str] = field(default_factory=list)
     token_usage: dict[str, int] = field(default_factory=dict)
+    created_chunk_count: int = 0
+    reused_chunk_count: int = 0
 
 
 class TextUnitHandler:
@@ -109,6 +111,8 @@ class TextUnitHandler:
         base_url: str,
         api_key: str,
         chunk_limit: int | None = None,
+        existing_chunks: dict[str, ChunkExtractionResult] | None = None,
+        on_chunk_ready: Callable[[ChunkExtractionResult], None] | None = None,
     ) -> TextUnitExecutionResult:
         if not self.supports(unit):
             raise ValueError(f"unsupported text extraction unit: {unit.unit_kind}")
@@ -118,9 +122,17 @@ class TextUnitHandler:
         prepared_chunks, chunk_warnings = self._prepare_chunks(parsed, chunk_limit=chunk_limit)
         warnings = [*parsed.warnings, *chunk_warnings]
         output: list[ChunkExtractionResult] = []
+        existing_chunks = existing_chunks or {}
+        reused_chunk_count = 0
+        created_chunk_count = 0
         usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         for text_chunk in prepared_chunks:
             chunk_id = f"{unit.unit_id}_text_{text_chunk.index:04d}"
+            existing_chunk = existing_chunks.get(chunk_id)
+            if existing_chunk is not None:
+                output.append(existing_chunk)
+                reused_chunk_count += 1
+                continue
             source_locator = self._source_locator(text_chunk)
             evidence_guidance = self._evidence_guidance(text_chunk)
             request = build_formal_text_json_request(
@@ -162,8 +174,7 @@ class TextUnitHandler:
                 value = result.token_usage.get(key)
                 if isinstance(value, int):
                     usage_total[key] += value
-            output.append(
-                self._chunk_result(
+            chunk_result = self._chunk_result(
                     unit=unit,
                     season_id=season_id,
                     chunk_id=chunk_id,
@@ -181,11 +192,16 @@ class TextUnitHandler:
                     result=result,
                     warnings=warnings if text_chunk.index == 1 else [],
                 )
-            )
+            output.append(chunk_result)
+            created_chunk_count += 1
+            if on_chunk_ready is not None:
+                on_chunk_ready(chunk_result)
         return TextUnitExecutionResult(
             chunks=output,
             warnings=warnings,
             token_usage=usage_total,
+            created_chunk_count=created_chunk_count,
+            reused_chunk_count=reused_chunk_count,
         )
 
     def parse_material(self, path: Path, *, unit_kind: str = "") -> ParsedTextMaterial:

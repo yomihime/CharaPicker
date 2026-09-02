@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-import logging
+import hashlib
 import json
+import logging
 import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -324,6 +326,191 @@ class Extractor(QObject):
 
     def save_preview_chunk_extraction_result(self, project_id: str, result: ChunkExtractionResult) -> Path:
         return kb.save_preview_chunk_result(project_id, result)
+
+    def _chunk_source_matches(
+        self,
+        chunk: ChunkExtractionResult,
+        *,
+        expected_source_path: str,
+        expected_source_trace: dict[str, Any],
+    ) -> bool:
+        normalized_expected_path = expected_source_path.replace("\\", "/").strip()
+        normalized_actual_path = chunk.source_path.replace("\\", "/").strip()
+        if normalized_expected_path and normalized_actual_path != normalized_expected_path:
+            return False
+
+        expected_units = {
+            self._manifest_string(value)
+            for value in expected_source_trace.get("unit_refs", [])
+            if self._manifest_string(value)
+        }
+        actual_units = {
+            self._manifest_string(value)
+            for value in chunk.source_trace.get("unit_refs", [])
+            if self._manifest_string(value)
+        }
+        if expected_units and not expected_units.issubset(actual_units):
+            return False
+
+        actual_materials = [
+            item
+            for item in chunk.source_trace.get("material_refs", [])
+            if isinstance(item, dict)
+        ]
+        for expected in expected_source_trace.get("material_refs", []):
+            if not isinstance(expected, dict):
+                continue
+            expected_id = self._manifest_string(expected.get("material_id"))
+            expected_path = self._manifest_string(expected.get("relative_path")).replace("\\", "/")
+            actual = next(
+                (
+                    item
+                    for item in actual_materials
+                    if (
+                        expected_id
+                        and self._manifest_string(item.get("material_id")) == expected_id
+                    )
+                    or (
+                        expected_path
+                        and self._manifest_string(item.get("relative_path")).replace("\\", "/")
+                        == expected_path
+                    )
+                ),
+                None,
+            )
+            if actual is None:
+                return False
+            expected_fingerprint = self._manifest_string(expected.get("fingerprint"))
+            actual_fingerprint = self._manifest_string(actual.get("fingerprint"))
+            if (
+                expected_fingerprint
+                and actual_fingerprint
+                and expected_fingerprint != actual_fingerprint
+            ):
+                return False
+        return True
+
+    def _load_reusable_full_chunk(
+        self,
+        project_id: str,
+        *,
+        season_id: str,
+        episode_id: str,
+        chunk_id: str,
+        expected_source_path: str,
+        expected_source_trace: dict[str, Any],
+        extraction_run_id: str,
+    ) -> ChunkExtractionResult | None:
+        path = kb.chunks_root_path(project_id, season_id, episode_id) / f"{chunk_id}.json"
+        if not path.is_file() or kb.is_preview_artifact_path(path):
+            return None
+        try:
+            chunk = kb.load_chunk_result(path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            return None
+        if chunk.extraction_stage != ExtractionArtifactStage.FULL:
+            return None
+        if (chunk.season_id, chunk.episode_id, chunk.chunk_id) != (
+            season_id,
+            episode_id,
+            chunk_id,
+        ):
+            return None
+        if not self._chunk_source_matches(
+            chunk,
+            expected_source_path=expected_source_path,
+            expected_source_trace=expected_source_trace,
+        ):
+            return None
+
+        original_run_id = chunk.extraction_run_id.strip()
+        if original_run_id and original_run_id != extraction_run_id:
+            try:
+                original_plan = kb.load_extraction_run_plan(project_id, original_run_id)
+            except (OSError, ValueError, json.JSONDecodeError):
+                original_plan = None
+            if original_plan is not None and original_plan.mode == FormalExtractionMode.FAST:
+                return None
+
+        if original_run_id != extraction_run_id:
+            model_metadata = dict(chunk.model_metadata)
+            reused_from = model_metadata.get("reused_from_run_ids", [])
+            if not isinstance(reused_from, list):
+                reused_from = []
+            if original_run_id and original_run_id not in reused_from:
+                reused_from.append(original_run_id)
+            model_metadata["reused_from_run_ids"] = reused_from
+            model_metadata["reused_by_full_completion"] = True
+            chunk = chunk.model_copy(
+                update={
+                    "extraction_run_id": extraction_run_id,
+                    "model_metadata": model_metadata,
+                }
+            )
+            self.save_chunk_extraction_result(project_id, chunk)
+        return chunk
+
+    def _load_reusable_unit_chunks(
+        self,
+        project_id: str,
+        *,
+        season_id: str,
+        unit: ExtractionUnit,
+        chunk_name_pattern: str,
+        extraction_run_id: str,
+    ) -> dict[str, ChunkExtractionResult]:
+        chunk_root = kb.chunks_root_path(project_id, season_id, unit.episode_id)
+        if not chunk_root.exists():
+            return {}
+        expected_trace = self._source_trace_for_unit(unit).model_dump(mode="json")
+        reusable: dict[str, ChunkExtractionResult] = {}
+        for path in chunk_root.glob(chunk_name_pattern):
+            chunk = self._load_reusable_full_chunk(
+                project_id,
+                season_id=season_id,
+                episode_id=unit.episode_id,
+                chunk_id=path.stem,
+                expected_source_path=unit.material_ref.relative_path,
+                expected_source_trace=expected_trace,
+                extraction_run_id=extraction_run_id,
+            )
+            if chunk is not None:
+                reusable[chunk.chunk_id] = chunk
+        return reusable
+
+    def _formal_aggregate_digest(
+        self,
+        project_id: str,
+        run_plan: FormalExtractionRunPlan,
+    ) -> str:
+        paths: list[Path] = []
+        season_ids: set[str] = set()
+        for episode in run_plan.episodes:
+            season_ids.add(episode.season_id)
+            paths.extend(
+                [
+                    kb.episode_content_path(project_id, episode.season_id, episode.episode_id),
+                    kb.episode_summary_path(project_id, episode.season_id, episode.episode_id),
+                ]
+            )
+        for season_id in season_ids:
+            paths.extend(
+                [
+                    kb.season_content_path(project_id, season_id),
+                    kb.season_summary_path(project_id, season_id),
+                ]
+            )
+        digest = hashlib.sha256()
+        knowledge_base = kb.root_path(project_id)
+        for path in sorted(paths, key=lambda item: item.as_posix().lower()):
+            if not path.is_file():
+                continue
+            digest.update(path.relative_to(knowledge_base).as_posix().encode("utf-8"))
+            try:
+                digest.update(path.read_bytes())
+            except OSError:
+                continue
+        return digest.hexdigest()
 
     def merge_episode_content(
         self,
@@ -1856,6 +2043,7 @@ class Extractor(QObject):
         unit_inputs = self._collect_text_units_from_run_plan(run_plan)
         usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         stats = {
+            "reused_chunks": 0,
             "succeeded_chunks": 0,
             "skipped_chunks": 0,
             "failed_chunks": 0,
@@ -1878,12 +2066,24 @@ class Extractor(QObject):
         )
         project_paths = ensure_project_tree(project_id)
         extracted_chunks: list[ChunkExtractionResult] = []
+        created_chunk_count = 0
         remaining_chunks = chunk_limit
         total_units = len(unit_inputs)
         for index, (season_id, unit) in enumerate(unit_inputs, start=1):
             if remaining_chunks is not None and remaining_chunks <= 0:
                 break
             try:
+                existing_chunks = (
+                    self._load_reusable_unit_chunks(
+                        project_id,
+                        season_id=season_id,
+                        unit=unit,
+                        chunk_name_pattern=f"{unit.unit_id}_text_*.json",
+                        extraction_run_id=run_plan.run_id,
+                    )
+                    if extraction_stage == ExtractionArtifactStage.FULL
+                    else {}
+                )
                 result = text_handler.execute(
                     source_root=(
                         project_paths.knowledge_base
@@ -1908,6 +2108,12 @@ class Extractor(QObject):
                     base_url=preset.base_url,
                     api_key=preset.api_key,
                     chunk_limit=remaining_chunks,
+                    existing_chunks=existing_chunks,
+                    on_chunk_ready=(
+                        lambda chunk: self.save_chunk_extraction_result(project_id, chunk)
+                        if extraction_stage == ExtractionArtifactStage.FULL
+                        else None
+                    ),
                 )
             except (ModelCallError, OSError, ValueError) as exc:
                 stats["failed_chunks"] += 1
@@ -1943,7 +2149,9 @@ class Extractor(QObject):
                 else:
                     self.save_chunk_extraction_result(project_id, chunk)
                 extracted_chunks.append(chunk)
-            stats["succeeded_chunks"] += len(result.chunks)
+            created_chunk_count += result.created_chunk_count
+            stats["succeeded_chunks"] += result.created_chunk_count
+            stats["reused_chunks"] += result.reused_chunk_count
             if remaining_chunks is not None:
                 remaining_chunks -= len(result.chunks)
             if emit_progress is not None and progress_span > 0:
@@ -1956,7 +2164,7 @@ class Extractor(QObject):
                 extraction_run_id=run_plan.run_id,
                 stats=stats,
             )
-        return len(extracted_chunks), usage_total, extracted_chunks, stats
+        return created_chunk_count, usage_total, extracted_chunks, stats
 
     def _extract_native_media_insight_units(
         self,
@@ -1974,6 +2182,7 @@ class Extractor(QObject):
         unit_inputs = self._collect_native_media_insight_units_from_run_plan(run_plan)
         usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         stats = {
+            "reused_chunks": 0,
             "succeeded_chunks": 0,
             "skipped_chunks": 0,
             "failed_chunks": 0,
@@ -1990,6 +2199,7 @@ class Extractor(QObject):
         native_handler = handler or self._native_media_insight_handler(preset)
         materials_root = ensure_project_tree(project_id).materials
         extracted_chunks: list[ChunkExtractionResult] = []
+        created_chunk_count = 0
         total_units = len(unit_inputs)
         for index, (season_id, unit) in enumerate(unit_inputs, start=1):
             support = native_handler.support_status(unit)
@@ -2003,6 +2213,23 @@ class Extractor(QObject):
                 if emit_progress is not None and progress_span > 0:
                     emit_progress(progress_base + int(index * progress_span / total_units))
                 continue
+
+            if extraction_stage == ExtractionArtifactStage.FULL:
+                reusable = self._load_reusable_full_chunk(
+                    project_id,
+                    season_id=season_id,
+                    episode_id=unit.episode_id,
+                    chunk_id=f"{unit.unit_id}_native_media_0001",
+                    expected_source_path=unit.material_ref.relative_path,
+                    expected_source_trace=self._source_trace_for_unit(unit).model_dump(mode="json"),
+                    extraction_run_id=run_plan.run_id,
+                )
+                if reusable is not None:
+                    extracted_chunks.append(reusable)
+                    stats["reused_chunks"] += 1
+                    if emit_progress is not None and progress_span > 0:
+                        emit_progress(progress_base + int(index * progress_span / total_units))
+                    continue
 
             try:
                 result = native_handler.execute(
@@ -2087,6 +2314,7 @@ class Extractor(QObject):
                 else:
                     self.save_chunk_extraction_result(project_id, chunk)
                 extracted_chunks.append(chunk)
+                created_chunk_count += 1
             stats["succeeded_chunks"] += len(result.chunks)
             if emit_progress is not None and progress_span > 0:
                 emit_progress(progress_base + int(index * progress_span / total_units))
@@ -2098,7 +2326,7 @@ class Extractor(QObject):
                 extraction_run_id=run_plan.run_id,
                 stats=stats,
             )
-        return len(extracted_chunks), usage_total, extracted_chunks, stats
+        return created_chunk_count, usage_total, extracted_chunks, stats
 
     def _extract_image_units(
         self,
@@ -2116,6 +2344,7 @@ class Extractor(QObject):
         unit_inputs = self._collect_image_units_from_run_plan(run_plan)
         usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         stats = {
+            "reused_chunks": 0,
             "succeeded_chunks": 0,
             "skipped_chunks": 0,
             "failed_chunks": 0,
@@ -2148,11 +2377,30 @@ class Extractor(QObject):
         )
         materials_root = ensure_project_tree(project_id).materials
         extracted_chunks: list[ChunkExtractionResult] = []
+        created_chunk_count = 0
         remaining_chunks = chunk_limit
         total_units = len(unit_inputs)
         for index, (season_id, unit) in enumerate(unit_inputs, start=1):
             if remaining_chunks is not None and remaining_chunks <= 0:
                 break
+            if extraction_stage == ExtractionArtifactStage.FULL:
+                reusable = self._load_reusable_full_chunk(
+                    project_id,
+                    season_id=season_id,
+                    episode_id=unit.episode_id,
+                    chunk_id=f"{unit.unit_id}_image_0001",
+                    expected_source_path=unit.material_ref.relative_path,
+                    expected_source_trace=self._source_trace_for_unit(unit).model_dump(mode="json"),
+                    extraction_run_id=run_plan.run_id,
+                )
+                if reusable is not None:
+                    extracted_chunks.append(reusable)
+                    stats["reused_chunks"] += 1
+                    if remaining_chunks is not None:
+                        remaining_chunks -= 1
+                    if emit_progress is not None and progress_span > 0:
+                        emit_progress(progress_base + int(index * progress_span / total_units))
+                    continue
             try:
                 result = image_handler.execute(
                     materials_root=materials_root,
@@ -2208,6 +2456,7 @@ class Extractor(QObject):
                 else:
                     self.save_chunk_extraction_result(project_id, chunk)
                 extracted_chunks.append(chunk)
+                created_chunk_count += 1
             stats["succeeded_chunks"] += len(result.chunks)
             if remaining_chunks is not None:
                 remaining_chunks -= len(result.chunks)
@@ -2221,7 +2470,7 @@ class Extractor(QObject):
                 extraction_run_id=run_plan.run_id,
                 stats=stats,
             )
-        return len(extracted_chunks), usage_total, extracted_chunks, stats
+        return created_chunk_count, usage_total, extracted_chunks, stats
 
     def _finalize_serial_unit_contexts(
         self,
@@ -2508,6 +2757,46 @@ class Extractor(QObject):
         api_key: str,
         context_window_tokens: int | None,
     ) -> tuple[bool, dict[str, int]]:
+        reusable_content = self._load_reusable_episode_content(
+            project_id,
+            season_id,
+            episode_id,
+            episode_chunks=episode_chunks,
+            expected_chunk_ids=[
+                self._manifest_string(item.get("chunk_id")) for item in chunk_inputs
+            ],
+            extraction_run_id=extraction_run_id,
+        )
+        if reusable_content is not None:
+            reusable_summary = self._load_and_adopt_full_artifact(
+                kb.episode_summary_path(project_id, season_id, episode_id),
+                extraction_run_id=extraction_run_id,
+            )
+            if reusable_summary is not None:
+                return (True, {})
+            try:
+                summary_usage = self._generate_episode_summary_with_ai(
+                    project_id,
+                    season_id,
+                    episode_id,
+                    extraction_run_id=extraction_run_id,
+                    backend=backend,
+                    model_name=model_name,
+                    base_url=base_url,
+                    api_key=api_key,
+                    context_window_tokens=context_window_tokens,
+                )
+            except Exception:  # noqa: BLE001
+                LOGGER.warning(
+                    "Formal episode AI summary completion failed; "
+                    "project_id=%s season_id=%s episode_id=%s",
+                    project_id,
+                    season_id,
+                    episode_id,
+                    exc_info=True,
+                )
+                return (False, {})
+            return (True, summary_usage)
         try:
             merge_usage = self._merge_episode_content_with_ai(
                 project_id,
@@ -2557,6 +2846,107 @@ class Extractor(QObject):
             )
             return (False, merge_usage)
         return (True, total_token_usage([merge_usage, summary_usage]))
+
+    def _load_and_adopt_full_artifact(
+        self,
+        path: Path,
+        *,
+        extraction_run_id: str,
+    ) -> dict[str, Any] | None:
+        if not path.is_file():
+            return None
+        try:
+            payload = kb.read_json_object(path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            return None
+        if not kb.is_full_artifact_payload(payload):
+            return None
+        original_run_id = kb.extraction_run_id_from_payload(payload)
+        if original_run_id != extraction_run_id:
+            metadata = payload.get("model_metadata", {})
+            metadata = dict(metadata) if isinstance(metadata, dict) else {}
+            reused_from = metadata.get("reused_from_run_ids", [])
+            reused_from = list(reused_from) if isinstance(reused_from, list) else []
+            if original_run_id and original_run_id not in reused_from:
+                reused_from.append(original_run_id)
+            metadata["reused_from_run_ids"] = reused_from
+            metadata["reused_by_full_completion"] = True
+            payload["extraction_run_id"] = extraction_run_id
+            payload["model_metadata"] = metadata
+            kb.write_json(path, payload)
+        return payload
+
+    def _chunk_semantic_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: payload.get(key)
+            for key in (
+                "season_id",
+                "episode_id",
+                "chunk_id",
+                "source_path",
+                "source_trace",
+                "targets",
+                "facts",
+                "behavior_traits",
+                "dialogue_style",
+                "relationship_interactions",
+                "conflicts",
+                "character_state_changes",
+                "insight_summary",
+                "evidence_refs",
+            )
+        }
+
+    def _episode_semantic_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: payload.get(key)
+            for key in (
+                "season_id",
+                "episode_id",
+                "source_trace",
+                "targets",
+                "chunk_results",
+                "facts",
+                "behavior_traits",
+                "dialogue_style",
+                "relationship_interactions",
+                "conflicts",
+                "character_state_changes",
+                "evidence_refs",
+            )
+        }
+
+    def _load_reusable_episode_content(
+        self,
+        project_id: str,
+        season_id: str,
+        episode_id: str,
+        *,
+        episode_chunks: list[ChunkExtractionResult],
+        expected_chunk_ids: list[str],
+        extraction_run_id: str,
+    ) -> dict[str, Any] | None:
+        content = self._load_and_adopt_full_artifact(
+            kb.episode_content_path(project_id, season_id, episode_id),
+            extraction_run_id=extraction_run_id,
+        )
+        if content is None:
+            return None
+        embedded = {
+            self._manifest_string(item.get("chunk_id")): self._chunk_semantic_payload(item)
+            for item in content.get("chunk_results", [])
+            if isinstance(item, dict) and self._manifest_string(item.get("chunk_id"))
+        }
+        expected = {
+            chunk.chunk_id: self._chunk_semantic_payload(chunk.model_dump(mode="json"))
+            for chunk in episode_chunks
+        }
+        required_ids = {chunk_id for chunk_id in expected_chunk_ids if chunk_id}
+        if not expected or not required_ids.issubset(expected):
+            return None
+        if any(embedded.get(chunk_id) != payload for chunk_id, payload in expected.items()):
+            return None
+        return content
 
     def _merge_episode_content_with_ai(
         self,
@@ -2851,6 +3241,41 @@ class Extractor(QObject):
         context_window_tokens: int | None,
         include_previous_season_backgrounds: bool = True,
     ) -> tuple[bool, dict[str, int]]:
+        reusable_content = self._load_reusable_season_content(
+            project_id,
+            manifest,
+            season_id,
+            extraction_run_id=extraction_run_id,
+        )
+        if reusable_content is not None:
+            reusable_summary = self._load_and_adopt_full_artifact(
+                kb.season_summary_path(project_id, season_id),
+                extraction_run_id=extraction_run_id,
+            )
+            if reusable_summary is not None:
+                return (True, {})
+            try:
+                summary_usage = self._generate_season_summary_with_ai(
+                    project_id,
+                    manifest,
+                    season_id,
+                    extraction_run_id=extraction_run_id,
+                    backend=backend,
+                    model_name=model_name,
+                    base_url=base_url,
+                    api_key=api_key,
+                    context_window_tokens=context_window_tokens,
+                    include_previous_season_backgrounds=include_previous_season_backgrounds,
+                )
+            except Exception:  # noqa: BLE001
+                LOGGER.warning(
+                    "Formal season AI summary completion failed; project_id=%s season_id=%s",
+                    project_id,
+                    season_id,
+                    exc_info=True,
+                )
+                return (False, {})
+            return (True, summary_usage)
         try:
             merge_usage = self._merge_season_content_with_ai(
                 project_id,
@@ -2895,6 +3320,42 @@ class Extractor(QObject):
             )
             return (False, merge_usage)
         return (True, total_token_usage([merge_usage, summary_usage]))
+
+    def _load_reusable_season_content(
+        self,
+        project_id: str,
+        manifest: dict[str, Any],
+        season_id: str,
+        *,
+        extraction_run_id: str,
+    ) -> dict[str, Any] | None:
+        content = self._load_and_adopt_full_artifact(
+            kb.season_content_path(project_id, season_id),
+            extraction_run_id=extraction_run_id,
+        )
+        if content is None:
+            return None
+        expected_ids = set(self._season_episode_ids_from_manifest(manifest, season_id))
+        embedded = {
+            self._manifest_string(item.get("episode_id")): self._episode_semantic_payload(item)
+            for item in content.get("episode_contents", [])
+            if isinstance(item, dict) and self._manifest_string(item.get("episode_id"))
+        }
+        if not expected_ids or not expected_ids.issubset(embedded):
+            return None
+        for episode_id in expected_ids:
+            try:
+                episode_content = kb.load_episode_content(project_id, season_id, episode_id)
+                episode_summary = kb.load_episode_summary(project_id, season_id, episode_id)
+            except (OSError, ValueError, json.JSONDecodeError):
+                return None
+            if not kb.is_full_artifact_payload_for_run(episode_content, extraction_run_id):
+                return None
+            if not kb.is_full_artifact_payload_for_run(episode_summary, extraction_run_id):
+                return None
+            if embedded.get(episode_id) != self._episode_semantic_payload(episode_content):
+                return None
+        return content
 
     def _merge_season_content_with_ai(
         self,
@@ -3660,6 +4121,7 @@ class Extractor(QObject):
     def _empty_full_extraction_stats(self, *, total_chunks: int = 0) -> dict[str, int]:
         return {
             "total_chunks": total_chunks,
+            "reused_chunks": 0,
             "succeeded_chunks": 0,
             "skipped_chunks": 0,
             "failed_chunks": 0,
@@ -4550,6 +5012,34 @@ class Extractor(QObject):
                             t("extractor.full.chunkMissing", path=source_path),
                         )
                         stats["skipped_chunks"] += 1
+                        continue
+
+                    reusable_chunk = self._load_reusable_full_chunk(
+                        config.project_id,
+                        season_id=chunk_input["season_id"],
+                        episode_id=chunk_input["episode_id"],
+                        chunk_id=chunk_input["chunk_id"],
+                        expected_source_path=source_path,
+                        expected_source_trace=self._source_trace_from_chunk_input(chunk_input),
+                        extraction_run_id=extraction_run_id,
+                    )
+                    if reusable_chunk is not None:
+                        extracted_chunks.append(reusable_chunk)
+                        current_episode_chunks.append(reusable_chunk)
+                        stats["reused_chunks"] += 1
+                        if emit_event is not None:
+                            emit_event(
+                                InsightEvent(
+                                    title=t("extractor.full.chunk.title"),
+                                    description=t(
+                                        "extractor.full.chunk.reused",
+                                        current=index,
+                                        total=total_chunks,
+                                        name=video_path.name,
+                                    ),
+                                    status=InsightStatus.DONE,
+                                ).model_dump(mode="json")
+                            )
                         continue
 
                     budget = video_handler.prepare_budget(video_path)
@@ -5489,10 +5979,28 @@ class Extractor(QObject):
             config.project_id,
             mode=extraction_mode,
         )
+        if extraction_mode == ExtractionMode.FULL:
+            resumable_plan = kb.load_latest_linear_extraction_run_plan(config.project_id)
+            if resumable_plan is not None:
+                run_plan = run_plan.model_copy(
+                    update={
+                        "run_id": resumable_plan.run_id,
+                        "created_at": resumable_plan.created_at,
+                        "updated_at": datetime.now(),
+                        "metadata": {
+                            **run_plan.metadata,
+                            "completion_policy": "fill_missing_artifacts",
+                            "resumed_run": True,
+                        },
+                    }
+                )
+            else:
+                run_plan.metadata["completion_policy"] = "fill_missing_artifacts"
         manifest = self._legacy_manifest_from_run_plan(run_plan)
         kb.save_extraction_run_plan(config.project_id, run_plan)
         kb.initialize_structure_from_run_plan(config.project_id, run_plan)
         kb.save_source_manifest(config.project_id, manifest)
+        aggregate_digest_before = self._formal_aggregate_digest(config.project_id, run_plan)
         initial_dispatch_plan = build_formal_dispatch_plan(
             run_plan,
             image_input_supported=True,
@@ -5801,7 +6309,13 @@ class Extractor(QObject):
             emit_token_usage(extraction_usage)
         emit_progress(96)
         stale_card_ids: list[str] = []
-        if extracted_chunks and (not is_fast_mode or run_stats.get("succeeded_seasons", 0) > 0):
+        aggregate_changed = (
+            self._formal_aggregate_digest(config.project_id, run_plan) != aggregate_digest_before
+        )
+        run_stats["updated_aggregates"] = int(aggregate_changed)
+        if (created_count > 0 or aggregate_changed) and (
+            not is_fast_mode or run_stats.get("succeeded_seasons", 0) > 0
+        ):
             stale_card_ids = mark_compiled_official_cards_stale(
                 config.project_id,
                 reason="formal_extraction_updated",
@@ -5835,6 +6349,7 @@ class Extractor(QObject):
             emit_event,
             description=t(
                 "extractor.full.summary",
+                reused=run_stats.get("reused_chunks", 0),
                 succeeded=run_stats.get("succeeded_chunks", 0),
                 skipped=run_stats.get("skipped_chunks", 0),
                 failed=run_stats.get("failed_chunks", 0),

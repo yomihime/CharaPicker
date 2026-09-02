@@ -290,6 +290,14 @@ def _assert_scan_handler_and_workflows() -> None:
         assert episode_content["source_kind"] == "image"
         assert len(episode_content["source_trace"]["material_refs"]) == 3
 
+        request_count_after_first_full = len(fake_model.requests)
+        resumed_chunks = extractor.run_full_extraction_streaming(
+            ProjectConfig(project_id=project_id),
+            cloud_preset=_preset(),
+        )
+        assert len(resumed_chunks) == 3
+        assert len(fake_model.requests) == request_count_after_first_full
+
 
 def main() -> None:
     _assert_material_validation()
