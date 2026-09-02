@@ -26,6 +26,7 @@ build.bat --local
 
 - 打包必须使用 PyInstaller。
 - 使用文件夹形式的 one-folder 产物，不使用单文件 exe 作为正式发布形态。
+- 主程序 EXE 只包含启动器与 Python 代码归档；Qt、Python 运行库和资源由 `COLLECT` 放入 `_internal/`，不得同时嵌入 EXE 形成需要临时解包的混合产物。
 - 主程序继续使用 one-folder；为在主程序退出后替换安装目录，允许把无第三方运行时依赖的 `CharaPickerUpdater.exe` 构建为独立 one-file 辅助程序，并随主程序目录发布。该辅助程序不是应用的独立分发形态。
 - 打包后的主程序运行根目录必须以 `CharaPicker.exe` 所在目录为准，不能依赖启动进程的当前工作目录。快捷方式、终端、文件管理器和自更新 relaunch 都可能提供不同 cwd；`config.yaml`、`projects/`、`log/`、`bin/`、`models/` 和运行资源路径不得因此漂移。
 - `main.spec` 负责收集 `i18n/`、`res/` 和 qfluentwidgets 资源。
