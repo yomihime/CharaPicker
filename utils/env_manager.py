@@ -8,6 +8,7 @@ from pathlib import Path
 
 from utils.global_store import get_global_value, set_global_value
 from utils.paths import APP_ROOT
+from utils.subprocess_utils import no_window_creation_flags
 
 LOGGER = logging.getLogger(__name__)
 CONDA_ENV_NAME = "CharaPicker"
@@ -97,6 +98,7 @@ def is_llamacpp_binary_usable(binary_path: Path) -> bool:
             timeout=LLAMACPP_CHECK_TIMEOUT_SECONDS,
             check=False,
             text=True,
+            creationflags=no_window_creation_flags(),
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -180,6 +182,7 @@ def is_whisper_runtime_usable(binary_path: Path) -> bool:
             timeout=WHISPERCPP_CHECK_TIMEOUT_SECONDS,
             check=False,
             text=True,
+            creationflags=no_window_creation_flags(),
         )
     except (OSError, subprocess.SubprocessError):
         return False

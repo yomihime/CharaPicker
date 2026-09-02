@@ -15,6 +15,7 @@ from core import knowledge_base as kb
 from core.models import EpisodeTranscript, TranscriptMetadata, TranscriptSegment, TranscriptSource
 from utils.env_manager import whisper_status
 from utils.ffmpeg_tool import FfmpegProcessError, extract_audio_to_wav
+from utils.subprocess_utils import no_window_creation_flags
 from utils.material_processing_events import SOURCE_PROCESSING_CANCELLED_MESSAGE
 from utils.media_types import AUDIO_SUFFIXES, VIDEO_SUFFIXES
 from utils.paths import ensure_project_tree
@@ -358,6 +359,7 @@ def _run_whisper_cli(
         cwd=runtime_path.parent,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        creationflags=no_window_creation_flags(),
     )
     try:
         while True:
@@ -600,6 +602,7 @@ def _terminate_process(process: subprocess.Popen[bytes]) -> None:
                 ["taskkill", "/PID", str(process.pid), "/T", "/F"],
                 capture_output=True,
                 check=False,
+                creationflags=no_window_creation_flags(),
             )
         else:
             process.terminate()

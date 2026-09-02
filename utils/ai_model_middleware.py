@@ -20,6 +20,7 @@ from utils.app_metadata import HTTP_USER_AGENT
 from utils.paths import APP_ROOT
 from utils.prompt_preferences import prompt_override
 from utils.ffmpeg_tool import find_usable_ffmpeg_binary
+from utils.subprocess_utils import no_window_creation_flags
 from utils.network_middleware import (
     NetworkMiddlewareError,
     open_response,
@@ -861,7 +862,13 @@ def _extract_video_frame_data_urls(video_path: Path, fps: float, max_frames: int
             str(frame_pattern),
         ]
         try:
-            completed = subprocess.run(command, capture_output=True, check=False, timeout=120)
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                check=False,
+                timeout=120,
+                creationflags=no_window_creation_flags(),
+            )
         except (OSError, subprocess.SubprocessError) as exc:
             raise ModelCallError(
                 f"Video frame sampling failed: {exc}",
