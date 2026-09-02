@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from core.character_card_constants import CHARACTER_CARD_JSON_FILE_NAME, PREVIEW_CARD_ID
-from core.extraction_plan import FormalExtractionRunPlan
+from core.extraction_plan import FormalExtractionMode, FormalExtractionRunPlan
 from core.models import ChunkExtractionResult, EpisodeTranscript, ExtractionArtifactStage
 from utils.atomic_io import write_json_atomically
 from utils.paths import ensure_project_tree
@@ -202,6 +202,27 @@ def load_extraction_run_plan(project_id: str, run_id: str) -> FormalExtractionRu
     return FormalExtractionRunPlan.model_validate(
         read_json_object(extraction_run_plan_path(project_id, run_id))
     )
+
+
+def load_latest_linear_extraction_run_plan(
+    project_id: str,
+) -> FormalExtractionRunPlan | None:
+    """Return the newest resumable FULL/CLEAN plan, ignoring FAST runs."""
+    root = extraction_runs_root_path(project_id)
+    if not root.exists():
+        return None
+
+    candidates: list[FormalExtractionRunPlan] = []
+    for plan_path in root.glob("*/plan.json"):
+        try:
+            plan = FormalExtractionRunPlan.model_validate(read_json_object(plan_path))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if plan.mode in {FormalExtractionMode.FULL, FormalExtractionMode.CLEAN}:
+            candidates.append(plan)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda plan: (plan.updated_at, plan.created_at, plan.run_id))
 
 
 def initialize_structure_from_run_plan(project_id: str, run_plan: FormalExtractionRunPlan) -> Path:

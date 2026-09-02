@@ -62,7 +62,8 @@
 - 新增业务数据结构时优先放在 `models.py`，保持 Type Hints。
 - 素材处理配置只描述用户选择和项目状态；文件复制、链接、清理等副作用放在 `utils/source_importer.py`。
 - `extractor` 只做素材解析、事实提取和洞察产出。
-- 完整提取和洁净提取保持线性上下文流程；快速提取允许 chunk 并发且不带上下文，随后用 AI 并发重整理集和季。
+- 完整提取和洁净提取保持线性上下文流程，但运行语义不同：完整提取沿用最近的线性 run，校验并复用已有正式 chunk，只补齐缺失、损坏或来源指纹已变化的产物；洁净提取先删除可再生产物再建立新 run 全量重建。旧 run chunk 被完整提取接纳时保留 `reused_from_run_ids` 来源。快速提取允许 chunk 并发且不带上下文，随后用 AI 并发重整理集和季，本规则不把快速结果静默复用为线性完整提取结果。
+- 文本正式提取按 chunk 成功即原子保存，后续 chunk 调用失败时已成功检查点仍可由下一次完整提取复用。集/季 AI 聚合会核对输入产物集合与语义内容；输入未变化时直接复用，只有 content 或 summary 缺失时补齐对应阶段。
 - 快速提取当前只对视频 chunk 启用并发；文本、图片、audio transcript 和原生视听线索仍通过正式串行 handler 写入 chunk 或派生成果，并按 `source_trace` 重建 episode/season，运行时会发出 warning 说明回退。
 - 文本 unit 使用独立输入字符预算和固定内部输出 token 上限，不复用视频“每分钟输出 token”语义；文本 chunk 必须保留原文 offset、素材引用和结构化 evidence。
 - `.srt` / `.ass` 通过普通 `text` handler 进入预览与正式提取；与视频同名或位于同一 episode 目录时会挂到视频 episode，并写入 `timed_text_association` metadata。对齐失败的字幕/台本继续作为独立 text episode 处理并发出 warning；`.vtt` / `.lrc` 当前只允许导入和扫描，必须保留 unsupported warning，不能静默当普通文档处理。

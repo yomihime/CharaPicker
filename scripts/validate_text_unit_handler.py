@@ -18,9 +18,15 @@ from core import source_scanner  # noqa: E402
 from core.extraction_ai import FormalExtractionJsonResult  # noqa: E402
 from core.extraction_plan import MediaType  # noqa: E402
 from core.extractor import Extractor  # noqa: E402
-from core.models import ExtractionArtifactStage, ProjectConfig, ProjectPaths  # noqa: E402
+from core.models import (  # noqa: E402
+    ChunkExtractionResult,
+    ExtractionArtifactStage,
+    ExtractionMode,
+    ProjectConfig,
+    ProjectPaths,
+)
 from core.text_unit_handler import TextUnitHandler, TextUnitHandlerConfig  # noqa: E402
-from utils.ai_model_middleware import ModelCallRequest  # noqa: E402
+from utils.ai_model_middleware import ModelCallError, ModelCallRequest  # noqa: E402
 from utils.chunker import chunk_text, chunk_text_with_ranges  # noqa: E402
 from utils.cloud_model_presets import CloudModelPreset  # noqa: E402
 
@@ -259,11 +265,82 @@ def _assert_text_only_workflow() -> None:
             assert payload["media_types"] == ["text"]
             assert payload["source_trace"]["material_refs"]
 
+        request_count_after_first_full = len(fake_model.requests)
+        resumed_chunks = extractor.run_full_extraction_streaming(
+            ProjectConfig(project_id=project_id),
+            cloud_preset=_preset(),
+        )
+        assert resumed_chunks
+        assert len(fake_model.requests) == request_count_after_first_full
+        assert {chunk.chunk_id for chunk in resumed_chunks} == {
+            chunk.chunk_id for chunk in full_chunks
+        }
+        assert {chunk.extraction_run_id for chunk in resumed_chunks} == {
+            chunk.extraction_run_id for chunk in full_chunks
+        }
+
+        clean_chunks = extractor.run_full_extraction_streaming(
+            ProjectConfig(project_id=project_id, extraction_mode=ExtractionMode.CLEAN),
+            cloud_preset=_preset(),
+        )
+        assert clean_chunks
+        assert len(fake_model.requests) > request_count_after_first_full
+
+
+def _assert_text_chunk_checkpoint_survives_later_failure() -> None:
+    project_id = "validation-text-checkpoint"
+    with _isolated_project(project_id) as paths:
+        paths.materials.joinpath("long.txt").write_text("角色 A 的长篇记录。" * 80, encoding="utf-8")
+        extractor = Extractor()
+        run_plan = extractor.prepare_formal_extraction_run_plan(project_id)
+        season_id, unit = extractor._collect_text_units_from_run_plan(run_plan)[0]
+        successful_model = _FakeTextModel()
+        call_count = 0
+
+        def fail_after_first(request: ModelCallRequest) -> FormalExtractionJsonResult:
+            nonlocal call_count
+            call_count += 1
+            if call_count > 1:
+                raise ModelCallError("validation quota exhausted")
+            return successful_model(request)
+
+        checkpoints: list[ChunkExtractionResult] = []
+        handler = TextUnitHandler(
+            TextUnitHandlerConfig(
+                max_input_chars=80,
+                overlap_chars=10,
+                max_chunks_per_unit=8,
+                max_output_tokens=256,
+            ),
+            model_call=fail_after_first,
+        )
+        try:
+            handler.execute(
+                source_root=paths.materials,
+                unit=unit,
+                season_id=season_id,
+                extraction_stage=ExtractionArtifactStage.FULL,
+                extraction_run_id=run_plan.run_id,
+                run_type="formal_extraction",
+                backend="openai_compatible",
+                model_name="validation-model",
+                base_url="https://example.invalid/v1",
+                api_key="validation-key",
+                on_chunk_ready=checkpoints.append,
+            )
+        except ModelCallError:
+            pass
+        else:
+            raise AssertionError("expected the second text chunk request to fail")
+        assert len(checkpoints) == 1
+        assert checkpoints[0].chunk_id.endswith("_text_0001")
+
 
 def main() -> None:
     _assert_chunking()
     _assert_parsing()
     _assert_text_only_workflow()
+    _assert_text_chunk_checkpoint_survives_later_failure()
     print("text unit handler validation passed")
 
 

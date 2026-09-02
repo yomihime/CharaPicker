@@ -25,6 +25,7 @@ from core.extraction_ai import (  # noqa: E402
     call_formal_json_model,
 )
 from core.extractor import Extractor  # noqa: E402
+from core.extraction_plan import FormalExtractionMode, FormalExtractionRunPlan  # noqa: E402
 from core.models import (  # noqa: E402
     CharacterCard,
     CharacterCardKind,
@@ -787,6 +788,176 @@ def _assert_stale_marking_only_updates_compiled_official_cards() -> None:
         assert template_compiled.compile_status == CharacterCardStatus.COMPILED
 
 
+def _assert_full_chunk_reuse_and_run_adoption() -> None:
+    project_id = "validation-full-completion-reuse"
+    with _isolated_project_tree(project_id):
+        extractor = Extractor()
+        old_plan = FormalExtractionRunPlan(
+            project_id=project_id,
+            run_id="run-old-linear",
+            mode=FormalExtractionMode.FULL,
+        )
+        kb.save_extraction_run_plan(project_id, old_plan)
+        source_trace = {
+            "unit_refs": ["unit_video_season_001_episode_001_chunk_0001"],
+            "material_refs": [
+                {
+                    "material_id": "material-video-1",
+                    "relative_path": "season_001/episode_001/chunk_0001.mp4",
+                    "source_media_type": "video",
+                    "content_form": "anime",
+                    "origin": "material",
+                    "fingerprint": "fingerprint-a",
+                    "metadata": {},
+                }
+            ],
+        }
+        chunk = ChunkExtractionResult(
+            season_id="season_001",
+            episode_id="episode_001",
+            chunk_id="chunk_0001",
+            extraction_stage=ExtractionArtifactStage.FULL,
+            extraction_run_id=old_plan.run_id,
+            run_type="formal_extraction",
+            source_path="season_001/episode_001/chunk_0001.mp4",
+            source_trace=source_trace,
+            facts=["existing fact"],
+        )
+        kb.save_chunk_result(project_id, chunk)
+
+        reused = extractor._load_reusable_full_chunk(
+            project_id,
+            season_id=chunk.season_id,
+            episode_id=chunk.episode_id,
+            chunk_id=chunk.chunk_id,
+            expected_source_path=chunk.source_path,
+            expected_source_trace=source_trace,
+            extraction_run_id="run-current-linear",
+        )
+        assert reused is not None
+        assert reused.facts == ["existing fact"]
+        assert reused.extraction_run_id == "run-current-linear"
+        assert reused.model_metadata["reused_from_run_ids"] == [old_plan.run_id]
+
+        changed_trace = {
+            **source_trace,
+            "material_refs": [
+                {
+                    **source_trace["material_refs"][0],
+                    "fingerprint": "fingerprint-b",
+                }
+            ],
+        }
+        assert (
+            extractor._load_reusable_full_chunk(
+                project_id,
+                season_id=chunk.season_id,
+                episode_id=chunk.episode_id,
+                chunk_id=chunk.chunk_id,
+                expected_source_path=chunk.source_path,
+                expected_source_trace=changed_trace,
+                extraction_run_id="run-current-linear",
+            )
+            is None
+        )
+
+
+def _assert_complete_episode_and_season_skip_ai_aggregation() -> None:
+    project_id = "validation-complete-aggregation-reuse"
+    with _isolated_project_tree(project_id):
+        extractor = Extractor()
+        run_id = "run-complete"
+        chunk = ChunkExtractionResult(
+            season_id="season_001",
+            episode_id="episode_001",
+            chunk_id="chunk_0001",
+            extraction_stage=ExtractionArtifactStage.FULL,
+            extraction_run_id=run_id,
+            run_type="formal_extraction",
+            source_path="episode_001/chunk_0001.mp4",
+            source_trace={"unit_refs": ["unit-video-1"], "material_refs": []},
+            facts=["complete fact"],
+        )
+        episode_content = {
+            "season_id": chunk.season_id,
+            "episode_id": chunk.episode_id,
+            "extraction_stage": "full",
+            "extraction_run_id": run_id,
+            "run_type": "formal_extraction",
+            "source_trace": chunk.source_trace,
+            "chunk_results": [chunk.model_dump(mode="json")],
+            "facts": chunk.facts,
+        }
+        episode_summary = {
+            "season_id": chunk.season_id,
+            "episode_id": chunk.episode_id,
+            "extraction_stage": "full",
+            "extraction_run_id": run_id,
+            "run_type": "formal_extraction",
+            "source_trace": {},
+        }
+        kb.save_episode_content(project_id, chunk.season_id, chunk.episode_id, episode_content)
+        kb.save_episode_summary(project_id, chunk.season_id, chunk.episode_id, episode_summary)
+        manifest = {
+            "extraction_run_id": run_id,
+            "seasons": [
+                {
+                    "season_id": chunk.season_id,
+                    "episodes": [{"episode_id": chunk.episode_id, "chunks": []}],
+                }
+            ],
+        }
+
+        episode_ready, episode_usage = extractor._finalize_formal_episode_context(
+            project_id,
+            manifest,
+            chunk.season_id,
+            chunk.episode_id,
+            chunk_inputs=[{"chunk_id": chunk.chunk_id}],
+            episode_chunks=[chunk],
+            previous_episode_id="",
+            extraction_run_id=run_id,
+            backend="openai_compatible",
+            model_name="validation-model",
+            base_url="https://example.invalid/v1",
+            api_key="validation-key",
+            context_window_tokens=8192,
+        )
+        assert episode_ready is True
+        assert episode_usage == {}
+
+        season_content = {
+            "season_id": chunk.season_id,
+            "extraction_stage": "full",
+            "extraction_run_id": run_id,
+            "run_type": "formal_extraction",
+            "source_trace": {},
+            "episode_contents": [episode_content],
+        }
+        season_summary = {
+            "season_id": chunk.season_id,
+            "extraction_stage": "full",
+            "extraction_run_id": run_id,
+            "run_type": "formal_extraction",
+            "source_trace": {},
+        }
+        kb.save_season_content(project_id, chunk.season_id, season_content)
+        kb.save_season_summary(project_id, chunk.season_id, season_summary)
+        season_ready, season_usage = extractor._finalize_formal_season_context(
+            project_id,
+            manifest,
+            chunk.season_id,
+            extraction_run_id=run_id,
+            backend="openai_compatible",
+            model_name="validation-model",
+            base_url="https://example.invalid/v1",
+            api_key="validation-key",
+            context_window_tokens=8192,
+        )
+        assert season_ready is True
+        assert season_usage == {}
+
+
 def main() -> None:
     _assert_fast_concurrency_bounds()
     _assert_formal_json_retry_success_on_third_attempt()
@@ -800,6 +971,8 @@ def main() -> None:
     _assert_ai_aggregation_source_trace_from_mixed_media()
     _assert_clean_regenerable_artifacts_scope()
     _assert_stale_marking_only_updates_compiled_official_cards()
+    _assert_full_chunk_reuse_and_run_adoption()
+    _assert_complete_episode_and_season_skip_ai_aggregation()
     print("formal extraction workflow validation passed")
 
 
