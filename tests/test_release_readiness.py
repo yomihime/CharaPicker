@@ -38,7 +38,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             project = root / "pyproject.toml"
             project.write_text(
                 project.read_text(encoding="utf-8").replace(
-                    'version = "1.0.0"',
+                    'version = "1.0.1"',
                     'version = "9.9.9"',
                 ),
                 encoding="utf-8",

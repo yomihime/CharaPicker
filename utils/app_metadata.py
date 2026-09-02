@@ -11,7 +11,7 @@ def format_version_tag(version: str, release_stage: str) -> str:
 
 APP_NAME = "CharaPicker"
 APP_ORGANIZATION_NAME = APP_NAME
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 APP_RELEASE_STAGE = "release"
 APP_VERSION_TAG = format_version_tag(APP_VERSION, APP_RELEASE_STAGE)
 
