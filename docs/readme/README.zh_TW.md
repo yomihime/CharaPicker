@@ -41,7 +41,7 @@ CharaPicker（拾卡姬）是一個個人實驗性質的桌面工具。它嘗試
 ## 資料、隱私與更新
 
 - `projects/` 是使用者資料根目錄。應用程式會為關鍵設定和角色卡保留一份最近有效備份，並在偵測到損壞時提供恢復入口，但這不是完整備份方案；重要升級前仍應自行複製 `projects/` 和 `config.yaml`。
-- 更新器會盡量保留 `projects/`、`config.yaml`、`log/`、`bin/` 和 `models/`，並在啟動確認失敗時回復舊版；斷電、磁碟故障或手動移動檔案仍可能超出自動恢復範圍。
+- 更新器會把已驗證的更新套件保留在安裝目錄的 `download/`，把即將覆蓋的舊程式檔案備份到 `update_backup/`，再直接覆蓋新版程式檔案；`projects/`、`config.yaml`、`log/`、`bin/` 和 `models/` 保持原位。可攜版更新不保證自動回復，失敗時可使用保留的 ZIP 手動覆蓋。
 - `config.yaml` 可能包含 API Key，目前儲存在本機應用程式目錄，未使用系統認證資料庫加密。請勿分享該檔案，也不要將它提交到版本控制。
 - 傳送給雲端模型的素材會離開本機，並受所選供應商的計費、隱私和內容政策約束；請只處理你有權使用的素材。
 - 官方下載入口只有本專案的 [GitHub Releases](https://github.com/yomihime/CharaPicker/releases)。目前 Windows 二進位沒有 Authenticode 簽章，Windows 可能顯示未知發行者或 SmartScreen 提示。

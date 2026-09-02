@@ -41,7 +41,7 @@ It is not mature commercial software, and it is not something I would treat as a
 ## Data, Privacy, and Updates
 
 - `projects/` is the user-data root. CharaPicker keeps one recent valid backup for critical configuration and character cards and offers recovery when corruption is detected, but this is not a complete backup system. Copy `projects/` and `config.yaml` before an important upgrade.
-- The updater is designed to preserve `projects/`, `config.yaml`, `log/`, `bin/`, and `models`, and to roll back when startup confirmation fails. Power loss, disk failure, or manually moved files can still fall outside automatic recovery.
+- The updater keeps the verified package in `download/`, backs up program files that are about to be overwritten to `update_backup/`, and then overlays the new program files in place. `projects/`, `config.yaml`, `log/`, `bin/`, and `models/` stay where they are. Portable updates do not guarantee automatic rollback; if an update fails, use the retained ZIP for a manual overlay.
 - `config.yaml` may contain API keys. It is currently stored in the local application directory and is not encrypted with the operating system credential vault. Do not share it or commit it to version control.
 - Materials sent to a cloud model leave your computer and are subject to the selected provider's billing, privacy, and content policies. Process only materials you are authorized to use.
 - The only official download location is this project's [GitHub Releases](https://github.com/yomihime/CharaPicker/releases). Current Windows binaries are not Authenticode-signed, so Windows may show an unknown-publisher or SmartScreen warning.

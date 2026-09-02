@@ -25,7 +25,7 @@
 - `pages/model_test_helpers.py`：模型连通性测试页使用的纯 helper，负责 token 用量格式化、测试素材 data URL 和响应语言提示等逻辑。
 - `pages/prompt_page.py`：提示词设置页。显示默认提示词，保存或清除用户自定义提示词覆盖。
 - `pages/settings_page.py`：语言、主题和日志等级等应用设置页。
-- `pages/about_page.py`：项目信息、注意事项和手动更新入口；只负责更新通道选择、弹窗、进度与重启反馈，不直接执行联网下载或安装目录替换。
+- `pages/about_page.py`：项目信息、注意事项和手动更新入口；只负责更新通道选择、弹窗、进度与重启反馈，不直接执行联网下载或程序文件覆盖。
 - `pages/insights_page.py`：独立洞察页组件，当前未接入主窗口导航。
 - `widgets/insight_stream_panel.py`：洞察流组件，使用 Card + Timeline 展示结构化事件，并把事件 `meta` 中的 `media_type`、`content_form`、unit 和素材名转换为本地化摘要；不自行判断提取能力或业务状态。
 - `widgets/dialog_middleware.py`：应用自有 Fluent 弹窗外壳。

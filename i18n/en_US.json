@@ -716,7 +716,7 @@
   "about.update.download.progress.extract": "Extracting and checking the update package...",
   "about.update.download.progress.ready": "The update is ready. CharaPicker will restart...",
   "about.update.apply.failure.title": "CharaPicker Update Failed",
-  "about.update.apply.failure.content": "The new version could not be installed. CharaPicker attempted to restore and restart the previous version.",
+  "about.update.apply.failure.content": "The update could not be completed, and some program files may already have been overwritten. The verified update package remains in the install directory's download folder, and the previous program files remain in update_backup. Extract the update package and copy it over the install directory manually. CharaPicker does not intentionally delete projects, configuration, or local models.",
   "about.update.size.unknown": "unknown size",
   "about.notice.title": "Notices",
   "about.notice.legalMaterial": "Only import materials you have the right to use.",

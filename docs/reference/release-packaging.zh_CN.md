@@ -115,7 +115,7 @@ CharaPicker-v1.0.0-windows-x64.zip
 发布包应包含：
 
 - 运行所需程序文件。
-- 用于退出后替换安装目录和失败回滚的 `CharaPickerUpdater.exe`。
+- 用于退出后备份旧程序文件并覆盖新版 payload 的 `CharaPickerUpdater.exe`。
 - `i18n/`、`res/` 和 qfluentwidgets 运行资源。
 - 必要说明文件：`README.md`、`LICENSE` 和 `THIRD_PARTY_NOTICES.md`。
 
@@ -148,7 +148,7 @@ GitHub Actions 只负责编排构建，不承载应用运行逻辑。当前 Wind
 - 更新资产必须精确匹配 `CharaPicker-v<version>[-<stage>]-windows-x64.zip` 及其同名 `.sha256`；不使用模糊匹配或任意 Release 附件。
 - 更新下载 URL 必须来自本项目 GitHub Releases 的固定下载路径。ZIP 使用独立的 2 GiB 压缩包上限并核对 GitHub asset `size`，同名 checksum 使用 64 KiB 上限；两者都同时检查 HTTP `Content-Length` 与实际流式字节数，失败或取消时清理 staging 文件。
 - 主程序通过统一网络中间件下载并校验更新包 SHA-256。自动更新接受应用文件位于 ZIP 根目录，或位于名称任意的唯一单层包装目录；解析出的 payload 必须直接包含主程序和更新器。多层嵌套、多个候选，或包装目录外存在其他内容时必须拒绝。
-- 更新器先等待当前主程序退出，再备份并替换安装目录；`projects/`、`config.yaml`、`log/`、`bin/` 和 `models/` 必须跨版本保留。新版未在限定时间内完成启动确认时，更新器应恢复旧版并重新启动。
+- 更新器先等待当前主程序退出，把已验证的 ZIP 与 checksum 保留到安装目录的 `download/`，并按照新版 payload 顶层项目把现有程序文件备份到 `update_backup/`，随后把 payload 直接覆盖到原安装目录。`projects/`、`config.yaml`、`log/`、`bin/` 和 `models/` 必须保持原位且不得进入覆盖范围。便携版自动更新不承诺自动回滚；覆盖或启动确认失败时应保留下载包和程序备份，供用户手工恢复。
 
 tag 构建会显式把当前 tag 传给 `build.bat`，让构建产物版本、阶段与发布 tag 对齐；若 tag 与 `utils.app_metadata.py` 不一致，构建必须失败。发布 GitHub Release 前必须先在 `CHANGELOG.md` 中准备同名版本小节；workflow 会抽取该小节作为 Release 正文开头，找不到对应小节时应失败，以避免发布缺少版本说明的二进制包。同时 workflow 必须开启 GitHub 自动 release notes，让 Release 页面保留 `What's Changed`、完整 changelog 链接和 contributors 区域。
 

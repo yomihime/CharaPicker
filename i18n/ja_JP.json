@@ -716,7 +716,7 @@
   "about.update.download.progress.extract": "更新パッケージを展開して確認しています...",
   "about.update.download.progress.ready": "更新の準備ができました。再起動します...",
   "about.update.apply.failure.title": "CharaPicker の更新に失敗しました",
-  "about.update.apply.failure.content": "新しいバージョンをインストールできませんでした。以前のバージョンを復元して再起動しました。",
+  "about.update.apply.failure.content": "更新を完了できず、一部のプログラムファイルが上書きされている可能性があります。検証済みの更新パッケージはインストール先の download フォルダーに、上書き前のプログラムファイルは update_backup フォルダーに残っています。更新パッケージを手動で展開し、インストール先へ上書きしてください。projects、設定、ローカルモデルを意図的に削除することはありません。",
   "about.update.size.unknown": "サイズ不明",
   "about.notice.title": "声明",
   "about.notice.legalMaterial": "使用権限のある素材のみインポートしてください。",
