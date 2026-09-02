@@ -192,6 +192,16 @@ def _assert_text_only_workflow() -> None:
             model_call=fake_model,
         )
         unit = text_inputs[0][1]
+        planned_chunk_ids = handler.planned_chunk_ids(
+            source_root=paths.materials,
+            unit=unit,
+            chunk_limit=2,
+        )
+        assert planned_chunk_ids == [
+            f"{unit.unit_id}_text_0001",
+            f"{unit.unit_id}_text_0002",
+        ]
+        assert fake_model.requests == []
         direct = handler.execute(
             source_root=paths.materials,
             unit=unit,

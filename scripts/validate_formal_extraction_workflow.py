@@ -25,7 +25,20 @@ from core.extraction_ai import (  # noqa: E402
     call_formal_json_model,
 )
 from core.extractor import Extractor  # noqa: E402
-from core.extraction_plan import FormalExtractionMode, FormalExtractionRunPlan  # noqa: E402
+from core.extraction_plan import (  # noqa: E402
+    ContentForm,
+    EpisodePlan,
+    ExtractionUnit,
+    FormalExtractionMode,
+    FormalExtractionRunPlan,
+    MaterialRef,
+    MediaType,
+)
+from core.formal_dispatch import (  # noqa: E402
+    FormalDispatchKind,
+    FormalDispatchPlan,
+    FormalHandlerDispatch,
+)
 from core.models import (  # noqa: E402
     CharacterCard,
     CharacterCardKind,
@@ -37,6 +50,7 @@ from core.models import (  # noqa: E402
     ProjectPaths,
 )
 from utils.ai_model_middleware import ModelCallRequest, ModelCallResult, ModelMessage  # noqa: E402
+from utils.cloud_model_presets import CloudModelPreset  # noqa: E402
 
 
 @contextmanager
@@ -862,6 +876,109 @@ def _assert_full_chunk_reuse_and_run_adoption() -> None:
         )
 
 
+def _assert_full_extraction_inventory_counts_reuse_before_requests() -> None:
+    project_id = "validation-full-inventory"
+    with _isolated_project_tree(project_id):
+        extractor = Extractor()
+        units = [
+            ExtractionUnit(
+                unit_id=f"unit-video-{index}",
+                episode_id="episode_001",
+                media_type=MediaType.VIDEO,
+                content_form=ContentForm.ANIME,
+                material_ref=MaterialRef(
+                    material_id=f"material-video-{index}",
+                    relative_path=f"episode_001/chunk_{index:04d}.mp4",
+                    source_media_type=MediaType.VIDEO,
+                    content_form=ContentForm.ANIME,
+                    fingerprint=f"fingerprint-{index}",
+                ),
+                unit_kind="video_chunk",
+                metadata={"legacy_chunk_id": f"chunk_{index:04d}"},
+            )
+            for index in (1, 2)
+        ]
+        run_plan = FormalExtractionRunPlan(
+            project_id=project_id,
+            run_id="run-inventory",
+            mode=FormalExtractionMode.FULL,
+            episodes=[
+                EpisodePlan(
+                    season_id="season_001",
+                    episode_id="episode_001",
+                    units=units,
+                )
+            ],
+        )
+        previous_plan = run_plan.model_copy(
+            update={"run_id": "run-inventory-previous"}
+        )
+        kb.save_extraction_run_plan(project_id, previous_plan)
+        manifest = extractor._legacy_manifest_from_run_plan(run_plan)
+        chunk_inputs = extractor._collect_formal_video_chunk_inputs_from_run_plan(
+            project_id,
+            run_plan,
+        )
+        first_input = chunk_inputs[0]
+        kb.save_chunk_result(
+            project_id,
+            ChunkExtractionResult(
+                season_id=first_input["season_id"],
+                episode_id=first_input["episode_id"],
+                chunk_id=first_input["chunk_id"],
+                extraction_stage=ExtractionArtifactStage.FULL,
+                extraction_run_id=previous_plan.run_id,
+                run_type="formal_extraction",
+                source_path=first_input["source_path"],
+                source_trace=first_input["source_trace"],
+                facts=["existing fact"],
+            ),
+        )
+        dispatch_plan = FormalDispatchPlan(
+            handlers=(
+                FormalHandlerDispatch(
+                    FormalDispatchKind.VIDEO,
+                    tuple(unit.unit_id for unit in units),
+                ),
+            ),
+            unsupported_units=(),
+        )
+        inventory = extractor._build_full_extraction_inventory(
+            project_id,
+            run_plan,
+            manifest,
+            dispatch_plan,
+            preset=CloudModelPreset(
+                name="validation",
+                provider="openai",
+                base_url="https://example.invalid/v1",
+                api_key="validation-key",
+                model_name="validation-model",
+            ),
+            chunk_inputs=chunk_inputs,
+        )
+
+        assert inventory["total_chunks"] == 2
+        assert inventory["reusable_chunks"] == 1
+        assert inventory["missing_chunks"] == 1
+        assert inventory["invalid_chunks"] == 0
+        assert inventory["pending_chunks"] == 1
+        assert inventory["aggregate_total"] == 4
+        assert inventory["aggregate_pending"] == 4
+        assert inventory["handlers"]["video"] == {
+            "total": 2,
+            "reusable": 1,
+            "missing": 1,
+            "invalid": 0,
+            "unresolved_units": 0,
+        }
+        persisted = kb.load_chunk_result(
+            kb.chunks_root_path(project_id, "season_001", "episode_001")
+            / "chunk_0001.json"
+        )
+        assert persisted.extraction_run_id == previous_plan.run_id
+
+
 def _assert_complete_episode_and_season_skip_ai_aggregation() -> None:
     project_id = "validation-complete-aggregation-reuse"
     with _isolated_project_tree(project_id):
@@ -972,6 +1089,7 @@ def main() -> None:
     _assert_clean_regenerable_artifacts_scope()
     _assert_stale_marking_only_updates_compiled_official_cards()
     _assert_full_chunk_reuse_and_run_adoption()
+    _assert_full_extraction_inventory_counts_reuse_before_requests()
     _assert_complete_episode_and_season_skip_ai_aggregation()
     print("formal extraction workflow validation passed")
 
