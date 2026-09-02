@@ -39,6 +39,12 @@ class StartupMiddlewareTests(unittest.TestCase):
 
             self.assertEqual(snapshot.project_configs, [config])
             self.assertEqual(snapshot.project_config_issues, [issue])
+            self.assertFalse(snapshot.ffmpeg_ready)
+            self.assertEqual(snapshot.encoder_options, [])
+            self.assertFalse(snapshot.llamacpp_ready)
+            self.assertFalse(snapshot.whisper_status.ready)
+            self.assertEqual(snapshot.local_models, [])
+            self.assertEqual(snapshot.cloud_presets, [])
 
 
 if __name__ == "__main__":

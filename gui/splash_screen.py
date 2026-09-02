@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from time import perf_counter
+from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QEasingCurve, QObject, QPointF, QPropertyAnimation, QSize, QThread, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPen
@@ -19,7 +21,6 @@ try:
 except ImportError:
     isDarkTheme = None
 
-from gui.main_window import MainWindow
 from res.colors import (
     SPLASH_DARK_CARD_BACKGROUND,
     SPLASH_DARK_CARD_BORDER,
@@ -43,6 +44,9 @@ from res.colors import (
 from utils.app_metadata import APP_NAME
 from utils.i18n import t
 from utils.startup_middleware import StartupWarmupSnapshot, warmup_startup_context
+
+if TYPE_CHECKING:
+    from gui.main_window import MainWindow
 
 
 LOGGER = logging.getLogger(__name__)
@@ -272,6 +276,7 @@ class StartupController(QObject):
 
     def __init__(self) -> None:
         super().__init__()
+        self._started_at = perf_counter()
         self.splash = SplashScreen()
         self.window: MainWindow | None = None
         self._startup_snapshot: StartupWarmupSnapshot | None = None
@@ -320,8 +325,20 @@ class StartupController(QObject):
         self._warmup_worker = None
 
     def _create_main_window(self) -> None:
+        import_started_at = perf_counter()
+        from gui.main_window import MainWindow
+
+        LOGGER.info(
+            "Main window module imported during startup; duration_ms=%.1f",
+            (perf_counter() - import_started_at) * 1000,
+        )
+        window_started_at = perf_counter()
         LOGGER.info("Creating main window during startup")
         self.window = MainWindow(self._startup_snapshot)
+        LOGGER.info(
+            "Main window created during startup; duration_ms=%.1f",
+            (perf_counter() - window_started_at) * 1000,
+        )
 
     def _show_main_window(self) -> None:
         if self.window is None:
@@ -335,7 +352,10 @@ class StartupController(QObject):
 
         acknowledge_update_startup()
         QTimer.singleShot(0, self.window.offer_persistence_recovery)
-        LOGGER.info("Main window shown")
+        LOGGER.info(
+            "Main window shown; startup_controller_duration_ms=%.1f",
+            (perf_counter() - self._started_at) * 1000,
+        )
 
     def _center_main_window(self) -> None:
         if self.window is None:

@@ -53,7 +53,7 @@
 - `source_importer.py`：把直接素材或已启用容器按项目目录规则原子复制到 `projects/{project_id}/raw`，计算 raw 目标，并通过预处理 manifest 协调 raw 清理、素材移除和 stale 派生产物清理；容器不得进入普通 materials link 分支。
 - `source_status.py`：计算项目页需要的素材显示名、raw/materials 或预处理 manifest 映射、项目内素材列表和素材状态；状态刷新只执行 manifest 结构、文件存在和大小检查，不在 GUI 主线程计算派生文件 SHA256。
 - `material_processing_middleware.py`：统一接收上层的素材处理请求，把 raw 拆成直接视频、直接非视频、已启用容器和 unsupported 四类；容器先预处理，直接非视频走 source importer，只有非原始方案中的直接视频进入 FFmpeg。FFmpeg 缺失策略由调用方显式选择 `error` 或 `skip_video`，并由 middleware 在执行点再次校验。
-- `startup_middleware.py`：启动阶段预加载中间件，集中探测 FFmpeg/llama.cpp/whisper.cpp、预取项目配置和云模型预设，供启动页线程复用。
+- `startup_middleware.py`：启动阶段预加载中间件，并行探测 FFmpeg/llama.cpp/whisper.cpp、本地模型和云模型预设，预取项目配置并记录分项耗时，供启动页线程复用。
 - `logging_preferences.py`：管理日志等级偏好。
 - `logging_middleware.py`：安装全局日志中间件，日志只写入文件；日志等级边界和敏感信息规则见运行时中间件参考文档。
 - `ai_model_middleware.py`：统一模型调用入口，负责加载默认提示词、构造标准消息、携带按请求设置的超时/结构化输出/后端专用参数、屏蔽敏感日志并路由下层模型后端；同时保留供应商错误的结构化失败类别，并提供不含 prompt 正文的资源版本、有效来源和模板 SHA-256 归因。OpenAI-compatible 原生音频在读取和 Base64 编码本地文件前执行 25 MiB 上限，超限时保留 transcript 主路径并返回可解释降级。
