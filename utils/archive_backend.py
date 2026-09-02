@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Callable, Literal, Protocol
 
 from utils.paths import APP_ROOT
+from utils.subprocess_utils import no_window_creation_flags
 
 
 ArchiveBackendFormat = Literal["7z", "rar"]
@@ -371,14 +372,13 @@ def _run_process(
     timeout_seconds: float,
     cancelled: CancelledCallback | None,
 ) -> _CompletedProcess:
-    creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     try:
         process = subprocess.Popen(
             command,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            creationflags=creationflags,
+            creationflags=no_window_creation_flags(),
         )
     except (OSError, ValueError) as exc:
         raise ArchiveBackendUnavailableError(type(exc).__name__) from exc

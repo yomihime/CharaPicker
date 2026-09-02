@@ -4,6 +4,8 @@ import os
 import platform
 import subprocess
 
+from utils.subprocess_utils import no_window_creation_flags
+
 
 def detect_video_device_names() -> list[str]:
     if os.name != "nt":
@@ -36,6 +38,7 @@ def run_powershell_lines(command: str) -> list[str]:
             ["powershell", "-NoProfile", "-Command", command],
             capture_output=True,
             check=False,
+            creationflags=no_window_creation_flags(),
         )
     except (OSError, subprocess.SubprocessError):
         return []

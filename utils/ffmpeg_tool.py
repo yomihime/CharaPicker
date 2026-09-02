@@ -22,6 +22,7 @@ from utils.ffmpeg_detection import (
 from utils.material_processing_events import FFMPEG_EVENT_PREFIX, SOURCE_PROCESSING_CANCELLED_MESSAGE
 from utils.media_types import VIDEO_SUFFIXES, is_import_supported_source
 from utils.paths import ensure_project_tree
+from utils.subprocess_utils import no_window_creation_flags
 
 FFMPEG_CANDIDATES = ("ffmpeg.exe", "ffmpeg")
 FFMPEG_CHECK_TIMEOUT_SECONDS = 6
@@ -98,6 +99,7 @@ def is_ffmpeg_binary_usable(binary_path: Path) -> bool:
             capture_output=True,
             timeout=FFMPEG_CHECK_TIMEOUT_SECONDS,
             check=False,
+            creationflags=no_window_creation_flags(),
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -668,6 +670,7 @@ def _probe_media_output(
         [str(ffmpeg_binary), "-hide_banner", "-i", str(source)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        creationflags=no_window_creation_flags(),
     )
     try:
         while process.poll() is None:
@@ -695,6 +698,7 @@ def _run_ffmpeg_command(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        creationflags=no_window_creation_flags(),
     )
     stderr_lines: list[str] = []
     progress_snapshot: dict[str, str] = {}
@@ -775,6 +779,7 @@ def _terminate_process(process: subprocess.Popen[bytes]) -> None:
                 ["taskkill", "/PID", str(process.pid), "/T", "/F"],
                 capture_output=True,
                 check=False,
+                creationflags=no_window_creation_flags(),
             )
         else:
             process.terminate()
@@ -1011,6 +1016,7 @@ def _read_supported_video_encoders(ffmpeg_binary: Path) -> set[str]:
             [str(ffmpeg_binary), "-hide_banner", "-encoders"],
             capture_output=True,
             check=False,
+            creationflags=no_window_creation_flags(),
         )
     except (OSError, subprocess.SubprocessError):
         return set()
