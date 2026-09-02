@@ -400,6 +400,7 @@ class Extractor(QObject):
         expected_source_path: str,
         expected_source_trace: dict[str, Any],
         extraction_run_id: str,
+        persist_adoption: bool = True,
     ) -> ChunkExtractionResult | None:
         path = kb.chunks_root_path(project_id, season_id, episode_id) / f"{chunk_id}.json"
         if not path.is_file() or kb.is_preview_artifact_path(path):
@@ -447,7 +448,8 @@ class Extractor(QObject):
                     "model_metadata": model_metadata,
                 }
             )
-            self.save_chunk_extraction_result(project_id, chunk)
+            if persist_adoption:
+                self.save_chunk_extraction_result(project_id, chunk)
         return chunk
 
     def _load_reusable_unit_chunks(
@@ -1949,6 +1951,229 @@ class Extractor(QObject):
             and unit.handler_options.get("transcript_candidate") is True
         ]
 
+    def _build_full_extraction_inventory(
+        self,
+        project_id: str,
+        run_plan: FormalExtractionRunPlan,
+        manifest: dict[str, Any],
+        dispatch_plan: FormalDispatchPlan,
+        *,
+        preset: CloudModelPreset,
+        chunk_inputs: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Inspect reusable formal artifacts without making model requests or writing files."""
+        inventory: dict[str, Any] = {
+            "total_chunks": 0,
+            "reusable_chunks": 0,
+            "missing_chunks": 0,
+            "invalid_chunks": 0,
+            "pending_chunks": 0,
+            "unresolved_units": 0,
+            "aggregate_total": 0,
+            "aggregate_reusable": 0,
+            "aggregate_pending": 0,
+            "handlers": {},
+        }
+        expected_ids_by_episode: dict[tuple[str, str], list[str]] = {}
+        reusable_by_episode: dict[tuple[str, str], list[ChunkExtractionResult]] = {}
+        pending_episode_keys: set[tuple[str, str]] = set()
+
+        def handler_stats(handler_name: str) -> dict[str, int]:
+            handlers = inventory["handlers"]
+            if handler_name not in handlers:
+                handlers[handler_name] = {
+                    "total": 0,
+                    "reusable": 0,
+                    "missing": 0,
+                    "invalid": 0,
+                    "unresolved_units": 0,
+                }
+            return handlers[handler_name]
+
+        def inspect_chunk(
+            handler_name: str,
+            *,
+            season_id: str,
+            episode_id: str,
+            chunk_id: str,
+            expected_source_path: str,
+            expected_source_trace: dict[str, Any],
+        ) -> None:
+            key = (season_id, episode_id)
+            expected_ids_by_episode.setdefault(key, []).append(chunk_id)
+            stats = handler_stats(handler_name)
+            stats["total"] += 1
+            inventory["total_chunks"] += 1
+            path = kb.chunks_root_path(project_id, season_id, episode_id) / f"{chunk_id}.json"
+            reusable = self._load_reusable_full_chunk(
+                project_id,
+                season_id=season_id,
+                episode_id=episode_id,
+                chunk_id=chunk_id,
+                expected_source_path=expected_source_path,
+                expected_source_trace=expected_source_trace,
+                extraction_run_id=run_plan.run_id,
+                persist_adoption=False,
+            )
+            if reusable is not None:
+                stats["reusable"] += 1
+                inventory["reusable_chunks"] += 1
+                reusable_by_episode.setdefault(key, []).append(reusable)
+                return
+            pending_episode_keys.add(key)
+            if path.is_file():
+                stats["invalid"] += 1
+                inventory["invalid_chunks"] += 1
+            else:
+                stats["missing"] += 1
+                inventory["missing_chunks"] += 1
+
+        handler_refs = {
+            kind: {
+                unit_ref
+                for handler in dispatch_plan.handlers
+                if handler.kind == kind
+                for unit_ref in handler.unit_refs
+            }
+            for kind in FormalDispatchKind
+        }
+        for chunk_input in chunk_inputs:
+            if self._manifest_string(chunk_input.get("unit_ref")) not in handler_refs[
+                FormalDispatchKind.VIDEO
+            ]:
+                continue
+            inspect_chunk(
+                FormalDispatchKind.VIDEO.value,
+                season_id=self._manifest_string(chunk_input.get("season_id")),
+                episode_id=self._manifest_string(chunk_input.get("episode_id")),
+                chunk_id=self._manifest_string(chunk_input.get("chunk_id")),
+                expected_source_path=self._manifest_string(chunk_input.get("source_path")),
+                expected_source_trace=self._source_trace_from_chunk_input(chunk_input),
+            )
+
+        project_paths = ensure_project_tree(project_id)
+        text_handler = self._text_unit_handler(preset)
+        for season_id, unit in self._collect_text_units_from_run_plan(run_plan):
+            if unit.unit_id not in handler_refs[FormalDispatchKind.TEXT]:
+                continue
+            source_root = (
+                project_paths.knowledge_base
+                if unit.handler_options.get("storage_root") == "knowledge_base"
+                else project_paths.materials
+            )
+            try:
+                chunk_ids = text_handler.planned_chunk_ids(
+                    source_root=source_root,
+                    unit=unit,
+                )
+            except (OSError, ValueError, json.JSONDecodeError):
+                stats = handler_stats(FormalDispatchKind.TEXT.value)
+                stats["unresolved_units"] += 1
+                inventory["unresolved_units"] += 1
+                key = (season_id, unit.episode_id)
+                expected_ids_by_episode.setdefault(key, [])
+                pending_episode_keys.add(key)
+                continue
+            expected_trace = self._source_trace_for_unit(unit).model_dump(mode="json")
+            for chunk_id in chunk_ids:
+                inspect_chunk(
+                    FormalDispatchKind.TEXT.value,
+                    season_id=season_id,
+                    episode_id=unit.episode_id,
+                    chunk_id=chunk_id,
+                    expected_source_path=unit.material_ref.relative_path,
+                    expected_source_trace=expected_trace,
+                )
+
+        for season_id, unit in self._collect_image_units_from_run_plan(run_plan):
+            if unit.unit_id not in handler_refs[FormalDispatchKind.IMAGE]:
+                continue
+            inspect_chunk(
+                FormalDispatchKind.IMAGE.value,
+                season_id=season_id,
+                episode_id=unit.episode_id,
+                chunk_id=f"{unit.unit_id}_image_0001",
+                expected_source_path=unit.material_ref.relative_path,
+                expected_source_trace=self._source_trace_for_unit(unit).model_dump(mode="json"),
+            )
+
+        for season_id, unit in self._collect_native_media_insight_units_from_run_plan(run_plan):
+            if unit.unit_id not in handler_refs[FormalDispatchKind.NATIVE_MEDIA]:
+                continue
+            inspect_chunk(
+                FormalDispatchKind.NATIVE_MEDIA.value,
+                season_id=season_id,
+                episode_id=unit.episode_id,
+                chunk_id=f"{unit.unit_id}_native_media_0001",
+                expected_source_path=unit.material_ref.relative_path,
+                expected_source_trace=self._source_trace_for_unit(unit).model_dump(mode="json"),
+            )
+
+        inventory["pending_chunks"] = (
+            inventory["missing_chunks"] + inventory["invalid_chunks"]
+        )
+        season_ids: set[str] = set()
+        pending_aggregate_seasons: set[str] = set()
+        for (season_id, episode_id), expected_chunk_ids in expected_ids_by_episode.items():
+            season_ids.add(season_id)
+            inventory["aggregate_total"] += 2
+            key = (season_id, episode_id)
+            if key in pending_episode_keys:
+                inventory["aggregate_pending"] += 2
+                pending_aggregate_seasons.add(season_id)
+                continue
+            reusable_content = self._load_reusable_episode_content(
+                project_id,
+                season_id,
+                episode_id,
+                episode_chunks=reusable_by_episode.get(key, []),
+                expected_chunk_ids=expected_chunk_ids,
+                extraction_run_id=run_plan.run_id,
+                persist_adoption=False,
+            )
+            if reusable_content is None:
+                inventory["aggregate_pending"] += 2
+                pending_aggregate_seasons.add(season_id)
+                continue
+            inventory["aggregate_reusable"] += 1
+            reusable_summary = self._load_and_adopt_full_artifact(
+                kb.episode_summary_path(project_id, season_id, episode_id),
+                extraction_run_id=run_plan.run_id,
+                persist_adoption=False,
+            )
+            if reusable_summary is None:
+                inventory["aggregate_pending"] += 1
+                pending_aggregate_seasons.add(season_id)
+            else:
+                inventory["aggregate_reusable"] += 1
+
+        for season_id in season_ids:
+            inventory["aggregate_total"] += 2
+            if season_id in pending_aggregate_seasons:
+                inventory["aggregate_pending"] += 2
+                continue
+            reusable_content = self._load_reusable_season_content(
+                project_id,
+                manifest,
+                season_id,
+                extraction_run_id=run_plan.run_id,
+                persist_adoption=False,
+            )
+            if reusable_content is None:
+                inventory["aggregate_pending"] += 2
+                continue
+            inventory["aggregate_reusable"] += 1
+            reusable_summary = self._load_and_adopt_full_artifact(
+                kb.season_summary_path(project_id, season_id),
+                extraction_run_id=run_plan.run_id,
+                persist_adoption=False,
+            )
+            if reusable_summary is None:
+                inventory["aggregate_pending"] += 1
+            else:
+                inventory["aggregate_reusable"] += 1
+        return inventory
+
     def _text_unit_handler(self, preset: CloudModelPreset) -> TextUnitHandler:
         context_tokens = context_window_budget_tokens(preset)
         max_input_chars = TEXT_UNIT_DEFAULT_INPUT_CHARS
@@ -2852,6 +3077,7 @@ class Extractor(QObject):
         path: Path,
         *,
         extraction_run_id: str,
+        persist_adoption: bool = True,
     ) -> dict[str, Any] | None:
         if not path.is_file():
             return None
@@ -2873,7 +3099,8 @@ class Extractor(QObject):
             metadata["reused_by_full_completion"] = True
             payload["extraction_run_id"] = extraction_run_id
             payload["model_metadata"] = metadata
-            kb.write_json(path, payload)
+            if persist_adoption:
+                kb.write_json(path, payload)
         return payload
 
     def _chunk_semantic_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -2925,10 +3152,12 @@ class Extractor(QObject):
         episode_chunks: list[ChunkExtractionResult],
         expected_chunk_ids: list[str],
         extraction_run_id: str,
+        persist_adoption: bool = True,
     ) -> dict[str, Any] | None:
         content = self._load_and_adopt_full_artifact(
             kb.episode_content_path(project_id, season_id, episode_id),
             extraction_run_id=extraction_run_id,
+            persist_adoption=persist_adoption,
         )
         if content is None:
             return None
@@ -3328,10 +3557,12 @@ class Extractor(QObject):
         season_id: str,
         *,
         extraction_run_id: str,
+        persist_adoption: bool = True,
     ) -> dict[str, Any] | None:
         content = self._load_and_adopt_full_artifact(
             kb.season_content_path(project_id, season_id),
             extraction_run_id=extraction_run_id,
+            persist_adoption=persist_adoption,
         )
         if content is None:
             return None
@@ -6044,6 +6275,13 @@ class Extractor(QObject):
             image_input_supported=provider_supports_capability(preset.provider, "image"),
             native_media_handler=self._native_media_insight_handler(preset),
         )
+        if extraction_mode == ExtractionMode.FULL:
+            self._emit_full_event(
+                emit_event,
+                title=t("extractor.full.inventory.title"),
+                description=t("extractor.full.inventory.running"),
+                status=InsightStatus.RUNNING,
+            )
         self._emit_formal_unsupported_units(emit_event, dispatch_plan.unsupported_units)
         chunk_inputs = (
             self._collect_formal_video_chunk_inputs_from_run_plan(
@@ -6114,6 +6352,35 @@ class Extractor(QObject):
             chunk_inputs = self._collect_formal_video_chunk_inputs_from_run_plan(
                 config.project_id,
                 run_plan,
+            )
+        if extraction_mode == ExtractionMode.FULL:
+            inventory = self._build_full_extraction_inventory(
+                config.project_id,
+                run_plan,
+                manifest,
+                dispatch_plan,
+                preset=preset,
+                chunk_inputs=chunk_inputs,
+            )
+            self._emit_full_event(
+                emit_event,
+                title=t("extractor.full.inventory.title"),
+                description=t(
+                    "extractor.full.inventory.complete",
+                    total=inventory["total_chunks"],
+                    reusable=inventory["reusable_chunks"],
+                    pending=inventory["pending_chunks"],
+                    missing=inventory["missing_chunks"],
+                    invalid=inventory["invalid_chunks"],
+                    unresolved=inventory["unresolved_units"],
+                    aggregate_pending=inventory["aggregate_pending"],
+                ),
+                status=(
+                    InsightStatus.WARNING
+                    if inventory["invalid_chunks"] or inventory["unresolved_units"]
+                    else InsightStatus.DONE
+                ),
+                meta=inventory,
             )
         created_count = 0
         extraction_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}

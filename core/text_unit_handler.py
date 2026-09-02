@@ -97,6 +97,24 @@ class TextUnitHandler:
             in SUPPORTED_TIMED_TEXT_SUFFIXES
         )
 
+    def planned_chunk_ids(
+        self,
+        *,
+        source_root: Path,
+        unit: ExtractionUnit,
+        chunk_limit: int | None = None,
+    ) -> list[str]:
+        """Return deterministic chunk ids without making model requests."""
+        if not self.supports(unit):
+            raise ValueError(f"unsupported text extraction unit: {unit.unit_kind}")
+        source_path = self._source_path(source_root, unit)
+        parsed = self.parse_material(source_path, unit_kind=unit.unit_kind)
+        prepared_chunks, _warnings = self._prepare_chunks(parsed, chunk_limit=chunk_limit)
+        return [
+            f"{unit.unit_id}_text_{text_chunk.index:04d}"
+            for text_chunk in prepared_chunks
+        ]
+
     def execute(
         self,
         *,
