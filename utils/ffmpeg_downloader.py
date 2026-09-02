@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 import tempfile
 import zipfile
 from collections.abc import Callable
@@ -8,12 +7,19 @@ from pathlib import Path
 
 from utils.app_metadata import HTTP_USER_AGENT
 from utils.download_integrity import DownloadIntegrityError, download_staged_file
-from utils.env_manager import BIN_ROOT
 from utils.ffmpeg_tool import find_usable_ffmpeg_binary
 from utils.network_middleware import NetworkMiddlewareError, redact_sensitive_text
+from utils.runtime_layout import (
+    BIN_ROOT,
+    FFMPEG_DIRECTORY_NAME,
+    managed_runtime_install_dir,
+    managed_runtime_root,
+    replace_runtime_directory,
+)
 from utils.runtime_downloads import RuntimeDownloadManifestError, runtime_download_asset
 
 FFMPEG_WINDOWS_ASSET_ID = "ffmpeg-win-x64"
+FFMPEG_WINDOWS_PACKAGE_ID = "win-x64"
 
 ProgressCallback = Callable[[int, str], None]
 CancelCallback = Callable[[], bool]
@@ -56,13 +62,20 @@ def download_and_install_ffmpeg(
         if progress:
             progress(value, message)
 
-    bin_root.mkdir(parents=True, exist_ok=True)
     try:
         asset = runtime_download_asset(FFMPEG_WINDOWS_ASSET_ID)
     except RuntimeDownloadManifestError as exc:
         raise FfmpegDownloadError(str(exc)) from exc
 
-    with tempfile.TemporaryDirectory(prefix="ffmpeg-", dir=bin_root) as temp_dir_name:
+    runtime_root = managed_runtime_root(bin_root, FFMPEG_DIRECTORY_NAME)
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    runtime_target = managed_runtime_install_dir(
+        bin_root,
+        FFMPEG_DIRECTORY_NAME,
+        asset.version,
+        FFMPEG_WINDOWS_PACKAGE_ID,
+    )
+    with tempfile.TemporaryDirectory(prefix=".staging-", dir=runtime_root) as temp_dir_name:
         temp_dir = Path(temp_dir_name)
         archive_path = temp_dir / asset.file_name
         extract_dir = temp_dir / "extract"
@@ -93,15 +106,14 @@ def download_and_install_ffmpeg(
         except (OSError, zipfile.BadZipFile) as exc:
             raise FfmpegDownloadError(str(exc)) from exc
 
-        emit(92, "install")
-        for source in extract_dir.rglob("*"):
-            if source.is_file():
-                relative_path = source.relative_to(extract_dir)
-                target = bin_root / relative_path
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source, target)
+        staged_binary = find_usable_ffmpeg_binary(extract_dir)
+        if staged_binary is None:
+            raise FfmpegDownloadError("Downloaded archive does not include a usable ffmpeg binary.")
 
-    binary = find_usable_ffmpeg_binary(bin_root)
+        emit(92, "install")
+        replace_runtime_directory(extract_dir, runtime_target)
+
+    binary = find_usable_ffmpeg_binary(runtime_target)
     if binary is None:
         raise FfmpegDownloadError("Downloaded archive does not include a usable ffmpeg binary.")
 

@@ -14,12 +14,18 @@ from utils.download_integrity import (
     file_matches_integrity,
 )
 from utils.env_manager import (
-    BIN_ROOT,
-    WHISPERCPP_ROOT,
-    WHISPER_MODEL_ROOT,
     find_usable_whisper_runtime_binary,
 )
 from utils.network_middleware import NetworkMiddlewareError, redact_sensitive_text
+from utils.runtime_layout import (
+    BIN_ROOT,
+    WHISPERCPP_DIRECTORY_NAME,
+    WHISPERCPP_ROOT,
+    WHISPER_MODEL_ROOT,
+    managed_runtime_install_dir,
+    managed_runtime_root,
+    replace_runtime_directory,
+)
 from utils.runtime_downloads import (
     RuntimeDownloadAsset,
     RuntimeDownloadManifestError,
@@ -138,7 +144,8 @@ def download_and_install_whisper(
     runtime_package = whisper_runtime_package(runtime_package_id)
     model_package = whisper_model_package(model_id)
 
-    bin_root.mkdir(parents=True, exist_ok=True)
+    runtime_root = managed_runtime_root(bin_root, WHISPERCPP_DIRECTORY_NAME)
+    runtime_root.mkdir(parents=True, exist_ok=True)
     model_root.mkdir(parents=True, exist_ok=True)
 
     emit(0, "release")
@@ -147,7 +154,7 @@ def download_and_install_whisper(
     model_asset = _model_asset(model_package)
     runtime_target: Path | None = None
     model_target = model_root / model_package.file_name
-    with tempfile.TemporaryDirectory(prefix="whispercpp-", dir=bin_root) as temp_dir_name:
+    with tempfile.TemporaryDirectory(prefix=".staging-", dir=runtime_root) as temp_dir_name:
         temp_dir = Path(temp_dir_name)
         staged_model_path = temp_dir / model_package.file_name
 
@@ -170,7 +177,7 @@ def download_and_install_whisper(
                 installed_runtime_package.package_id,
             )
             emit(94, "install")
-            _replace_directory(staged_runtime_dir, runtime_target)
+            replace_runtime_directory(staged_runtime_dir, runtime_target)
         else:
             runtime_target, installed_runtime_package = cached_runtime
             emit(64, "reuseRuntime")
@@ -426,28 +433,13 @@ def _copy_tree_contents(source_root: Path, target_root: Path, cancelled: CancelC
             shutil.copy2(source, target)
 
 
-def _replace_directory(source_dir: Path, target_dir: Path) -> None:
-    target_dir.parent.mkdir(parents=True, exist_ok=True)
-    backup_dir = target_dir.with_name(f"{target_dir.name}.backup")
-    if backup_dir.exists():
-        shutil.rmtree(backup_dir)
-    if target_dir.exists():
-        target_dir.replace(backup_dir)
-    try:
-        source_dir.replace(target_dir)
-    except OSError:
-        if backup_dir.exists() and not target_dir.exists():
-            backup_dir.replace(target_dir)
-        raise
-    if backup_dir.exists():
-        shutil.rmtree(backup_dir)
-
-
 def _runtime_install_dir(bin_root: Path, tag_name: str, package_id: str) -> Path:
-    safe_tag = _safe_segment(tag_name)
-    safe_package_id = _safe_segment(package_id)
-    runtime_root = WHISPERCPP_ROOT if bin_root == BIN_ROOT else bin_root / "whisper.cpp"
-    return runtime_root / safe_tag / safe_package_id
+    return managed_runtime_install_dir(
+        bin_root,
+        WHISPERCPP_DIRECTORY_NAME,
+        tag_name,
+        package_id,
+    )
 
 
 def _safe_segment(value: str) -> str:
