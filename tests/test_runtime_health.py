@@ -32,6 +32,7 @@ class RuntimeHealthTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         self.assertEqual(result["status"], "ok", result["errors"])
         self.assertGreater(result["prompt_count"], 0)
+        self.assertEqual(result["model_test_media_count"], 3)
         self.assertTrue(all(count > 0 for count in result["locales"].values()))
 
     def test_health_entrypoint_does_not_write_to_working_directory(self) -> None:

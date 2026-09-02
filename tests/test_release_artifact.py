@@ -23,6 +23,9 @@ class ReleaseArtifactTests(unittest.TestCase):
             "_internal/res/default_prompts.json": b"{}",
             "_internal/res/runtime_downloads.json": b"{}",
             "_internal/res/app_icon.png": b"png",
+            "_internal/res/test_media/model_test_input.jpg": b"jpg",
+            "_internal/res/test_media/model_test_input.wav": b"wav",
+            "_internal/res/test_media/model_test_input.mp4": b"mp4",
         }
         for locale in ("zh_CN", "zh_TW", "en_US", "ja_JP"):
             files[f"_internal/i18n/{locale}.json"] = b"{}"
@@ -184,6 +187,30 @@ class ReleaseArtifactTests(unittest.TestCase):
             )
 
             self.assertTrue(any("missing required file: CharaPicker/LICENSE" in error for error in errors))
+
+    def test_missing_model_test_media_is_reported(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive, checksum, build_info = self._build_fixture(root)
+            rewritten = archive.with_suffix(".rewritten.zip")
+            missing_path = "CharaPicker/_internal/res/test_media/model_test_input.wav"
+            with zipfile.ZipFile(archive) as source, zipfile.ZipFile(rewritten, "w") as target:
+                for info in source.infolist():
+                    if info.filename != missing_path:
+                        target.writestr(info, source.read(info))
+            rewritten.replace(archive)
+            checksum.write_text(f"{sha256_file(archive)}  {archive.name}\n", encoding="ascii")
+
+            errors = validate_release_artifact(
+                archive,
+                checksum_path=checksum,
+                build_info_path=build_info,
+                repository_root=root,
+            )
+
+            self.assertTrue(
+                any("missing runtime resource: test_media/model_test_input.wav" in error for error in errors)
+            )
 
     def test_unsigned_trust_claim_must_match_executable_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

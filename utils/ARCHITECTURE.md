@@ -29,7 +29,7 @@
 - `archive_backend.py`：定义 Archive capability、entry/listing 和可注入 backend 协议，并提供唯一的 7-Zip CLI 生产适配器；只发现受信名称的项目内、环境变量、PATH 或系统安装路径，通过 `7z i` 校验身份与格式能力，所有 list/test/extract 调用使用参数列表、关闭 stdin、设置超时并支持取消，不记录命令、绝对路径或原始输出。
 - `archive_material_preprocessor.py`：复用 Archive backend 对 7z/RAR 容器执行先列举、再完整性测试、后展开和落盘后二次清单校验；统一拒绝加密、链接、路径逃逸、规范化冲突和超过数量/大小/压缩比限制的容器，只把图片、音频和文本白名单叶子复制到预处理输出。`.7z`、`.rar` 保留支持叶子的相对路径，容器内视频返回 `container_video_requires_explicit_import`；`.cbr` 只接纳图片并按自然顺序派生为单一页目录。
 - `material_processing_events.py`：集中保存素材处理取消消息和 FFmpeg 进度事件前缀等跨层协议常量。
-- `paths.py`：定义应用根目录、项目根目录和单个项目的标准目录结构。
+- `paths.py`：定义应用根目录、PyInstaller bundle 内的只读资源根目录、项目根目录和单个项目的标准目录结构。
 - `global_store.py`：提供全局用户数据和配置选项的原子读写中间件，默认使用根目录 `config.yaml`；保留单份最近有效备份，损坏主文件不会被默认值静默覆盖，恢复必须显式触发。
 - `proxy_preferences.py`：封装内置代理设置的默认值、归一化、读写和代理 URL 构造。
 - `state_manager.py`：保存、读取和扫描项目配置；`projects/{project_id}/config.json` 原子写入并保留单份有效备份，扫描会分离健康配置与损坏问题，恢复只能显式触发。
