@@ -341,7 +341,7 @@ wheels = [
 
 [[package]]
 name = "charapicker"
-version = "1.0.1"
+version = "1.0.2"
 source = { virtual = "." }
 dependencies = [
     { name = "dashscope" },

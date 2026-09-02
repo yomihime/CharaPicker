@@ -89,13 +89,13 @@ class UpdateCheckTests(unittest.TestCase):
     def test_stable_channel_excludes_prereleases(self, read_json) -> None:
         read_json.return_value = [
             _release_payload("v1.1.0-beta", prerelease=True),
-            _release_payload("v1.0.2", prerelease=False),
+            _release_payload("v1.0.3", prerelease=False),
         ]
 
         release = check_for_update(include_prereleases=False)
 
         self.assertIsNotNone(release)
-        self.assertEqual(release.version.public_tag, "1.0.2")
+        self.assertEqual(release.version.public_tag, "1.0.3")
 
     @patch("utils.app_update.read_json")
     def test_test_channel_includes_prereleases(self, read_json) -> None:
