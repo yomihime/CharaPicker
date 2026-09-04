@@ -37,9 +37,11 @@ class ReleaseReadinessTests(unittest.TestCase):
             root = self._fixture(Path(tmp))
             project = root / "pyproject.toml"
             project.write_text(
-                project.read_text(encoding="utf-8").replace(
-                    'version = "1.0.2"',
+                re.sub(
+                    r'(?m)^version = "[^"]+"$',
                     'version = "9.9.9"',
+                    project.read_text(encoding="utf-8"),
+                    count=1,
                 ),
                 encoding="utf-8",
             )

@@ -1,6 +1,6 @@
 [project]
 name = "charapicker"
-version = "1.0.2"
+version = "1.1.0"
 description = "A Fluent UI desktop tool for character-focused insight extraction and compilation."
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
