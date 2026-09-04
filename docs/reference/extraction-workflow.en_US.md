@@ -224,7 +224,7 @@ read formal episode_content
 -> ask AI to review the state, timeline, knowledge summary, and evidence_layers
 -> write alias_resolution, needs_review_reasons, conflict_groups, and parse_diagnostics
 -> save CharaPicker JSON master
--> optionally export Markdown, HTML, Character Card V2 JSON, or AstrBot copy checklist
+-> optionally export Markdown, HTML, Character Card V2 JSON, official AstrBot persona JSON, or its supplemental copy checklist
 ```
 
 ```mermaid
@@ -240,7 +240,7 @@ flowchart TD
     G --> H[AI reviews timeline + evidence_layers]
     H --> Q[Apply quality rules and structured review reasons]
     Q --> I[Save card.json]
-    I --> J[Export Markdown / HTML / Card V2 / AstrBot when requested]
+    I --> J[Export Markdown / HTML / Card V2 / AstrBot persona JSON and helper when requested]
 ```
 
 Character matching uses these card identity fields:

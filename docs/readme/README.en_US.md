@@ -28,7 +28,7 @@ It is not mature commercial software, and it is not something I would treat as a
 - Call OpenAI-compatible or DashScope cloud backends through shared middleware and record token usage.
 - Show important extraction events in the insight stream instead of leaving everything in logs.
 - Manage project-scoped character cards: create, edit, crop covers, preview, compile, import, and export.
-- Compile CharaPicker JSON from the formal knowledge base and export Markdown, HTML, Character Card V2 JSON, and AstrBot copy lists.
+- Compile CharaPicker JSON from the formal knowledge base and export Markdown, HTML, Character Card V2 JSON, official AstrBot persona JSON, and a supplemental copy list.
 
 ## Still Shaky
 
@@ -100,7 +100,7 @@ build.bat
 - Project-scoped material management (`projects/{project_id}`)
 - Character card management with CharaPicker JSON as the source of truth
 - Insight event stream during extraction (Insight Stream)
-- Character card Markdown, HTML, Character Card V2 JSON, and AstrBot copy-list export (iterating)
+- Character card Markdown, HTML, Character Card V2 JSON, official AstrBot persona JSON, and supplemental copy-list export (iterating)
 
 ## Screenshots
 

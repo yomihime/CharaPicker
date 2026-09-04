@@ -45,6 +45,7 @@
 - [正式视频提取架构指南与任务计划](archive/formal-video-extraction-architecture-plan.zh_CN.md)
 - [真实预览结果接入计划完成记录](archive/preview-real-result-ingestion-plan.completed.zh_CN.md)
 - [角色卡最终编译与角色卡页面计划](archive/character-card-compilation-plan.completed.zh_CN.md)
+- [AstrBot 官方人格 JSON 导出适配计划完成记录](archive/astrbot-persona-json-export-plan.completed.zh_CN.md)
 - [角色卡质量后续执行计划完成记录](archive/character-card-quality-followup-plan.completed.zh_CN.md)
 - [多供应商与多 API 规范接入计划完成记录](archive/multi-provider-api-support-plan.completed.zh_CN.md)
 - [Proxy 运行时网络能力计划完成记录](archive/proxy-runtime-network-plan.completed.zh_CN.md)

@@ -27,7 +27,7 @@ from core.character_card_constants import (
     STALE_WARNING_CHARACTER_NAME_CHANGED,
     STALE_WARNING_COMPILE_INPUTS_CHANGED,
 )
-from core.character_card_exporter import export_astrbot_copy_markdown
+from core.character_card_exporter import export_astrbot_persona_json
 from core.models import (
     CharacterCard,
     CharacterCardCrop,
@@ -597,6 +597,7 @@ class CharacterCardPage(QWidget):
             CharacterCardExportTarget.CHARAPICKER_MARKDOWN,
             CharacterCardExportTarget.CHARAPICKER_HTML,
             CharacterCardExportTarget.CHARACTER_CARD_V2_JSON,
+            CharacterCardExportTarget.ASTRBOT_PERSONA_JSON,
             CharacterCardExportTarget.ASTRBOT_COPY,
         ]
         worker = CharacterCardExportWorker(self._current_card, targets, Path(directory))
@@ -609,7 +610,7 @@ class CharacterCardPage(QWidget):
         self.detail.set_card(card)
         self.refresh_gallery(card.card_id)
         if self.detail.export_astrbot_after_compile.isChecked():
-            result = export_astrbot_copy_markdown(card)
+            result = export_astrbot_persona_json(card)
             if result.status != CharacterCardExportStatus.SUCCESS:
                 self._show_warning(t("cards.astrbot.partial.title"), result.error or "; ".join(result.warnings))
         self._show_success(t("cards.compile.success.title"), t("cards.compile.success.content"))

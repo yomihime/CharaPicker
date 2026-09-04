@@ -28,7 +28,7 @@ CharaPicker は、個人実験として作っているデスクトップツー�
 - 共通ミドルウェア経由で OpenAI-compatible または DashScope のクラウドバックエンドを呼び出し、token usage を記録する。
 - 抽出中の重要なイベントをログだけでなくインサイトストリームに表示する。
 - プロジェクト内のキャラクターカードを作成、編集、カバー切り抜き、プレビュー、コンパイル、インポート、エクスポートできる。
-- 正式ナレッジベースから CharaPicker JSON をコンパイルし、Markdown、HTML、Character Card V2 JSON、AstrBot 手動コピーリストを書き出せる。
+- 正式ナレッジベースから CharaPicker JSON をコンパイルし、Markdown、HTML、Character Card V2 JSON、AstrBot 公式人格 JSON、補助コピーリストを書き出せる。
 
 ## まだ不安定なところ
 
@@ -100,7 +100,7 @@ build.bat
 - プロジェクト単位の素材管理（`projects/{project_id}`）
 - プロジェクト内キャラクターカード管理と CharaPicker JSON 母本
 - 抽出段階のインサイトイベントストリーム（Insight Stream）
-- キャラクターカード Markdown、HTML、Character Card V2 JSON、AstrBot 手動コピーリストのエクスポート（継続的に改善中）
+- キャラクターカード Markdown、HTML、Character Card V2 JSON、AstrBot 公式人格 JSON、補助コピーリストのエクスポート（継続的に改善中）
 
 ## スクリーンショット
 

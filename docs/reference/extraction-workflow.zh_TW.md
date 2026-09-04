@@ -221,7 +221,7 @@ knowledge_base/
 -> 把角色狀態、timeline、知識庫摘要和 evidence_layers 交給 AI 複核並生成角色卡欄位
 -> 寫入 alias_resolution、needs_review_reasons、conflict_groups 和 parse_diagnostics
 -> 保存 CharaPicker JSON 母本
--> 可選匯出 Markdown、HTML、Character Card V2 JSON 或 AstrBot 手動複製清單
+-> 可選匯出 Markdown、HTML、Character Card V2 JSON、AstrBot 官方人格 JSON 或補充複製清單
 ```
 
 ```mermaid
@@ -237,7 +237,7 @@ flowchart TD
     G --> H[AI 複核 timeline + evidence_layers]
     H --> Q[套用品質規則與結構化複核原因]
     Q --> I[保存 card.json]
-    I --> J[按需匯出 Markdown / HTML / Card V2 / AstrBot 清單]
+    I --> J[按需匯出 Markdown / HTML / Card V2 / AstrBot 人格 JSON 與補充清單]
 ```
 
 角色匹配使用角色卡身份欄位：

@@ -32,7 +32,7 @@ CharaPicker（拾卡姬）是一个个人实验性质的桌面工具。它尝试
 - 通过统一模型中间件调用 OpenAI-compatible 或 DashScope 云端后端，并记录 token usage。
 - 在洞察流面板里看到提取过程中的关键事件，而不是只看日志。
 - 在角色卡页面管理项目内角色卡：创建、编辑、封面裁剪、预览、编译、导入和导出。
-- 从正式知识库编译 CharaPicker JSON，并导出 Markdown、HTML、Character Card V2 JSON 和 AstrBot 手动复制清单。
+- 从正式知识库编译 CharaPicker JSON，并导出 Markdown、HTML、Character Card V2 JSON、AstrBot 官方人格 JSON 和补充复制清单。
 
 ## 还不稳的地方
 
@@ -105,7 +105,7 @@ build.bat
 - 素材提取模式配置
 - 项目内角色卡管理与 CharaPicker JSON 母本
 - 提取阶段洞察事件流（Insight Stream）
-- 角色卡 Markdown、HTML、Character Card V2 JSON 和 AstrBot 手动复制清单导出（持续迭代中）
+- 角色卡 Markdown、HTML、Character Card V2 JSON、AstrBot 官方人格 JSON 和补充复制清单导出（持续迭代中）
 
 ## 截图
 

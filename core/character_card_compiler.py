@@ -1661,12 +1661,12 @@ def _build_extra_requirements_prompt(
 def _compile_variant_instruction(compile_variant: CharacterCardCompileVariant) -> str:
     if compile_variant == CharacterCardCompileVariant.ASTRBOT:
         return (
-            "Compile target: AstrBot manual copy only. For this run, write only the AstrBot-facing "
+            "Compile target: AstrBot persona export. For this run, write only the AstrBot-facing "
             "surface: prompt_surfaces.system_prompt, prompt_surfaces.custom_error_reply, "
             "dialogue.preset_dialogues, and any directly needed suggested starters. Do not spend "
             "output budget rewriting general profile text or Character Card V2 fields unless needed "
             "to keep the returned JSON valid. CharaPicker JSON remains the source of truth; AstrBot "
-            "text is a derived target surface."
+            "persona JSON and manual copy text are derived target surfaces."
         )
     if compile_variant == CharacterCardCompileVariant.CHARACTER_CARD_V2:
         return (
