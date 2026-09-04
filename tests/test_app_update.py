@@ -23,6 +23,17 @@ from utils.app_update import (
     check_for_update,
     launch_prepared_update,
 )
+from utils.app_metadata import APP_VERSION
+
+
+def _future_patch_tag() -> str:
+    current = AppVersion.parse(APP_VERSION)
+    return f"v{current.major}.{current.minor}.{current.patch + 1}"
+
+
+def _future_minor_prerelease_tag() -> str:
+    current = AppVersion.parse(APP_VERSION)
+    return f"v{current.major}.{current.minor + 1}.0-beta"
 
 
 def _release_payload(
@@ -87,32 +98,39 @@ class AppVersionTests(unittest.TestCase):
 class UpdateCheckTests(unittest.TestCase):
     @patch("utils.app_update.read_json")
     def test_stable_channel_excludes_prereleases(self, read_json) -> None:
+        future_prerelease = _future_minor_prerelease_tag()
+        future_stable = _future_patch_tag()
         read_json.return_value = [
-            _release_payload("v1.1.0-beta", prerelease=True),
-            _release_payload("v1.0.3", prerelease=False),
+            _release_payload(future_prerelease, prerelease=True),
+            _release_payload(future_stable, prerelease=False),
         ]
 
         release = check_for_update(include_prereleases=False)
 
         self.assertIsNotNone(release)
-        self.assertEqual(release.version.public_tag, "1.0.3")
+        self.assertEqual(release.version.public_tag, future_stable.removeprefix("v"))
 
     @patch("utils.app_update.read_json")
     def test_test_channel_includes_prereleases(self, read_json) -> None:
+        future_prerelease = _future_minor_prerelease_tag()
         read_json.return_value = [
-            _release_payload("v1.1.0-beta", prerelease=True),
-            _release_payload("v1.0.0", prerelease=False),
+            _release_payload(future_prerelease, prerelease=True),
+            _release_payload(f"v{APP_VERSION}", prerelease=False),
         ]
 
         release = check_for_update(include_prereleases=True)
 
         self.assertIsNotNone(release)
-        self.assertEqual(release.version.public_tag, "1.1.0-beta")
+        self.assertEqual(release.version.public_tag, future_prerelease.removeprefix("v"))
 
     @patch("utils.app_update.read_json")
     def test_newer_release_requires_archive_and_checksum(self, read_json) -> None:
         read_json.return_value = [
-            _release_payload("v1.1.0-beta", prerelease=True, with_checksum=False)
+            _release_payload(
+                _future_minor_prerelease_tag(),
+                prerelease=True,
+                with_checksum=False,
+            )
         ]
 
         with self.assertRaises(UpdatePackageUnavailableError):
@@ -121,7 +139,7 @@ class UpdateCheckTests(unittest.TestCase):
     @patch("utils.app_update.read_json")
     def test_current_or_older_release_is_not_an_update(self, read_json) -> None:
         read_json.return_value = [
-            _release_payload("v1.0.0-rc", prerelease=True),
+            _release_payload(f"v{APP_VERSION}", prerelease=False),
             _release_payload("v0.9.0", prerelease=False),
         ]
 
@@ -129,7 +147,7 @@ class UpdateCheckTests(unittest.TestCase):
 
     @patch("utils.app_update.read_json")
     def test_release_assets_must_use_repository_download_origin(self, read_json) -> None:
-        payload = _release_payload("v1.1.0", prerelease=False)
+        payload = _release_payload(_future_patch_tag(), prerelease=False)
         payload["assets"][0]["browser_download_url"] = "https://example.com/update.zip"
         read_json.return_value = [payload]
 
