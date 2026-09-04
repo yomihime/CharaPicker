@@ -10,6 +10,7 @@
 - [正式视频提取架构指南与任务计划](formal-video-extraction-architecture-plan.zh_CN.md)：S1-S7 正式视频提取 MVP 已于 2026-05-15 完成，保留为架构演进和验收记录。
 - [真实预览结果接入计划完成记录](preview-real-result-ingestion-plan.completed.zh_CN.md)：视频 chunk 真实预览、`preview__` 产物隔离和早期预览计划已完成部分的历史记录。
 - [角色卡最终编译与角色卡页面计划](character-card-compilation-plan.completed.zh_CN.md)：角色卡页面、CharaPicker JSON 母本、封面裁剪、预览、编译、导入、导出和 AstrBot 手动复制辅助已完成基础生命周期，保留为历史阶段记录。
+- [AstrBot 官方人格 JSON 导出适配计划完成记录](astrbot-persona-json-export-plan.completed.zh_CN.md)：官方三字段人格 JSON 已接入预览、批量导出与编译后导出，手动复制清单继续承载官方格式未覆盖的补充字段。
 - [角色卡质量后续执行计划完成记录](character-card-quality-followup-plan.completed.zh_CN.md)：角色卡编译上下文分层、AI 别名重分类、结构化复核原因、冲突分组、质量诊断和本轮真实素材调优已阶段性完成。
 - [多供应商与多 API 规范接入计划完成记录](multi-provider-api-support-plan.completed.zh_CN.md)：供应商 endpoint、API 规范、视频输入方式、DashScope 原生音频测试、Whisper 管理和音频转写首版已完成，保留为本阶段验收记录。
 - [Proxy 运行时网络能力计划完成记录](proxy-runtime-network-plan.completed.zh_CN.md)：内置代理设置、统一网络中间件、连通性测试、DashScope 临时代理环境和相关文档同步已完成，保留为本阶段验收记录。
