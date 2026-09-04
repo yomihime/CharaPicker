@@ -255,6 +255,8 @@ If the knowledge base uses candidate names such as `Lala` or `Haruna` while the 
 
 Character card compilation requires at least some direct evidence. If no direct evidence is found, compilation fails with `character was not found in the formal knowledge base`, avoiding fabricated cards for characters with no evidence.
 
+The character-card page's “Target Dialogue Groups” setting is the final total required in a successful compile: blank lets the model decide, 0 keeps no dialogue groups, and a positive value must be met exactly. If the initial card response is short, core makes one evidence-grounded request through the shared model middleware for only the missing groups, then deduplicates existing and new dialogues. If the result is still short, compilation fails explicitly instead of saving a short card as successful.
+
 The ideal long-term character growth path is still:
 
 ```text

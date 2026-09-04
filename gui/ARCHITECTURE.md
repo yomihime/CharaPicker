@@ -36,6 +36,7 @@
 - `widgets/human_json_view.py`：人类友好的结构化 JSON 展示组件。
 - `widgets/cover_crop_dialog.py`：9:16 封面裁剪确认弹窗。
 - `workers/character_card_workers.py`：角色卡编译、预览草稿、导入和导出的 Qt worker，只桥接信号与 core 调用。
+- 角色卡详情页的“目标对话组数”只编辑兼容字段 `user_metadata.extra_dialogue_count`；留空表示自动、0 表示不生成、正数表示编译成功时的最终总组数。数量校验与缺口补充属于 core，GUI 不生成对话。
 - `workers/app_update_workers.py`：应用更新检查和更新包准备的 Qt worker，桥接关于页与 `utils.app_update`，避免联网和压缩包处理阻塞 GUI。
 
 ## 与其他目录的关系

@@ -19,6 +19,7 @@ from core.models import (
     CharacterCardCompileTarget,
     CharacterCardCompileVariant,
     CharacterCardDialogue,
+    CharacterCardDialogueExample,
     CharacterCardKind,
     CharacterCardProfile,
     CharacterCardPromptSurfaces,
@@ -30,6 +31,7 @@ from utils.cloud_model_presets import CloudModelPreset, cloud_model_provider
 
 LOGGER = logging.getLogger(__name__)
 CHARACTER_CARD_COMPILE_PROMPT = "character_card_compile"
+CHARACTER_CARD_DIALOGUE_SUPPLEMENT_PROMPT = "character_card_dialogue_supplement"
 CHARACTER_ALIAS_RESOLVE_PROMPT = "character_alias_resolve"
 CHARACTER_CARD_COMPILE_TIMEOUT_SECONDS = 300
 CHARACTER_ALIAS_RESOLVE_TIMEOUT_SECONDS = 120
@@ -1347,6 +1349,7 @@ def _review_card_with_ai(
         _evidence_layer_summary(evidence_layers),
         on_stream_delta is not None,
     )
+    knowledge_summary = _build_ai_knowledge_summary(card, final_state, timeline, episode_payloads)
     request = build_model_call_request(
         purpose=CHARACTER_CARD_COMPILE_PROMPT,
         backend=cloud_model_provider(cloud_preset.provider).backend_for("text"),
@@ -1357,7 +1360,7 @@ def _review_card_with_ai(
         variables={
             "character": card.identity.character_name,
             "current_card": _build_ai_card_draft_payload(card),
-            "knowledge_summary": _build_ai_knowledge_summary(card, final_state, timeline, episode_payloads),
+            "knowledge_summary": knowledge_summary,
             "evidence_layers": evidence_layers,
             "extra_requirements": _build_extra_requirements_prompt(card, compile_variant),
             "compile_variant": compile_variant.value,
@@ -1383,6 +1386,14 @@ def _review_card_with_ai(
     )
     payload = parse_result.payload
     _apply_ai_card_payload(card, payload)
+    supplement_diagnostics = _ensure_extra_dialogue_count(
+        card,
+        knowledge_summary=knowledge_summary,
+        evidence_layers=evidence_layers,
+        cloud_preset=cloud_preset,
+        compile_variant=compile_variant,
+        on_stage=on_stage,
+    )
     card.source_context.prompt_profile_id = CHARACTER_CARD_COMPILE_PROMPT
     card.source_context.model_profile_id = cloud_preset.name
     LOGGER.info(
@@ -1392,7 +1403,7 @@ def _review_card_with_ai(
         len(parse_result.diagnostics),
         sorted(payload.keys()),
     )
-    return parse_result.diagnostics
+    return [*parse_result.diagnostics, *supplement_diagnostics]
 
 
 def _build_ai_knowledge_summary(
@@ -1641,9 +1652,6 @@ def _apply_ai_card_payload(card: CharacterCard, payload: dict[str, Any]) -> None
             ]
             if item
         )
-    _enforce_extra_dialogue_count(card)
-
-
 def _build_extra_requirements_prompt(
     card: CharacterCard,
     compile_variant: CharacterCardCompileVariant,
@@ -1692,16 +1700,16 @@ def _extra_dialogue_count_prompt_value(value: int | None) -> str:
 def _extra_dialogue_count_instruction(value: int | None) -> str:
     if value is None:
         return (
-            "Extra dialogue sample count: auto. Let the model choose an appropriate number of "
+            "Target dialogue sample count: auto. Let the model choose an appropriate number of "
             "dialogue sample groups based on available evidence, user requirements, and output budget."
         )
     if value == 0:
         return (
-            "Extra dialogue sample count: 0. Do not generate dialogue sample groups; return empty "
+            "Target dialogue sample count: 0. Do not generate dialogue sample groups; return empty "
             "dialogue.preset_dialogues and dialogue.example_dialogues."
         )
     return (
-        f"Extra dialogue sample count: {value}. Generate exactly {value} dialogue sample group(s) "
+        f"Target dialogue sample count: {value}. Generate exactly {value} dialogue sample group(s) "
         "in dialogue.preset_dialogues. Each group should contain at least one user message and one "
         "assistant reply. Also mirror the same groups in dialogue.example_dialogues when useful for "
         "Character Card V2 export. Keep every group grounded in the formal knowledge base evidence "
@@ -1709,43 +1717,147 @@ def _extra_dialogue_count_instruction(value: int | None) -> str:
     )
 
 
-def _enforce_extra_dialogue_count(card: CharacterCard) -> None:
+def _ensure_extra_dialogue_count(
+    card: CharacterCard,
+    *,
+    knowledge_summary: dict[str, Any],
+    evidence_layers: dict[str, list[dict[str, Any]]],
+    cloud_preset: CloudModelPreset,
+    compile_variant: CharacterCardCompileVariant,
+    on_stage: CompileStageCallback | None = None,
+) -> list[dict[str, Any]]:
     requested_count = card.user_metadata.extra_dialogue_count
     if requested_count is None:
-        return
+        return []
     if requested_count == 0:
         card.dialogue.preset_dialogues = []
         card.dialogue.example_dialogues = []
-        return
+        return []
 
-    preset_dialogues = _usable_dialogues(card.dialogue.preset_dialogues)
-    example_dialogues = _usable_dialogues(card.dialogue.example_dialogues)
-    if len(preset_dialogues) < requested_count:
-        preset_dialogues.extend(
-            dialogue.model_copy(deep=True)
-            for dialogue in example_dialogues
-            if len(preset_dialogues) < requested_count
+    dialogues = _dialogue_pool(card, compile_variant)
+    diagnostics: list[dict[str, Any]] = []
+    if len(dialogues) < requested_count:
+        missing_count = requested_count - len(dialogues)
+        _emit_stage(on_stage, "supplementing_dialogues")
+        supplements, diagnostics = _generate_dialogue_supplements(
+            card,
+            missing_count=missing_count,
+            target_count=requested_count,
+            existing_dialogues=dialogues,
+            knowledge_summary=knowledge_summary,
+            evidence_layers=evidence_layers,
+            cloud_preset=cloud_preset,
         )
-    if len(example_dialogues) < requested_count:
-        example_dialogues.extend(
-            dialogue.model_copy(deep=True)
-            for dialogue in preset_dialogues
-            if len(example_dialogues) < requested_count
-        )
-    card.dialogue.preset_dialogues = preset_dialogues[:requested_count]
-    card.dialogue.example_dialogues = example_dialogues[:requested_count]
-    actual_count = len(card.dialogue.preset_dialogues)
+        dialogues = _unique_dialogues([*dialogues, *supplements])
+
+    actual_count = min(len(dialogues), requested_count)
     if actual_count < requested_count:
-        warning = (
-            f"requested {requested_count} dialogue sample group(s), "
-            f"but the model returned {actual_count}"
+        raise ValueError(
+            f"target dialogue group count was {requested_count}, but only {actual_count} "
+            "unique complete group(s) were generated"
         )
-        card.quality.warnings = _unique([*card.quality.warnings, warning])
-        card.evidence.warnings = collect_compile_warnings(card)
+
+    _set_dialogue_pool(card, dialogues[:requested_count])
+    return diagnostics
 
 
-def _usable_dialogues(dialogues: list[Any]) -> list[Any]:
-    return [dialogue for dialogue in dialogues if getattr(dialogue, "messages", None)]
+def _generate_dialogue_supplements(
+    card: CharacterCard,
+    *,
+    missing_count: int,
+    target_count: int,
+    existing_dialogues: list[CharacterCardDialogueExample],
+    knowledge_summary: dict[str, Any],
+    evidence_layers: dict[str, list[dict[str, Any]]],
+    cloud_preset: CloudModelPreset,
+) -> tuple[list[CharacterCardDialogueExample], list[dict[str, Any]]]:
+    request = build_model_call_request(
+        purpose=CHARACTER_CARD_DIALOGUE_SUPPLEMENT_PROMPT,
+        backend=cloud_model_provider(cloud_preset.provider).backend_for("text"),
+        model_name=cloud_preset.model_name,
+        base_url=cloud_preset.base_url,
+        api_key=cloud_preset.api_key,
+        max_tokens=cloud_preset.max_output_tokens,
+        variables={
+            "character": card.identity.character_name,
+            "missing_count": missing_count,
+            "target_count": target_count,
+            "existing_dialogues": [item.model_dump(mode="json") for item in existing_dialogues],
+            "knowledge_summary": knowledge_summary,
+            "evidence_layers": evidence_layers,
+            "response_schema": {
+                "dialogues": [
+                    {
+                        "title": "string",
+                        "messages": [{"role": "user|assistant", "content": "string"}],
+                    }
+                ]
+            },
+        },
+        metadata={
+            "project_id": card.project_id,
+            "card_id": card.card_id,
+            "character": card.identity.character_name,
+            "missing_count": missing_count,
+        },
+    )
+    request = request.model_copy(update={"timeout_seconds": CHARACTER_CARD_COMPILE_TIMEOUT_SECONDS})
+    result = call_text_model(request)
+    parse_result = _parse_json_object_with_diagnostics(
+        result.content,
+        source=CHARACTER_CARD_DIALOGUE_SUPPLEMENT_PROMPT,
+    )
+    raw_dialogues = parse_result.payload.get("dialogues", [])
+    if not isinstance(raw_dialogues, list):
+        raw_dialogues = []
+    normalized_payload = {"preset_dialogues": raw_dialogues}
+    _normalize_dialogue_roles(normalized_payload)
+    dialogues: list[CharacterCardDialogueExample] = []
+    for payload in normalized_payload["preset_dialogues"]:
+        if not isinstance(payload, dict):
+            continue
+        try:
+            dialogues.append(CharacterCardDialogueExample.model_validate(payload))
+        except (TypeError, ValueError):
+            continue
+    return _unique_dialogues(dialogues), parse_result.diagnostics
+
+
+def _dialogue_pool(
+    card: CharacterCard,
+    compile_variant: CharacterCardCompileVariant,
+) -> list[CharacterCardDialogueExample]:
+    if compile_variant == CharacterCardCompileVariant.CHARACTER_CARD_V2:
+        candidates = [*card.dialogue.example_dialogues, *card.dialogue.preset_dialogues]
+    else:
+        candidates = [*card.dialogue.preset_dialogues, *card.dialogue.example_dialogues]
+    return _unique_dialogues(candidates)
+
+
+def _set_dialogue_pool(card: CharacterCard, dialogues: list[CharacterCardDialogueExample]) -> None:
+    card.dialogue.preset_dialogues = [item.model_copy(deep=True) for item in dialogues]
+    card.dialogue.example_dialogues = [item.model_copy(deep=True) for item in dialogues]
+
+
+def _unique_dialogues(dialogues: list[CharacterCardDialogueExample]) -> list[CharacterCardDialogueExample]:
+    output: list[CharacterCardDialogueExample] = []
+    seen: set[tuple[tuple[str, str], ...]] = set()
+    for dialogue in dialogues:
+        fingerprint = _dialogue_fingerprint(dialogue)
+        roles = {role for role, _content in fingerprint}
+        if not fingerprint or not {"user", "assistant"}.issubset(roles) or fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        output.append(dialogue.model_copy(deep=True))
+    return output
+
+
+def _dialogue_fingerprint(dialogue: CharacterCardDialogueExample) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (message.role.value, " ".join(message.content.split()).casefold())
+        for message in dialogue.messages
+        if message.content.strip()
+    )
 
 
 def _merged_payload(model: Any, payload: dict[str, Any]) -> dict[str, Any]:
