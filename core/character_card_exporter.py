@@ -5,6 +5,7 @@ from pathlib import Path
 
 from core.character_card_formats import (
     to_astrbot_copy_markdown,
+    to_astrbot_persona_json,
     to_character_card_v2_json,
 )
 from core.character_card_renderers import render_card_html, render_card_markdown
@@ -104,6 +105,25 @@ def export_astrbot_copy_markdown(
     return result
 
 
+def export_astrbot_persona_json(
+    card: CharacterCard,
+    *,
+    overwrite: bool = True,
+    output_dir: Path | None = None,
+) -> CharacterCardExportResult:
+    formatted = to_astrbot_persona_json(card)
+    path = _output_root(card.project_id, output_dir) / f"{card.card_id}.astrbot-persona.json"
+    result = _write_text_target(
+        card,
+        CharacterCardExportTarget.ASTRBOT_PERSONA_JSON,
+        path,
+        json.dumps(formatted.payload, ensure_ascii=False, indent=2),
+        overwrite=overwrite,
+    )
+    result.warnings.extend(formatted.warnings)
+    return result
+
+
 def export_selected_targets(
     card: CharacterCard,
     targets: list[CharacterCardExportTarget],
@@ -116,6 +136,7 @@ def export_selected_targets(
         CharacterCardExportTarget.CHARAPICKER_MARKDOWN: export_markdown,
         CharacterCardExportTarget.CHARAPICKER_HTML: export_html,
         CharacterCardExportTarget.CHARACTER_CARD_V2_JSON: export_character_card_v2_json,
+        CharacterCardExportTarget.ASTRBOT_PERSONA_JSON: export_astrbot_persona_json,
         CharacterCardExportTarget.ASTRBOT_COPY: export_astrbot_copy_markdown,
     }
     results: list[CharacterCardExportResult] = []

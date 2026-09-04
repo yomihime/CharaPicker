@@ -278,7 +278,7 @@ zip 至少包含 `refusal_sample.json` 和 `package_manifest.json`。如果用�
 -> 把角色状态、timeline、知识库摘要和 evidence_layers 交给 AI 复核并生成角色卡字段
 -> 写入 alias_resolution、needs_review_reasons、conflict_groups、evidence_source_profile 和 parse_diagnostics
 -> 保存 CharaPicker JSON 母本
--> 可选导出 Markdown、HTML、Character Card V2 JSON 或 AstrBot 手动复制清单
+-> 可选导出 Markdown、HTML、Character Card V2 JSON、AstrBot 官方人格 JSON 或补充复制清单
 ```
 
 ```mermaid
@@ -294,7 +294,7 @@ flowchart TD
     G --> H[AI 复核 timeline + evidence_layers]
     H --> Q[应用质量规则与结构化复核原因]
     Q --> I[保存 card.json]
-    I --> J[按需导出 Markdown / HTML / Card V2 / AstrBot 清单]
+    I --> J[按需导出 Markdown / HTML / Card V2 / AstrBot 人格 JSON 与补充清单]
 ```
 
 角色匹配使用角色卡身份字段：

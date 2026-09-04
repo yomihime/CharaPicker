@@ -5,7 +5,7 @@ import json
 from PyQt6.QtWidgets import QApplication, QHBoxLayout, QTabWidget, QTextBrowser, QVBoxLayout, QWidget
 from qfluentwidgets import CaptionLabel, PlainTextEdit, PushButton
 
-from core.character_card_formats import to_astrbot_copy_markdown, to_character_card_v2_json
+from core.character_card_formats import to_astrbot_persona_json, to_character_card_v2_json
 from core.character_card_renderers import build_human_json_sections, render_card_html, render_card_markdown
 from core.models import CharacterCard
 from gui.widgets.dialog_middleware import FluentDialog
@@ -84,7 +84,7 @@ class CharacterCardPreviewDialog(FluentDialog):
         json_layout.addWidget(json_view, 1)
         tabs.addTab(json_tab, t("cards.preview.tab.json"))
 
-        astrbot_text = str(to_astrbot_copy_markdown(card).payload)
+        astrbot_text = json.dumps(to_astrbot_persona_json(card).payload, ensure_ascii=False, indent=2)
         astrbot = PlainTextEdit(tabs)
         astrbot.setReadOnly(True)
         astrbot.setPlainText(astrbot_text)

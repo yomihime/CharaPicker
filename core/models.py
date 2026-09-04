@@ -81,6 +81,7 @@ class CharacterCardExportTarget(str, Enum):
     CHARAPICKER_MARKDOWN = "charapicker_markdown"
     CHARAPICKER_HTML = "charapicker_html"
     CHARACTER_CARD_V2_JSON = "character_card_v2_json"
+    ASTRBOT_PERSONA_JSON = "astrbot_persona_json"
     ASTRBOT_COPY = "astrbot_copy"
 
 

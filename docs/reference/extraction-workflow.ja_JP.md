@@ -221,7 +221,7 @@ knowledge_base/
 -> キャラクター状態、timeline、ナレッジベース要約、evidence_layers を AI に渡して再確認し、カード項目を生成
 -> alias_resolution、needs_review_reasons、conflict_groups、parse_diagnostics を書き込む
 -> CharaPicker JSON 原本を保存
--> 必要に応じて Markdown、HTML、Character Card V2 JSON、AstrBot 手動コピーリストを出力
+-> 必要に応じて Markdown、HTML、Character Card V2 JSON、AstrBot 公式人格 JSON、補助コピーリストを出力
 ```
 
 ```mermaid
@@ -237,7 +237,7 @@ flowchart TD
     G --> H[AI が timeline + evidence_layers を再確認]
     H --> Q[品質ルールと構造化レビュー理由を適用]
     Q --> I[card.json を保存]
-    I --> J[必要に応じて Markdown / HTML / Card V2 / AstrBot リストを出力]
+    I --> J[必要に応じて Markdown / HTML / Card V2 / AstrBot 人格 JSON と補助リストを出力]
 ```
 
 キャラクター照合には、キャラクターカードの身元フィールドを使います。

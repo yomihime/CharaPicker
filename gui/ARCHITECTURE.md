@@ -32,7 +32,7 @@
 - `widgets/streaming_text_session.py`：把流式文本 delta 安全追加到 `QTextCursor`。
 - `widgets/character_card_gallery.py`：角色卡海报墙/列表组件，只消费轻量 summary，不读取文件。
 - `widgets/character_card_detail_panel.py`：当前角色卡元数据、状态和操作区，不直接落盘；读取 core 写入的结构化 `needs_review_reasons` 并转换为本地化提示，不直接暴露内部 reason key。
-- `widgets/character_card_preview_dialog.py`：角色卡 HTML、Markdown、结构化 JSON、AstrBot 和 Card V2 预览弹窗。
+- `widgets/character_card_preview_dialog.py`：角色卡 HTML、Markdown、结构化 JSON、AstrBot 官方人格 JSON 和 Card V2 预览弹窗。
 - `widgets/human_json_view.py`：人类友好的结构化 JSON 展示组件。
 - `widgets/cover_crop_dialog.py`：9:16 封面裁剪确认弹窗。
 - `workers/character_card_workers.py`：角色卡编译、预览草稿、导入和导出的 Qt worker，只桥接信号与 core 调用。
