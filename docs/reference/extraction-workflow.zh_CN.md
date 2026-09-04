@@ -309,6 +309,8 @@ flowchart TD
 
 角色卡编译需要至少找到直接证据。没有任何直接证据时，角色卡编译会失败并提示 `character was not found in the formal knowledge base`，避免把没有出现或没有证据的角色硬编出来。
 
+角色卡页面的“目标对话组数”表示编译结果中的最终对话总组数：留空时由模型自动决定，0 时不保留对话组，正数则必须精确满足。首次角色卡编译返回不足时，core 会通过统一模型中间件发起一次只针对缺口的证据约束补充请求，并对已有与新增对话去重；补充后仍不足会明确使编译失败，不再把数量不足的角色卡保存为成功结果。
+
 在混合媒体项目中，角色卡证据不能只保留“命中了哪一集”。每条 direct、mention、causal 或 season_context 证据 entry 都会带一份紧凑 `source_metadata`，用于描述该证据来自什么素材和什么中间成果：
 
 - `extraction_run_id`：该 episode 正式产物所属的提取 run；角色卡还会把实际消费的 run 去重写入 `source_context.source_runs`。

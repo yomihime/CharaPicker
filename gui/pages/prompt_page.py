@@ -40,6 +40,15 @@ PROMPT_VARIABLES = {
         "extra_dialogue_count",
         "response_schema",
     ),
+    "character_card_dialogue_supplement": (
+        "character",
+        "target_count",
+        "missing_count",
+        "existing_dialogues",
+        "knowledge_summary",
+        "evidence_layers",
+        "response_schema",
+    ),
     "final_polish": ("character", "character_state"),
 }
 

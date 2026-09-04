@@ -27,7 +27,7 @@
 - `plans/rc-to-release-hardening-plan.zh_CN.md`：RC 到 Release 阶段的三部分收口专项，按文档与文本、全自动验证、优化与完善组织用户文档、数据、构建、分发信誉、Prompt、Release 门禁、产物健康检查和下载供应链保护。
 - `plans/extraction-development-roadmap.zh_CN.md`：面向开发者的 Extract Once、知识库和角色成长编译长期路线；不是当前剩余任务清单。
 - `readme/`：README 的多语言补充版本，例如 `README.en_US.md`、`README.ja_JP.md`、`README.zh_TW.md`。
-- `archive/`：已执行完成、已被替代或仅保留历史查阅价值的计划类文档，包括已完成的路线 01-03、更多输入格式、真实预览后续覆盖、正式视频提取、角色卡最终编译、AstrBot 官方人格 JSON 导出、角色卡质量分层、多供应商、proxy、发布包和自更新修复计划。
+- `archive/`：已执行完成、已被替代或仅保留历史查阅价值的计划类文档，包括已完成的路线 01-03、更多输入格式、真实预览后续覆盖、正式视频提取、角色卡最终编译、AstrBot 官方人格 JSON 导出、目标对话组数修复、角色卡质量分层、多供应商、proxy、发布包和自更新修复计划。
 - 后续多语言文档应在文件名中标明语种，例如 `usage.zh_CN.md`。
 
 ## 与其他目录的关系
