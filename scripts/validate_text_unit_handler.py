@@ -15,7 +15,10 @@ if str(APP_ROOT) not in sys.path:
 from core import extractor as extractor_module  # noqa: E402
 from core import knowledge_base as kb  # noqa: E402
 from core import source_scanner  # noqa: E402
-from core.extraction_ai import FormalExtractionJsonResult  # noqa: E402
+from core.extraction_ai import (  # noqa: E402
+    FormalExtractionJsonResult,
+    FormalExtractionOutputTruncatedError,
+)
 from core.extraction_plan import MediaType  # noqa: E402
 from core.extractor import Extractor  # noqa: E402
 from core.models import (  # noqa: E402
@@ -25,7 +28,12 @@ from core.models import (  # noqa: E402
     ProjectConfig,
     ProjectPaths,
 )
-from core.text_unit_handler import TextUnitHandler, TextUnitHandlerConfig  # noqa: E402
+from core.text_unit_handler import (  # noqa: E402
+    TextChunkProgress,
+    TextUnitExtractionCancelled,
+    TextUnitHandler,
+    TextUnitHandlerConfig,
+)
 from utils.ai_model_middleware import ModelCallError, ModelCallRequest  # noqa: E402
 from utils.chunker import chunk_text, chunk_text_with_ranges  # noqa: E402
 from utils.cloud_model_presets import CloudModelPreset  # noqa: E402
@@ -192,15 +200,17 @@ def _assert_text_only_workflow() -> None:
             model_call=fake_model,
         )
         unit = text_inputs[0][1]
-        planned_chunk_ids = handler.planned_chunk_ids(
+        limited_plan = handler.plan_unit(
             source_root=paths.materials,
             unit=unit,
             chunk_limit=2,
         )
-        assert planned_chunk_ids == [
+        assert limited_plan.chunk_ids == [
             f"{unit.unit_id}_text_0001",
             f"{unit.unit_id}_text_0002",
         ]
+        assert limited_plan.coverage_percent < 100.0
+        assert any("chunk_limit_reached" in warning for warning in limited_plan.warnings)
         assert fake_model.requests == []
         direct = handler.execute(
             source_root=paths.materials,
@@ -239,6 +249,9 @@ def _assert_text_only_workflow() -> None:
             model_call=fake_model,
         )
         extractor._text_unit_handler = lambda _preset_value: workflow_handler
+        preflight = extractor.inspect_text_extraction_plan(project_id, _preset())
+        assert preflight["total_chunks"] > 0
+        assert preflight["coverage_percent"] == 100.0
         preview_output = extractor.run_preview_streaming(
             ProjectConfig(project_id=project_id),
             cloud_preset=_preset(),
@@ -251,11 +264,19 @@ def _assert_text_only_workflow() -> None:
         assert preview_paths
         assert not kb.list_full_chunk_result_paths(project_id, include_legacy_top_level=False)
 
+        detail_updates: list[dict[str, object]] = []
+        usage_updates: list[dict[str, int]] = []
         full_chunks = extractor.run_full_extraction_streaming(
             ProjectConfig(project_id=project_id),
             cloud_preset=_preset(),
+            emit_detail=detail_updates.append,
+            emit_token_usage=usage_updates.append,
         )
         assert full_chunks
+        assert detail_updates
+        assert detail_updates[-1]["processed"] == detail_updates[-1]["total"]
+        assert usage_updates
+        assert usage_updates[-1]["total_tokens"] > 0
         assert all(chunk.source_kind == "text" for chunk in full_chunks)
         assert kb.list_full_chunk_result_paths(project_id, include_legacy_top_level=False)
         episode_content = kb.load_episode_content(
@@ -324,6 +345,138 @@ def _assert_text_chunk_checkpoint_survives_later_failure() -> None:
             ),
             model_call=fail_after_first,
         )
+        result = handler.execute(
+            source_root=paths.materials,
+            unit=unit,
+            season_id=season_id,
+            extraction_stage=ExtractionArtifactStage.FULL,
+            extraction_run_id=run_plan.run_id,
+            run_type="formal_extraction",
+            backend="openai_compatible",
+            model_name="validation-model",
+            base_url="https://example.invalid/v1",
+            api_key="validation-key",
+            on_chunk_ready=checkpoints.append,
+        )
+        assert len(checkpoints) == 1
+        assert checkpoints[0].chunk_id.endswith("_text_0001")
+        assert result.chunks == checkpoints
+        assert result.failed_chunks
+        assert result.failed_chunks[0].chunk_id.endswith("_text_0002")
+        assert call_count == 2
+
+
+def _assert_truncated_text_chunk_is_split_and_usage_is_preserved() -> None:
+    project_id = "validation-text-adaptive-split"
+    with _isolated_project(project_id) as paths:
+        paths.materials.joinpath("dense-chat.txt").write_text(
+            "小唐:\n时间: 2026-09-05 00:00:00\n内容: 测试消息。\n\n" * 20,
+            encoding="utf-8",
+        )
+        extractor = Extractor()
+        run_plan = extractor.prepare_formal_extraction_run_plan(project_id)
+        season_id, unit = extractor._collect_text_units_from_run_plan(run_plan)[0]
+        successful_model = _FakeTextModel()
+        call_count = 0
+
+        def truncate_once(request: ModelCallRequest) -> FormalExtractionJsonResult:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise FormalExtractionOutputTruncatedError(
+                    "validation output truncated",
+                    attempts=1,
+                    attempt_metadata=[
+                        {
+                            "token_usage": {
+                                "prompt_tokens": 7,
+                                "completion_tokens": 4,
+                                "total_tokens": 11,
+                            }
+                        }
+                    ],
+                )
+            return successful_model(request)
+
+        handler = TextUnitHandler(
+            TextUnitHandlerConfig(
+                max_input_chars=600,
+                overlap_chars=0,
+                max_chunks_per_unit=8,
+                max_output_tokens=4096,
+                min_adaptive_chunk_chars=100,
+                max_adaptive_split_depth=2,
+            ),
+            model_call=truncate_once,
+        )
+        progress_updates: list[TextChunkProgress] = []
+        result = handler.execute(
+            source_root=paths.materials,
+            unit=unit,
+            season_id=season_id,
+            extraction_stage=ExtractionArtifactStage.PREVIEW,
+            extraction_run_id="",
+            run_type="preview_trial",
+            backend="openai_compatible",
+            model_name="validation-model",
+            base_url="https://example.invalid/v1",
+            api_key="validation-key",
+            chunk_limit=1,
+            on_chunk_progress=progress_updates.append,
+        )
+
+        assert result.adaptive_split_count == 1
+        assert result.failed_chunks == []
+        assert len(result.chunks) == 2
+        assert result.chunks[0].chunk_id.endswith("_text_0001_a")
+        assert result.chunks[1].chunk_id.endswith("_text_0001_b")
+        first_range = result.chunks[0].source_trace["material_refs"][0]["text_range"]
+        second_range = result.chunks[1].source_trace["material_refs"][0]["text_range"]
+        assert first_range["start_offset"] == 0
+        assert first_range["end_offset"] == second_range["start_offset"]
+        assert result.token_usage == {
+            "prompt_tokens": 27,
+            "completion_tokens": 14,
+            "total_tokens": 41,
+        }
+        assert all(chunk.requested_output_tokens == 4096 for chunk in result.chunks)
+        assert [progress.processed_chunks for progress in progress_updates] == [1, 2]
+        assert [progress.total_chunks for progress in progress_updates] == [2, 2]
+        assert progress_updates[-1].token_usage == result.token_usage
+
+
+def _assert_text_chunk_progress_can_cancel_between_requests() -> None:
+    project_id = "validation-text-cancel"
+    with _isolated_project(project_id) as paths:
+        paths.materials.joinpath("cancel.txt").write_text(
+            "需要分块的文本。" * 80,
+            encoding="utf-8",
+        )
+        extractor = Extractor()
+        run_plan = extractor.prepare_formal_extraction_run_plan(project_id)
+        season_id, unit = extractor._collect_text_units_from_run_plan(run_plan)[0]
+        model = _FakeTextModel()
+        cancel_requested = False
+        progress_updates: list[TextChunkProgress] = []
+
+        def capture_progress(progress: TextChunkProgress) -> None:
+            nonlocal cancel_requested
+            progress_updates.append(progress)
+            cancel_requested = True
+
+        handler = TextUnitHandler(
+            TextUnitHandlerConfig(
+                max_input_chars=100,
+                overlap_chars=0,
+                max_chunks_per_unit=8,
+                max_output_tokens=1024,
+            ),
+            model_call=model,
+        )
+        plan = handler.plan_unit(source_root=paths.materials, unit=unit)
+        assert plan.coverage_percent == 100.0
+        assert len(plan.chunk_ids) > 1
+
         try:
             handler.execute(
                 source_root=paths.materials,
@@ -336,14 +489,17 @@ def _assert_text_chunk_checkpoint_survives_later_failure() -> None:
                 model_name="validation-model",
                 base_url="https://example.invalid/v1",
                 api_key="validation-key",
-                on_chunk_ready=checkpoints.append,
+                on_chunk_progress=capture_progress,
+                cancelled=lambda: cancel_requested,
             )
-        except ModelCallError:
+        except TextUnitExtractionCancelled:
             pass
         else:
-            raise AssertionError("expected the second text chunk request to fail")
-        assert len(checkpoints) == 1
-        assert checkpoints[0].chunk_id.endswith("_text_0001")
+            raise AssertionError("text extraction should stop between model requests")
+
+        assert len(model.requests) == 1
+        assert len(progress_updates) == 1
+        assert progress_updates[0].processed_chunks == 1
 
 
 def main() -> None:
@@ -351,6 +507,8 @@ def main() -> None:
     _assert_parsing()
     _assert_text_only_workflow()
     _assert_text_chunk_checkpoint_survives_later_failure()
+    _assert_truncated_text_chunk_is_split_and_usage_is_preserved()
+    _assert_text_chunk_progress_can_cancel_between_requests()
     print("text unit handler validation passed")
 
 

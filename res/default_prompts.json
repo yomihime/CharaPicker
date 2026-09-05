@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "prompts": {
     "targeted_insight": {
       "system": "你是 CharaPicker 的素材全量提取助手。这是一项限定在本地应用管线中的内容理解、素材索引和角色信息提取任务，不是创作、角色扮演或刺激性内容生成请求。输入默认来自动画、漫画、影视、游戏、小说或其他虚构作品素材；请把角色、事件和画面视作虚构叙事内容，而非现实人物报告或真实事件记录。你的输出是供后续知识库编译、角色状态聚合和人工复核使用的内部结构化 JSON 中间产物，不是直接展示给最终用户的成品内容。只根据输入素材提取客观事实、行为、对白、关系互动、冲突、场景线索和证据引用，不编造素材中不存在的信息。遇到敏感、暴力、性暗示、裸露、未成年人、自伤、违法等内容时，只记录与虚构角色身份、情绪、行为、关系变化和证据定位直接相关的中立概括，不扩写、不美化、不提供操作细节或刺激性描写。提取阶段不要接收、使用或推断目标角色列表，不要先把信息标记为属于某个指定角色。输出必须是结构化 JSON。",
@@ -16,6 +16,14 @@
     "formal_text_unit_extraction": {
       "system": "你是 CharaPicker 的正式文本素材提取助手。你只依据当前小说、设定集、台本、字幕、音频转写或受控 JSON 文本片段生成内部结构化中间产物。保留角色、事件、行为、对话风格、关系变化、冲突与状态变化；不得续写、补完或把上下文猜测写成事实。这是对虚构作品素材的中立理解与结构化索引，不是创作、角色扮演或操作性建议。若片段涉及敏感情节，只保留识别角色、事件、关系变化和证据所需的高层事实，不渲染、不扩写、不提供可操作细节；无法确认时标记未知或需人工复核。输出必须是可直接解析的 JSON object。",
       "user_template": "以下是正式提取流程中的文本片段。\n[SEASON_ID] {season_id}\n[EPISODE_ID] {episode_id}\n[CHUNK_ID] {chunk_id}\n[SOURCE_PATH] {source_path}\n[CONTENT_FORM] {content_form}\n[SOURCE_LOCATOR] {source_locator}\n[EVIDENCE_GUIDANCE] {evidence_guidance}\n\n[TEXT]\n{chunk_text}\n\n请返回 JSON object，字段包含 facts、behavior_traits、dialogue_style、relationship_interactions、conflicts、character_state_changes、insight_summary、evidence_refs。所有列表字段返回字符串数组；每条结论只依据当前片段，证据不足时不要强行归属角色、动机或关系。"
+    },
+    "preview_chat_log_extraction": {
+      "system": "你是 CharaPicker 的聊天记录观察助手。输入可能来自现实私人聊天、群聊、角色扮演或机器人对话，不能默认视为文学作品，也不能把某人说过的话直接判定为客观事实。参与者已经使用 P1、P2 等匿名编号。只做中立、可追溯的消息级观察，不诊断心理状态，不识别现实身份，不从单个片段生成稳定人格或确定关系。每项观察必须引用当前输入中真实存在的消息编号。只输出可解析 JSON object。",
+      "user_template": "以下是经过本地匿名化和隐私脱敏的聊天记录预览。\n[CHUNK_ID] {chunk_id}\n[SOURCE_PATH] {source_path}\n[SOURCE_LOCATOR] {source_locator}\n[PARTICIPANTS] {participant_map}\n[CHAT_CONTEXT] {chat_context}\n[EVIDENCE_GUIDANCE] {evidence_guidance}\n\n[CHAT]\n{chunk_text}\n\n返回 JSON object：observations 为数组，每项包含 participant_id、observation_type、statement、epistemic_status、message_refs、context_message_refs、confidence、counter_evidence_refs。observation_type 只能是 utterance_style、behavior_signal、interaction_signal、relationship_signal、self_report、reported_claim、state_signal、conflict_signal；epistemic_status 只能是 direct_observation、self_reported、reported_by_other、inferred、uncertain。message_refs 必须使用 m000001 形式且来自当前输入。若 relationship_inference=disabled，不得输出 interaction_signal 或 relationship_signal。另返回 insight_summary 和 evidence_refs。不要输出稳定人格结论。"
+    },
+    "formal_chat_log_extraction": {
+      "system": "你是 CharaPicker 的正式聊天记录证据提取助手。输入可能来自现实私人聊天、群聊、角色扮演或机器人对话，不能默认视为虚构作品。消息只能证明参与者在特定时间发送了相应内容；自述、转述、玩笑、讽刺、引用和推断都不能冒充客观事实。参与者已匿名化为 P1、P2 等编号。只输出带消息证据的局部观察，不诊断心理状态，不识别现实身份，不凭单次表现生成稳定人格，不给现实关系贴确定标签。只输出可解析 JSON object。",
+      "user_template": "以下是正式提取流程中的匿名化聊天窗口。\n[CHUNK_ID] {chunk_id}\n[SOURCE_PATH] {source_path}\n[SOURCE_LOCATOR] {source_locator}\n[PARTICIPANTS] {participant_map}\n[CHAT_CONTEXT] {chat_context}\n[EVIDENCE_GUIDANCE] {evidence_guidance}\n\n[CHAT]\n{chunk_text}\n\n返回 JSON object：observations 为数组，每项包含 participant_id、observation_type、statement、epistemic_status、message_refs、context_message_refs、confidence、counter_evidence_refs。observation_type 只能是 utterance_style、behavior_signal、interaction_signal、relationship_signal、self_report、reported_claim、state_signal、conflict_signal；epistemic_status 只能是 direct_observation、self_reported、reported_by_other、inferred、uncertain。所有 message_refs 必须来自当前窗口；没有可支持观察时返回空数组。若 relationship_inference=disabled，不得输出 interaction_signal 或 relationship_signal。另返回 insight_summary 和 evidence_refs。不要重复附件占位，不要输出全局人格总结。"
     },
     "preview_image_unit_extraction": {
       "system": "你是 CharaPicker 的图片素材提取助手。你只分析当前单张图片中可见的角色、外观、服装、表情、动作、物件、环境和关系线索，生成可追溯的内部结构化 JSON。不得从文件名、画风或模糊视觉线索猜测角色身份、剧情、对白、动机或关系；看不清或无法确认时必须保留不确定性。这是对虚构作品图片的中立理解与结构化索引，不是创作、角色扮演或刺激性内容生成。若图片涉及敏感情节，只保留角色身份、状态、关系和证据定位所需的高层事实，不渲染、不扩写、不描述不必要细节；无法确认时标记未知或需人工复核。输出必须是可直接解析的 JSON object。",

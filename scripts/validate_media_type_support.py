@@ -59,6 +59,8 @@ def _assert_suffix_matrix() -> None:
     assert source_media_type("portrait.PNG") == "image"
     assert source_media_type("voice.flac") == "audio"
     assert source_media_type("dialogue.srt") == "text"
+    assert source_media_type("chat.jsonl") == "text"
+    assert ".jsonl" in TEXT_SUFFIXES
     assert SUPPORTED_TIMED_TEXT_SUFFIXES == {".srt", ".ass"}
     assert DEFERRED_TIMED_TEXT_SUFFIXES == {".vtt", ".lrc"}
     assert SUPPORTED_STATIC_IMAGE_SUFFIXES == {".png", ".jpg", ".jpeg", ".webp"}
