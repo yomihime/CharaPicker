@@ -22,6 +22,40 @@ class ExtractionArtifactStage(str, Enum):
     LEGACY_UNKNOWN = "legacy_unknown"
 
 
+class ChatObservationType(str, Enum):
+    UTTERANCE_STYLE = "utterance_style"
+    BEHAVIOR_SIGNAL = "behavior_signal"
+    INTERACTION_SIGNAL = "interaction_signal"
+    RELATIONSHIP_SIGNAL = "relationship_signal"
+    SELF_REPORT = "self_report"
+    REPORTED_CLAIM = "reported_claim"
+    STATE_SIGNAL = "state_signal"
+    CONFLICT_SIGNAL = "conflict_signal"
+
+
+class ChatEpistemicStatus(str, Enum):
+    DIRECT_OBSERVATION = "direct_observation"
+    SELF_REPORTED = "self_reported"
+    REPORTED_BY_OTHER = "reported_by_other"
+    INFERRED = "inferred"
+    UNCERTAIN = "uncertain"
+
+
+class ChatObservation(BaseModel):
+    observation_id: str = ""
+    participant_id: str = ""
+    participant_name: str = ""
+    observation_type: ChatObservationType
+    statement: str
+    epistemic_status: ChatEpistemicStatus = ChatEpistemicStatus.DIRECT_OBSERVATION
+    message_refs: list[str] = Field(default_factory=list)
+    context_message_refs: list[str] = Field(default_factory=list)
+    time_start: str = ""
+    time_end: str = ""
+    confidence: float = Field(default=0.5, ge=0, le=1)
+    counter_evidence_refs: list[str] = Field(default_factory=list)
+
+
 class SourceProcessingPreset(str, Enum):
     ORIGINAL = "original"
     SEGMENT_TRANSCODE = "segment_transcode"
@@ -394,6 +428,8 @@ class ChunkExtractionResult(ExtractionStructuredArtifact):
     character_state_changes: list[str] = Field(default_factory=list)
     insight_summary: str = ""
     evidence_refs: list[str] = Field(default_factory=list)
+    chat_observations: list[ChatObservation] = Field(default_factory=list)
+    chat_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class EpisodeExtractionContent(ExtractionStructuredArtifact):
@@ -410,6 +446,8 @@ class EpisodeExtractionContent(ExtractionStructuredArtifact):
     evidence_refs: list[str] = Field(default_factory=list)
     uncertainties: list[str] = Field(default_factory=list)
     full_context_view: dict[str, Any] = Field(default_factory=dict)
+    chat_observations: list[ChatObservation] = Field(default_factory=list)
+    chat_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class EpisodeExtractionSummary(ExtractionStructuredArtifact):
@@ -440,6 +478,8 @@ class SeasonExtractionContent(ExtractionStructuredArtifact):
     evidence_refs: list[str] = Field(default_factory=list)
     unresolved_threads: list[str] = Field(default_factory=list)
     season_outline: str = ""
+    chat_observations: list[ChatObservation] = Field(default_factory=list)
+    chat_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class SeasonExtractionSummary(ExtractionStructuredArtifact):

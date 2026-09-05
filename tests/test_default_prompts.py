@@ -32,7 +32,7 @@ class DefaultPromptTests(unittest.TestCase):
         cls.payload = json.loads(DEFAULT_PROMPTS_PATH.read_text(encoding="utf-8"))
 
     def test_semantic_prompt_resource_version_is_incremented(self) -> None:
-        self.assertEqual(self.payload["version"], 2)
+        self.assertEqual(self.payload["version"], 3)
 
     def test_content_facing_prompts_keep_neutral_fiction_boundaries(self) -> None:
         prompts = self.payload["prompts"]
@@ -50,6 +50,21 @@ class DefaultPromptTests(unittest.TestCase):
         for forbidden in ("忽略安全策略", "绕过安全策略", "关闭安全策略", "隐藏安全策略"):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, serialized)
+
+    def test_chat_prompts_keep_reality_and_evidence_boundaries(self) -> None:
+        prompts = self.payload["prompts"]
+        for purpose in (
+            "preview_chat_log_extraction",
+            "formal_chat_log_extraction",
+        ):
+            with self.subTest(purpose=purpose):
+                system_prompt = prompts[purpose]["system"]
+                user_template = prompts[purpose]["user_template"]
+                self.assertIn("不能默认", system_prompt)
+                self.assertIn("消息", system_prompt)
+                self.assertIn("JSON", system_prompt)
+                self.assertIn("message_refs", user_template)
+                self.assertIn("relationship_inference=disabled", user_template)
 
 
 if __name__ == "__main__":

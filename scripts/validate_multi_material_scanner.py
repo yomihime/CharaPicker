@@ -82,6 +82,26 @@ def _assert_multi_material_scan() -> None:
                 "甲:\n时间: 2026-09-05 12:00:00\n内容: 你好\n"
             ).encode("utf-8"),
         )
+        qq_json_message = {
+            "id": "1",
+            "time": "2026-09-05 12:00:00",
+            "sender": {"uid": "u1", "name": "甲"},
+            "content": {"text": "你好", "elements": [], "resources": []},
+        }
+        _write_fixture(
+            paths.materials / "qq_chat.json",
+            json.dumps(
+                {
+                    "metadata": {"name": "QQChatExporter", "version": "5"},
+                    "messages": [qq_json_message],
+                },
+                ensure_ascii=False,
+            ).encode("utf-8"),
+        )
+        _write_fixture(
+            paths.materials / "qq_chat.jsonl",
+            json.dumps(qq_json_message, ensure_ascii=False).encode("utf-8"),
+        )
         _write_fixture(paths.materials / "voice.wav")
         _write_fixture(paths.materials / "images" / "001.png")
         _write_fixture(paths.materials / "images" / "002.jpg")
@@ -140,7 +160,11 @@ def _assert_multi_material_scan() -> None:
         assert standalone_units["qq_chat.txt"].content_form == ContentForm.CHAT_LOG
         assert standalone_units["qq_chat.txt"].unit_kind == "chat_log_text"
         assert standalone_units["qq_chat.txt"].handler_options["chat_format"] == "qq_chat_exporter"
-        assert standalone_units["qq_chat.txt"].handler_options["chat_parser_version"] == 1
+        assert standalone_units["qq_chat.txt"].handler_options["chat_parser_version"] == 2
+        assert standalone_units["qq_chat.json"].content_form == ContentForm.CHAT_LOG
+        assert standalone_units["qq_chat.json"].unit_kind == "chat_log_text"
+        assert standalone_units["qq_chat.jsonl"].content_form == ContentForm.CHAT_LOG
+        assert standalone_units["qq_chat.jsonl"].unit_kind == "chat_log_text"
         assert standalone_units["voice.wav"].media_type == MediaType.AUDIO
         assert standalone_units["voice.wav"].handler_options["transcript_candidate"] is True
         assert standalone_units["images/001.png"].material_ref.page_range.start_page == 1

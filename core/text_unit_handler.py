@@ -8,8 +8,16 @@ from typing import Any
 
 from core.chat_log_parser import (
     ChatMessage,
-    parse_qq_chat_export,
-    render_chat_messages,
+    parse_chat_export,
+)
+from core.chat_log_processing import (
+    ChatModelView,
+    build_chat_index_stats,
+    build_chat_model_views,
+    build_preview_chat_view,
+    normalize_chat_observations,
+    project_chat_observations,
+    render_compact_chat_messages,
 )
 from core.extraction_ai import (
     FormalExtractionJsonError,
@@ -42,7 +50,7 @@ TEXT_DOCUMENT_UNIT_KINDS = frozenset({"document_text", "controlled_json_text"})
 TIMED_TEXT_UNIT_KINDS = frozenset({"subtitle_text"})
 TRANSCRIPT_TEXT_UNIT_KINDS = frozenset({"transcript_text"})
 CHAT_LOG_UNIT_KINDS = frozenset({"chat_log_text"})
-TEXT_DOCUMENT_SUFFIXES = frozenset({".txt", ".md", ".json"})
+TEXT_DOCUMENT_SUFFIXES = frozenset({".txt", ".md", ".json", ".jsonl"})
 TEXT_DECODE_ENCODINGS = ("utf-8-sig", "utf-8", "gb18030", "shift_jis")
 ModelJsonCall = Callable[[ModelCallRequest], FormalExtractionJsonResult]
 
@@ -56,6 +64,7 @@ class TextUnitHandlerConfig:
     max_output_tokens: int = 4_096
     min_adaptive_chunk_chars: int = 1_500
     max_adaptive_split_depth: int = 3
+    max_chat_output_tokens: int = 1_536
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +87,12 @@ class PreparedTextChunk:
     timed_text_format: str = ""
     timed_segments: list[TimedTextSegment] = field(default_factory=list)
     chat_messages: list[ChatMessage] = field(default_factory=list)
+    chat_participant_aliases: dict[str, str] = field(default_factory=dict)
+    chat_participant_names: dict[str, str] = field(default_factory=dict)
+    represented_message_count: int = 0
+    chat_session_count: int = 0
+    chat_redaction_count: int = 0
+    chat_sampled: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +111,12 @@ class TextUnitPlan:
     chunk_ids: list[str]
     total_chars: int
     covered_chars: int
+    model_input_chars: int = 0
+    message_count: int = 0
+    represented_message_count: int = 0
+    participant_count: int = 0
+    active_days: int = 0
+    one_sided: bool = False
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -180,17 +201,36 @@ class TextUnitHandler:
             raise ValueError(f"unsupported text extraction unit: {unit.unit_kind}")
         source_path = self._source_path(source_root, unit)
         parsed = self.parse_material(source_path, unit_kind=unit.unit_kind)
-        prepared_chunks, chunk_warnings = self._prepare_chunks(parsed, chunk_limit=chunk_limit)
+        prepared_chunks, chunk_warnings = self._prepare_chunks(
+            parsed,
+            chunk_limit=chunk_limit,
+            preview_sampling=False,
+        )
+        represented_message_count = sum(
+            chunk.represented_message_count or len(chunk.chat_messages)
+            for chunk in prepared_chunks
+        )
+        chat_stats = build_chat_index_stats(parsed.chat_messages) if parsed.chat_messages else None
+        covered_chars = max(
+            (text_chunk.end_offset for text_chunk in prepared_chunks),
+            default=0,
+        )
+        if chat_stats is not None:
+            coverage_fraction = represented_message_count / max(1, chat_stats.message_count)
+            covered_chars = round(len(parsed.text) * min(1.0, coverage_fraction))
         return TextUnitPlan(
             chunk_ids=[
                 f"{unit.unit_id}_text_{text_chunk.index:04d}"
                 for text_chunk in prepared_chunks
             ],
             total_chars=len(parsed.text),
-            covered_chars=max(
-                (text_chunk.end_offset for text_chunk in prepared_chunks),
-                default=0,
-            ),
+            covered_chars=covered_chars,
+            model_input_chars=sum(len(chunk.text) for chunk in prepared_chunks),
+            message_count=chat_stats.message_count if chat_stats is not None else 0,
+            represented_message_count=represented_message_count,
+            participant_count=chat_stats.participant_count if chat_stats is not None else 0,
+            active_days=chat_stats.active_days if chat_stats is not None else 0,
+            one_sided=chat_stats.one_sided if chat_stats is not None else False,
             warnings=[*parsed.warnings, *chunk_warnings],
         )
 
@@ -218,7 +258,11 @@ class TextUnitHandler:
 
         source_path = self._source_path(source_root, unit)
         parsed = self.parse_material(source_path, unit_kind=unit.unit_kind)
-        prepared_chunks, chunk_warnings = self._prepare_chunks(parsed, chunk_limit=chunk_limit)
+        prepared_chunks, chunk_warnings = self._prepare_chunks(
+            parsed,
+            chunk_limit=chunk_limit,
+            preview_sampling=extraction_stage == ExtractionArtifactStage.PREVIEW,
+        )
         warnings = [*parsed.warnings, *chunk_warnings]
         output: list[ChunkExtractionResult] = []
         failures: list[TextChunkFailure] = []
@@ -302,9 +346,14 @@ class TextUnitHandler:
 
             source_locator = self._source_locator(text_chunk)
             evidence_guidance = self._evidence_guidance(text_chunk)
+            is_chat = bool(text_chunk.chat_messages)
             request = build_formal_text_json_request(
                 purpose=(
-                    "preview_text_unit_extraction"
+                    "preview_chat_log_extraction"
+                    if is_chat and extraction_stage == ExtractionArtifactStage.PREVIEW
+                    else "formal_chat_log_extraction"
+                    if is_chat
+                    else "preview_text_unit_extraction"
                     if extraction_stage == ExtractionArtifactStage.PREVIEW
                     else "formal_text_unit_extraction"
                 ),
@@ -316,14 +365,22 @@ class TextUnitHandler:
                     "season_id": season_id,
                     "episode_id": unit.episode_id,
                     "chunk_id": chunk_id,
-                    "source_path": unit.material_ref.relative_path,
+                    "source_path": "[chat_log]" if is_chat else unit.material_ref.relative_path,
                     "content_form": unit.content_form.value,
                     "source_locator": source_locator,
                     "text_range": source_locator,
                     "evidence_guidance": evidence_guidance,
                     "chunk_text": text_chunk.text,
+                    "participant_map": ", ".join(
+                        sorted(text_chunk.chat_participant_aliases.values())
+                    ),
+                    "chat_context": self._chat_context(text_chunk),
                 },
-                max_tokens=self.config.max_output_tokens,
+                max_tokens=(
+                    min(self.config.max_output_tokens, self.config.max_chat_output_tokens)
+                    if is_chat
+                    else self.config.max_output_tokens
+                ),
                 metadata={
                     "stage": extraction_stage.value,
                     "season_id": season_id,
@@ -433,6 +490,13 @@ class TextUnitHandler:
                     ),
                     timed_segments=text_chunk.timed_segments,
                     chat_messages=text_chunk.chat_messages,
+                    chat_format=parsed.chat_format,
+                    chat_participant_aliases=text_chunk.chat_participant_aliases,
+                    chat_participant_names=text_chunk.chat_participant_names,
+                    represented_message_count=text_chunk.represented_message_count,
+                    chat_session_count=text_chunk.chat_session_count,
+                    chat_redaction_count=text_chunk.chat_redaction_count,
+                    chat_sampled=text_chunk.chat_sampled,
                     extraction_stage=extraction_stage,
                     extraction_run_id=extraction_run_id,
                     run_type=run_type,
@@ -476,7 +540,7 @@ class TextUnitHandler:
         if unit_kind in TRANSCRIPT_TEXT_UNIT_KINDS:
             return self._parse_transcript_material(text, encoding=encoding, warnings=warnings)
         if unit_kind in CHAT_LOG_UNIT_KINDS:
-            document = parse_qq_chat_export(text)
+            document = parse_chat_export(text, suffix=suffix)
             return ParsedTextMaterial(
                 text=text,
                 encoding=encoding,
@@ -555,9 +619,14 @@ class TextUnitHandler:
         parsed: ParsedTextMaterial,
         *,
         chunk_limit: int | None,
+        preview_sampling: bool = False,
     ) -> tuple[list[PreparedTextChunk], list[str]]:
         if parsed.chat_messages:
-            return self._chunk_chat_messages(parsed, chunk_limit=chunk_limit)
+            return self._chunk_chat_messages(
+                parsed,
+                chunk_limit=chunk_limit,
+                preview_sampling=preview_sampling,
+            )
         if parsed.timed_segments:
             return self._chunk_timed_segments(parsed, chunk_limit=chunk_limit)
         chunking = self.chunk_material(parsed.text, chunk_limit=chunk_limit)
@@ -579,58 +648,109 @@ class TextUnitHandler:
         parsed: ParsedTextMaterial,
         *,
         chunk_limit: int | None,
+        preview_sampling: bool = False,
     ) -> tuple[list[PreparedTextChunk], list[str]]:
         max_chunks = self.config.max_chat_chunks_per_unit
         if chunk_limit is not None:
             max_chunks = min(max_chunks, max(1, chunk_limit))
-        chunks: list[PreparedTextChunk] = []
         warnings: list[str] = []
-        current: list[ChatMessage] = []
-        for message_position, message in enumerate(parsed.chat_messages):
-            candidate = [*current, message]
-            candidate_text = render_chat_messages(candidate)
-            if current and len(candidate_text) > self.config.max_input_chars:
-                chunks.append(self._prepared_chat_chunk(current, len(chunks) + 1))
-                if len(chunks) >= max_chunks:
-                    remaining_messages = len(parsed.chat_messages) - message_position
-                    warnings.append(
-                        f"chat_log_chunk_limit_reached:max_chunks={max_chunks}:"
-                        f"remaining_messages={remaining_messages}:"
-                        f"remaining_chars={len(parsed.text) - message.start_offset}"
-                    )
-                    return chunks, warnings
-                current = [message]
-            else:
-                current = candidate
-            rendered_current = render_chat_messages(current)
-            if len(rendered_current) > self.config.max_input_chars:
-                warnings.append(
-                    f"chat_message_exceeds_budget:index={message.index}:"
-                    f"chars={len(rendered_current)}"
-                )
-        if current:
-            if len(chunks) >= max_chunks:
-                warnings.append(
-                    f"chat_log_chunk_limit_reached:max_chunks={max_chunks}:"
-                    f"remaining_messages={len(current)}"
-                )
-            else:
-                chunks.append(self._prepared_chat_chunk(current, len(chunks) + 1))
+        if preview_sampling:
+            preview_view = build_preview_chat_view(
+                parsed.chat_messages,
+                max_chars=self.config.max_input_chars,
+            )
+            warnings.append(
+                "chat_preview_stratified_sampling:"
+                f"represented_messages={preview_view.represented_message_count}:"
+                f"total_messages={len(parsed.chat_messages)}"
+            )
+            return [self._prepared_chat_view(preview_view, 1)], warnings
+
+        model_views = build_chat_model_views(
+            parsed.chat_messages,
+            max_chars=self.config.max_input_chars,
+        )
+        selected_views = model_views[:max_chunks]
+        chunks = [
+            self._prepared_chat_view(view, index)
+            for index, view in enumerate(selected_views, start=1)
+        ]
+        represented_messages = sum(view.represented_message_count for view in selected_views)
+        if len(model_views) > max_chunks:
+            warnings.append(
+                f"chat_log_chunk_limit_reached:max_chunks={max_chunks}:"
+                f"remaining_messages={len(parsed.chat_messages) - represented_messages}:"
+                f"remaining_chars={len(parsed.text) - chunks[-1].end_offset if chunks else len(parsed.text)}"
+            )
         if len(chunks) > 1:
             warnings.append(f"chat_log_split_into_chunks:count={len(chunks)}")
+        stats = build_chat_index_stats(parsed.chat_messages)
+        warnings.append(
+            "chat_log_indexed:"
+            f"messages={stats.message_count}:participants={stats.participant_count}:"
+            f"active_days={stats.active_days}:attachment_only={stats.attachment_only_count}"
+        )
+        if stats.one_sided:
+            warnings.append("chat_log_one_sided:relationship_inference_disabled")
         return chunks, warnings
 
-    @staticmethod
     def _prepared_chat_chunk(
+        self,
         messages: list[ChatMessage],
         index: int,
+        *,
+        participant_aliases: dict[str, str] | None = None,
+        participant_names: dict[str, str] | None = None,
     ) -> PreparedTextChunk:
+        views = build_chat_model_views(
+            messages,
+            max_chars=max(self.config.max_input_chars, 1),
+        )
+        if not views:
+            raise ValueError("chat chunk does not contain messages")
+        prepared = self._prepared_chat_view(views[0], index)
+        if participant_aliases is None and participant_names is None:
+            return prepared
+        aliases = dict(participant_aliases or prepared.chat_participant_aliases)
+        rendered, redactions = render_compact_chat_messages(
+            prepared.chat_messages,
+            participant_aliases=aliases,
+            reply_refs={
+                message.source_message_id: message.message_ref
+                for message in prepared.chat_messages
+                if message.source_message_id
+            },
+        )
+        return PreparedTextChunk(
+            index=prepared.index,
+            text=rendered,
+            start_offset=prepared.start_offset,
+            end_offset=prepared.end_offset,
+            chat_messages=prepared.chat_messages,
+            chat_participant_aliases=aliases,
+            chat_participant_names=dict(
+                participant_names or prepared.chat_participant_names
+            ),
+            represented_message_count=prepared.represented_message_count,
+            chat_session_count=prepared.chat_session_count,
+            chat_redaction_count=redactions,
+            chat_sampled=prepared.chat_sampled,
+        )
+
+    @staticmethod
+    def _prepared_chat_view(view: ChatModelView, index: int) -> PreparedTextChunk:
         return PreparedTextChunk(
             index=index,
-            text=render_chat_messages(messages),
-            start_offset=messages[0].start_offset,
-            end_offset=messages[-1].end_offset,
-            chat_messages=list(messages),
+            text=view.text,
+            start_offset=min(message.start_offset for message in view.messages),
+            end_offset=max(message.end_offset for message in view.messages),
+            chat_messages=list(view.messages),
+            chat_participant_aliases=dict(view.participant_aliases),
+            chat_participant_names=dict(view.participant_names),
+            represented_message_count=view.represented_message_count,
+            chat_session_count=view.session_count,
+            chat_redaction_count=view.redaction_count,
+            chat_sampled=view.sampled,
         )
 
     def _chunk_timed_segments(
@@ -713,6 +833,13 @@ class TextUnitHandler:
         text_range: TextRange,
         timed_segments: list[TimedTextSegment],
         chat_messages: list[ChatMessage],
+        chat_format: str,
+        chat_participant_aliases: dict[str, str],
+        chat_participant_names: dict[str, str],
+        represented_message_count: int,
+        chat_session_count: int,
+        chat_redaction_count: int,
+        chat_sampled: bool,
         extraction_stage: ExtractionArtifactStage,
         extraction_run_id: str,
         run_type: str,
@@ -755,11 +882,13 @@ class TextUnitHandler:
                 evidence_locator["source_line_start"] = source_lines[0]
                 evidence_locator["source_line_end"] = source_lines[-1]
         if chat_messages:
+            message_indexes = sorted(message.index for message in chat_messages)
             evidence_locator.update(
                 {
-                    "chat_format": "qq_chat_exporter",
-                    "message_index_start": chat_messages[0].index,
-                    "message_index_end": chat_messages[-1].index,
+                    "chat_format": chat_format or "qq_chat_exporter",
+                    "message_index_start": message_indexes[0],
+                    "message_index_end": message_indexes[-1],
+                    "message_ranges": self._message_ranges(message_indexes),
                     "message_time_start": chat_messages[0].timestamp,
                     "message_time_end": chat_messages[-1].timestamp,
                 }
@@ -774,7 +903,7 @@ class TextUnitHandler:
                 "media_type": MediaType.TEXT.value,
                 "unit_kind": unit.unit_kind,
                 "speaker_policy": "explicit_only",
-                "chat_format": "qq_chat_exporter" if chat_messages else "",
+                "chat_format": chat_format if chat_messages else "",
             },
         )
         source_trace = SourceTrace(
@@ -788,7 +917,17 @@ class TextUnitHandler:
         evidence_refs = self._string_list(payload.get("evidence_refs"))
         if fallback_evidence not in evidence_refs:
             evidence_refs.append(fallback_evidence)
+        chat_observations = normalize_chat_observations(
+            payload,
+            chat_messages,
+            participant_aliases=chat_participant_aliases,
+            participant_names=chat_participant_names,
+        )
+        chat_projection = project_chat_observations(chat_observations)
         relationships = payload.get("relationship_interactions", payload.get("relationships"))
+        if chat_observations:
+            relationships = chat_projection["relationship_interactions"]
+        chat_stats = build_chat_index_stats(chat_messages) if chat_messages else None
         return ChunkExtractionResult(
             season_id=season_id,
             episode_id=unit.episode_id,
@@ -815,14 +954,75 @@ class TextUnitHandler:
             estimated_context_tokens=result.estimated_context_tokens,
             requested_output_tokens=result.requested_output_tokens,
             finish_reason=result.finish_reason,
-            facts=self._string_list(payload.get("facts")),
-            behavior_traits=self._string_list(payload.get("behavior_traits")),
-            dialogue_style=self._string_list(payload.get("dialogue_style")),
+            targets=(
+                chat_projection["targets"]
+                if chat_observations
+                else self._string_list(payload.get("targets"))
+            ),
+            facts=(
+                chat_projection["facts"]
+                if chat_observations
+                else self._string_list(payload.get("facts"))
+            ),
+            behavior_traits=(
+                chat_projection["behavior_traits"]
+                if chat_observations
+                else self._string_list(payload.get("behavior_traits"))
+            ),
+            dialogue_style=(
+                chat_projection["dialogue_style"]
+                if chat_observations
+                else self._string_list(payload.get("dialogue_style"))
+            ),
             relationship_interactions=self._string_list(relationships),
-            conflicts=self._string_list(payload.get("conflicts")),
-            character_state_changes=self._string_list(payload.get("character_state_changes")),
+            conflicts=(
+                chat_projection["conflicts"]
+                if chat_observations
+                else self._string_list(payload.get("conflicts"))
+            ),
+            character_state_changes=(
+                chat_projection["character_state_changes"]
+                if chat_observations
+                else self._string_list(payload.get("character_state_changes"))
+            ),
             insight_summary=str(payload.get("insight_summary", "")).strip(),
-            evidence_refs=evidence_refs,
+            evidence_refs=list(
+                dict.fromkeys(
+                    [
+                        *evidence_refs,
+                        *(
+                            f"{material_ref.relative_path}#message={message_ref}"
+                            for message_ref in chat_projection["evidence_refs"]
+                        ),
+                    ]
+                )
+            ),
+            chat_observations=chat_observations,
+            chat_metadata=(
+                {
+                    "format": chat_format or "qq_chat_exporter",
+                    "message_count": chat_stats.message_count,
+                    "represented_message_count": represented_message_count
+                    or chat_stats.message_count,
+                    "participant_count": len(chat_participant_aliases),
+                    "active_days": chat_stats.active_days,
+                    "active_day_keys": sorted(
+                        {
+                            message.timestamp[:10]
+                            for message in chat_messages
+                            if len(message.timestamp) >= 10
+                        }
+                    ),
+                    "attachment_only_count": chat_stats.attachment_only_count,
+                    "one_sided": len(chat_participant_aliases) < 2,
+                    "participant_ids": sorted(chat_participant_aliases),
+                    "session_count": chat_session_count,
+                    "pii_redaction_count": chat_redaction_count,
+                    "sampled": chat_sampled,
+                }
+                if chat_stats is not None
+                else {}
+            ),
         )
 
     def _prepared_timed_chunk(
@@ -859,8 +1059,13 @@ class TextUnitHandler:
     @staticmethod
     def _source_locator(chunk: PreparedTextChunk) -> str:
         if chunk.chat_messages:
+            message_indexes = sorted(message.index for message in chunk.chat_messages)
+            ranges = ",".join(
+                f"{item['start']}-{item['end']}"
+                for item in TextUnitHandler._message_ranges(message_indexes)
+            )
             return (
-                f"messages={chunk.chat_messages[0].index}-{chunk.chat_messages[-1].index};"
+                f"messages={ranges};"
                 f"time={chunk.chat_messages[0].timestamp}-{chunk.chat_messages[-1].timestamp};"
                 f"text={chunk.start_offset}:{chunk.end_offset}"
             )
@@ -879,6 +1084,21 @@ class TextUnitHandler:
             f"{max(segment.end_seconds for segment in chunk.timed_segments):.3f}"
         )
         return ";".join(parts)
+
+    @staticmethod
+    def _message_ranges(indexes: list[int]) -> list[dict[str, int]]:
+        if not indexes:
+            return []
+        ranges: list[dict[str, int]] = []
+        start = previous = indexes[0]
+        for index in indexes[1:]:
+            if index == previous + 1:
+                previous = index
+                continue
+            ranges.append({"start": start, "end": previous})
+            start = previous = index
+        ranges.append({"start": start, "end": previous})
+        return ranges
 
     @staticmethod
     def _evidence_guidance(chunk: PreparedTextChunk) -> str:
@@ -944,10 +1164,14 @@ class TextUnitHandler:
                 self._prepared_chat_chunk(
                     chunk.chat_messages[:split_index],
                     chunk.index,
+                    participant_aliases=chunk.chat_participant_aliases,
+                    participant_names=chunk.chat_participant_names,
                 ),
                 self._prepared_chat_chunk(
                     chunk.chat_messages[split_index:],
                     chunk.index,
+                    participant_aliases=chunk.chat_participant_aliases,
+                    participant_names=chunk.chat_participant_names,
                 ),
             )
         if chunk.timed_segments:
@@ -1005,6 +1229,20 @@ class TextUnitHandler:
                 start_offset=absolute_split,
                 end_offset=chunk.end_offset,
             ),
+        )
+
+    @staticmethod
+    def _chat_context(chunk: PreparedTextChunk) -> str:
+        if not chunk.chat_messages:
+            return ""
+        participant_count = len(chunk.chat_participant_aliases)
+        return (
+            f"participants={participant_count};"
+            f"represented_messages={chunk.represented_message_count or len(chunk.chat_messages)};"
+            f"sessions={chunk.chat_session_count};"
+            f"sampled={'true' if chunk.chat_sampled else 'false'};"
+            f"pii_redactions={chunk.chat_redaction_count};"
+            f"relationship_inference={'disabled' if participant_count < 2 else 'evidence_only'}"
         )
 
     @staticmethod

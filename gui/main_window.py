@@ -379,6 +379,8 @@ class MainWindow(FluentWindow):
         cloud_preset = self.model_page.current_cloud_video_preset()
         if cloud_preset is not None and not self._confirm_low_preview_token_budget(cloud_preset):
             return
+        if cloud_preset is not None and not self._confirm_chat_cloud_processing(config, cloud_preset):
+            return
         self.switchTo(self.project_page)
         self.project_page.clear_events()
         self.project_page.set_extraction_running(True, cancellable=False)
@@ -417,8 +419,16 @@ class MainWindow(FluentWindow):
             fast_concurrency,
         )
         cloud_preset = self.model_page.current_cloud_video_preset()
-        if cloud_preset is not None and not self._confirm_full_text_plan(config, cloud_preset):
-            return
+        if cloud_preset is not None:
+            text_plan = self._inspect_text_extraction_plan(config, cloud_preset)
+            if not self._confirm_chat_cloud_processing(
+                config,
+                cloud_preset,
+                plan=text_plan,
+            ):
+                return
+            if not self._confirm_full_text_plan(config, cloud_preset, plan=text_plan):
+                return
         self.switchTo(self.project_page)
         self.project_page.clear_events()
         self.project_page.set_extraction_running(True, cancellable=True)
@@ -457,15 +467,11 @@ class MainWindow(FluentWindow):
         self,
         config: ProjectConfig,
         preset: CloudModelPreset,
+        *,
+        plan: dict[str, int | float] | None = None,
     ) -> bool:
-        try:
-            plan = self.extractor.inspect_text_extraction_plan(config.project_id, preset)
-        except (OSError, ValueError):
-            LOGGER.warning(
-                "Text extraction preflight failed; project_id=%s",
-                config.project_id,
-                exc_info=True,
-            )
+        plan = plan or self._inspect_text_extraction_plan(config, preset)
+        if plan is None:
             return True
         total_chunks = int(plan["total_chunks"])
         limited_units = int(plan["limited_units"])
@@ -485,6 +491,65 @@ class MainWindow(FluentWindow):
         dialog.yesButton.setText(t("app.full.textPlan.dialog.continue"))
         dialog.cancelButton.setText(t("app.full.textPlan.dialog.cancel"))
         return bool(dialog.exec())
+
+    def _confirm_chat_cloud_processing(
+        self,
+        config: ProjectConfig,
+        preset: CloudModelPreset,
+        *,
+        plan: dict[str, int | float] | None = None,
+    ) -> bool:
+        plan = plan or self._inspect_text_extraction_plan(config, preset)
+        if plan is None:
+            return True
+
+        if int(plan.get("chat_units", 0)) <= 0:
+            return True
+
+        one_sided_note = (
+            t("app.chat.cloud.dialog.oneSided")
+            if int(plan.get("chat_one_sided_units", 0)) > 0
+            else ""
+        )
+        dialog = MessageBox(
+            t("app.chat.cloud.dialog.title"),
+            t(
+                "app.chat.cloud.dialog.content",
+                messages=int(plan.get("chat_messages", 0)),
+                participants=int(plan.get("chat_participants", 0)),
+                active_days=int(plan.get("chat_active_days", 0)),
+                model_chars=int(plan.get("model_input_chars", 0)),
+                one_sided_note=one_sided_note,
+            ),
+            self,
+        )
+        dialog.yesButton.setText(t("app.chat.cloud.dialog.continue"))
+        dialog.cancelButton.setText(t("app.chat.cloud.dialog.cancel"))
+        confirmed = bool(dialog.exec())
+        LOGGER.info(
+            "Chat cloud processing confirmation resolved; project_id=%s "
+            "messages=%s participants=%s confirmed=%s",
+            config.project_id,
+            int(plan.get("chat_messages", 0)),
+            int(plan.get("chat_participants", 0)),
+            confirmed,
+        )
+        return confirmed
+
+    def _inspect_text_extraction_plan(
+        self,
+        config: ProjectConfig,
+        preset: CloudModelPreset,
+    ) -> dict[str, int | float] | None:
+        try:
+            return self.extractor.inspect_text_extraction_plan(config.project_id, preset)
+        except (OSError, ValueError):
+            LOGGER.warning(
+                "Text extraction preflight failed; project_id=%s",
+                config.project_id,
+                exc_info=True,
+            )
+            return None
 
     def _on_preview_succeeded(self, config: ProjectConfig) -> None:
         InfoBar.info(

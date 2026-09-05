@@ -1445,6 +1445,11 @@ def _build_ai_knowledge_summary(
                     [str(item) for item in payload.get("evidence_refs", []) if str(item).strip()],
                     20,
                 ),
+                "chat_observations": _related_chat_observations(
+                    payload.get("chat_observations", []),
+                    match_terms,
+                    limit=24,
+                ),
                 "source_metadata": _payload_source_metadata(payload),
             }
         )
@@ -1510,6 +1515,49 @@ def _compact_timeline(timeline: list[dict]) -> list[dict[str, Any]]:
 
 def _compact_items(values: list[str], limit: int, *, max_chars: int = 500) -> list[str]:
     return [_clip_text(value, max_chars) for value in _unique(values)[:limit]]
+
+
+def _related_chat_observations(
+    values: Any,
+    match_terms: list[str],
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    if not isinstance(values, list):
+        return []
+    lowered_terms = [term.casefold() for term in match_terms if term.strip()]
+    output: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, dict):
+            continue
+        participant_name = str(value.get("participant_name", ""))
+        statement = str(value.get("statement", ""))
+        searchable = f"{participant_name}\n{statement}".casefold()
+        if lowered_terms and not any(term in searchable for term in lowered_terms):
+            continue
+        observation_id = str(value.get("observation_id", ""))
+        identity = observation_id or searchable
+        if identity in seen:
+            continue
+        seen.add(identity)
+        output.append(
+            {
+                "participant_name": participant_name,
+                "observation_type": str(value.get("observation_type", "")),
+                "statement": _clip_text(statement, 500),
+                "epistemic_status": str(value.get("epistemic_status", "")),
+                "message_refs": [
+                    str(ref)
+                    for ref in value.get("message_refs", [])
+                    if str(ref).strip()
+                ][:12],
+                "confidence": value.get("confidence", 0.5),
+            }
+        )
+        if len(output) >= limit:
+            break
+    return output
 
 
 def _clip_text(value: str, limit: int) -> str:

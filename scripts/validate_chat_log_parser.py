@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 import sys
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 
 APP_ROOT = Path(__file__).resolve().parents[1]
@@ -14,7 +17,13 @@ from core.chat_log_parser import (  # noqa: E402
     QQ_CHAT_PARSER_VERSION,
     is_qq_chat_export_path,
     looks_like_qq_chat_export,
+    parse_chat_export,
     parse_qq_chat_export,
+)
+from core.chat_log_processing import (  # noqa: E402
+    build_preview_chat_view,
+    normalize_chat_observations,
+    render_compact_chat_messages,
 )
 from core.extraction_ai import FormalExtractionJsonResult  # noqa: E402
 from core.extraction_plan import ContentForm, ExtractionUnit, MaterialRef, MediaType  # noqa: E402
@@ -50,6 +59,44 @@ CHAT_FIXTURE = """[QQChatExporter V5 / https://example.invalid]
 消息有第二行
 """
 
+JSON_MESSAGES = [
+    {
+        "id": "101",
+        "timestamp": 1788580800000,
+        "time": "2026-09-05 12:00:00",
+        "sender": {"uid": "u-001", "name": "真实甲"},
+        "type": "text",
+        "content": {"text": "联系邮箱 a@example.com", "elements": [], "resources": []},
+        "recalled": False,
+        "system": False,
+    },
+    {
+        "id": "102",
+        "timestamp": 1788580860000,
+        "time": "2026-09-05 12:01:00",
+        "sender": {"uid": "u-002", "name": "真实乙"},
+        "type": "mixed",
+        "content": {
+            "text": "收到",
+            "elements": [{"type": "reply", "data": {"referencedMessageId": "101"}}],
+            "resources": [],
+        },
+        "recalled": False,
+        "system": False,
+    },
+]
+
+JSON_FIXTURE = json.dumps(
+    {
+        "metadata": {"name": "QQChatExporter", "version": "5"},
+        "chatInfo": {"name": "验证会话", "type": "private"},
+        "statistics": {"totalMessages": 2},
+        "messages": JSON_MESSAGES,
+    },
+    ensure_ascii=False,
+)
+JSONL_FIXTURE = "\n".join(json.dumps(item, ensure_ascii=False) for item in JSON_MESSAGES)
+
 
 def _chat_unit() -> ExtractionUnit:
     material_ref = MaterialRef(
@@ -57,7 +104,10 @@ def _chat_unit() -> ExtractionUnit:
         relative_path="chat.txt",
         source_media_type=MediaType.TEXT,
         content_form=ContentForm.CHAT_LOG,
-        metadata={"chat_format": "qq_chat_exporter", "chat_parser_version": 1},
+        metadata={
+            "chat_format": "qq_chat_exporter",
+            "chat_parser_version": QQ_CHAT_PARSER_VERSION,
+        },
     )
     return ExtractionUnit(
         unit_id="unit-chat-validation",
@@ -89,6 +139,84 @@ def _assert_parser() -> None:
         left.end_offset <= right.start_offset
         for left, right in zip(document.messages[:-1], document.messages[1:], strict=True)
     )
+
+    json_document = parse_chat_export(JSON_FIXTURE, suffix=".json")
+    assert json_document.format_name == "qq_chat_exporter_json"
+    assert len(json_document.messages) == 2
+    assert json_document.messages[1].reply_to_id == "101"
+    assert json_document.messages[0].participant_id != "u-001"
+
+    jsonl_document = parse_chat_export(JSONL_FIXTURE, suffix=".jsonl")
+    assert jsonl_document.format_name == "qq_chat_exporter_jsonl"
+    assert len(jsonl_document.messages) == 2
+    aliases = {
+        message.participant_id: f"P{index}"
+        for index, message in enumerate(jsonl_document.messages, start=1)
+    }
+    rendered, redactions = render_compact_chat_messages(
+        jsonl_document.messages,
+        participant_aliases=aliases,
+        reply_refs={"101": "m000001", "102": "m000002"},
+    )
+    assert "真实甲" not in rendered
+    assert "a@example.com" not in rendered
+    assert "[邮箱]" in rendered
+    assert "reply=m000001" in rendered
+    assert redactions == 1
+
+    preview_source = jsonl_document.messages * 80
+    preview_source = [
+        replace(
+            message,
+            index=index,
+            source_message_id=str(100 + index),
+        )
+        for index, message in enumerate(preview_source, start=1)
+    ]
+    preview = build_preview_chat_view(preview_source, max_chars=1200)
+    assert preview.sampled
+    assert "SAMPLED_WINDOW 1/3" in preview.text
+    assert "SAMPLED_WINDOW 3/3" in preview.text
+
+    one_sided = [json_document.messages[0]]
+    rejected = normalize_chat_observations(
+        {
+            "observations": [
+                {
+                    "participant_id": "P1",
+                    "observation_type": "relationship_signal",
+                    "statement": "关系结论",
+                    "epistemic_status": "inferred",
+                    "message_refs": ["m000001"],
+                }
+            ]
+        },
+        one_sided,
+    )
+    assert rejected == []
+    global_aliases = {
+        message.participant_id: f"P{index}"
+        for index, message in enumerate(json_document.messages, start=1)
+    }
+    accepted = normalize_chat_observations(
+        {
+            "observations": [
+                {
+                    "participant_id": "P1",
+                    "observation_type": "relationship_signal",
+                    "statement": "仅作为跨参与者聊天中的局部关系信号",
+                    "epistemic_status": "inferred",
+                    "message_refs": ["m000001"],
+                }
+            ]
+        },
+        one_sided,
+        participant_aliases=global_aliases,
+        participant_names={
+            message.participant_id: message.sender for message in json_document.messages
+        },
+    )
+    assert len(accepted) == 1
 
 
 def _assert_message_boundary_chunking() -> None:
@@ -126,12 +254,18 @@ def _assert_message_boundary_chunking() -> None:
             requests.append(request)
             return FormalExtractionJsonResult(
                 payload={
-                    "facts": ["甲发送了一条消息"],
-                    "behavior_traits": [],
-                    "dialogue_style": [],
-                    "relationship_interactions": [],
-                    "conflicts": [],
-                    "character_state_changes": [],
+                    "observations": [
+                        {
+                            "participant_id": "P1",
+                            "observation_type": "utterance_style",
+                            "statement": "使用简短陈述",
+                            "epistemic_status": "direct_observation",
+                            "message_refs": ["m000001"],
+                            "context_message_refs": [],
+                            "confidence": 0.8,
+                            "counter_evidence_refs": [],
+                        }
+                    ],
                     "insight_summary": "聊天记录验证",
                     "evidence_refs": [],
                 },
@@ -160,8 +294,11 @@ def _assert_message_boundary_chunking() -> None:
             api_key="validation-key",
             chunk_limit=1,
         )
+        assert requests[0].purpose == "preview_chat_log_extraction"
         assert requests[0].metadata["chat_format"] == "qq_chat_exporter"
         assert result.chunks[0].source_counts["chat_messages"] > 0
+        assert result.chunks[0].chat_observations
+        assert result.chunks[0].dialogue_style
         locator = result.chunks[0].source_trace["evidence_refs"][0]["locator"]
         assert locator["message_index_start"] == 1
         assert locator["message_time_start"] == "2026-09-05 12:00:00"
@@ -185,6 +322,30 @@ def _assert_message_boundary_chunking() -> None:
             expected_source_path=unit.material_ref.relative_path,
             expected_source_trace=extractor._source_trace_for_unit(unit).model_dump(mode="json"),
         )
+
+        with (
+            patch.object(extractor, "merge_episode_content") as merge_episode,
+            patch.object(extractor, "generate_episode_summary") as summarize_episode,
+        ):
+            ready, merge_usage = extractor._finalize_formal_episode_context(
+                "validation-project",
+                {"seasons": []},
+                "season_materials",
+                unit.episode_id,
+                chunk_inputs=[{"chunk_id": result.chunks[0].chunk_id}],
+                episode_chunks=result.chunks,
+                previous_episode_id="",
+                extraction_run_id="validation-run",
+                backend="openai_compatible",
+                model_name="validation-model",
+                base_url="https://example.invalid/v1",
+                api_key="validation-key",
+                context_window_tokens=8_192,
+            )
+        assert ready is True
+        assert merge_usage == {}
+        merge_episode.assert_called_once()
+        summarize_episode.assert_called_once()
 
 
 def main() -> None:

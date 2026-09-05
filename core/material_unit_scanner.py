@@ -571,8 +571,8 @@ def _text_unit_kind(path: Path) -> str:
         return "subtitle_text"
     if suffix == ".lrc":
         return "lyrics_text"
-    if suffix == ".json":
-        return "controlled_json_text"
+        if suffix == ".json":
+            return "controlled_json_text"
     return "document_text"
 
 

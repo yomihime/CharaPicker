@@ -561,6 +561,8 @@ class Extractor(QObject):
         character_state_changes: list[str] = []
         evidence_refs: list[str] = []
         aggregation_warnings: list[str] = []
+        chat_observations: list[dict[str, Any]] = []
+        chat_metadata_items: list[dict[str, Any]] = []
         skipped_chunks = 0
         full_chunks: list[ChunkExtractionResult] = []
 
@@ -617,6 +619,12 @@ class Extractor(QObject):
             character_state_changes.extend(chunk.character_state_changes)
             evidence_refs.extend(chunk.evidence_refs)
             aggregation_warnings.extend(chunk.aggregation_warnings)
+            chat_observations.extend(
+                observation.model_dump(mode="json")
+                for observation in chunk.chat_observations
+            )
+            if chunk.chat_metadata:
+                chat_metadata_items.append(chunk.chat_metadata)
 
         if not chunk_paths:
             warning = f"no_chunk_files:{season_id}/{episode_id}"
@@ -669,6 +677,8 @@ class Extractor(QObject):
             "conflicts": self._deduplicate_preserve_order(conflicts),
             "character_state_changes": self._deduplicate_preserve_order(character_state_changes),
             "evidence_refs": self._deduplicate_preserve_order(evidence_refs),
+            "chat_observations": self._deduplicate_chat_observations(chat_observations),
+            "chat_metadata": self._merge_chat_metadata(chat_metadata_items),
         }
         return kb.save_episode_content(project_id, season_id, episode_id, episode_content)
 
@@ -1063,6 +1073,8 @@ class Extractor(QObject):
         character_state_changes: list[str] = []
         evidence_refs: list[str] = []
         aggregation_warnings: list[str] = []
+        chat_observations: list[dict[str, Any]] = []
+        chat_metadata_items: list[dict[str, Any]] = []
         preview_chunks: list[ChunkExtractionResult] = []
 
         for chunk_path in chunk_paths:
@@ -1078,6 +1090,12 @@ class Extractor(QObject):
             character_state_changes.extend(chunk.character_state_changes)
             evidence_refs.extend(chunk.evidence_refs)
             aggregation_warnings.extend(chunk.aggregation_warnings)
+            chat_observations.extend(
+                observation.model_dump(mode="json")
+                for observation in chunk.chat_observations
+            )
+            if chunk.chat_metadata:
+                chat_metadata_items.append(chunk.chat_metadata)
 
         source_trace = self._source_trace_from_chunks(preview_chunks)
         media_types = self._media_types_from_source_trace(source_trace)
@@ -1105,6 +1123,8 @@ class Extractor(QObject):
             "conflicts": self._deduplicate_preserve_order(conflicts),
             "character_state_changes": self._deduplicate_preserve_order(character_state_changes),
             "evidence_refs": self._deduplicate_preserve_order(evidence_refs),
+            "chat_observations": self._deduplicate_chat_observations(chat_observations),
+            "chat_metadata": self._merge_chat_metadata(chat_metadata_items),
         }
         return kb.save_preview_episode_content(project_id, season_id, episode_id, episode_content)
 
@@ -1201,6 +1221,8 @@ class Extractor(QObject):
         character_state_changes: list[str] = []
         evidence_refs: list[str] = []
         aggregation_warnings: list[str] = []
+        chat_observations: list[dict[str, Any]] = []
+        chat_metadata_items: list[dict[str, Any]] = []
         skipped_episodes = 0
 
         for episode_dir in episode_dirs:
@@ -1253,6 +1275,14 @@ class Extractor(QObject):
             character_state_changes.extend(payload.get("character_state_changes", []))
             evidence_refs.extend(payload.get("evidence_refs", []))
             aggregation_warnings.extend(payload.get("aggregation_warnings", []))
+            raw_chat_observations = payload.get("chat_observations", [])
+            if isinstance(raw_chat_observations, list):
+                chat_observations.extend(
+                    item for item in raw_chat_observations if isinstance(item, dict)
+                )
+            raw_chat_metadata = payload.get("chat_metadata", {})
+            if isinstance(raw_chat_metadata, dict) and raw_chat_metadata:
+                chat_metadata_items.append(raw_chat_metadata)
 
         if not episode_contents:
             warning = f"no_full_episode_contents:{season_id}"
@@ -1297,6 +1327,8 @@ class Extractor(QObject):
             "conflicts": self._deduplicate_preserve_order(conflicts),
             "character_state_changes": self._deduplicate_preserve_order(character_state_changes),
             "evidence_refs": self._deduplicate_preserve_order(evidence_refs),
+            "chat_observations": self._deduplicate_chat_observations(chat_observations),
+            "chat_metadata": self._merge_chat_metadata(chat_metadata_items),
         }
         return kb.save_season_content(project_id, season_id, season_content)
 
@@ -1389,6 +1421,78 @@ class Extractor(QObject):
             seen.add(value)
             unique_values.append(value)
         return unique_values
+
+    @staticmethod
+    def _deduplicate_chat_observations(
+        observations: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        seen: set[str] = set()
+        output: list[dict[str, Any]] = []
+        for observation in observations:
+            observation_id = str(observation.get("observation_id", "")).strip()
+            identity = observation_id or json.dumps(
+                observation,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            if identity in seen:
+                continue
+            seen.add(identity)
+            output.append(observation)
+        return output
+
+    @staticmethod
+    def _merge_chat_metadata(items: list[dict[str, Any]]) -> dict[str, Any]:
+        if not items:
+            return {}
+        participant_ids = sorted(
+            {
+                str(participant_id)
+                for item in items
+                for participant_id in item.get("participant_ids", [])
+                if str(participant_id).strip()
+            }
+        )
+        active_day_keys = sorted(
+            {
+                str(day)
+                for item in items
+                for day in item.get("active_day_keys", [])
+                if str(day).strip()
+            }
+        )
+        formats = sorted(
+            {
+                str(item.get("format", "")).strip()
+                for item in items
+                if str(item.get("format", "")).strip()
+            }
+        )
+        return {
+            "format": formats[0] if len(formats) == 1 else "mixed",
+            "formats": formats,
+            "chunk_count": sum(int(item.get("chunk_count", 1)) for item in items),
+            "message_count": sum(int(item.get("message_count", 0)) for item in items),
+            "represented_message_count": sum(
+                int(item.get("represented_message_count", item.get("message_count", 0)))
+                for item in items
+            ),
+            "participant_count": len(participant_ids),
+            "participant_ids": participant_ids,
+            "active_days": len(active_day_keys)
+            if active_day_keys
+            else max((int(item.get("active_days", 0)) for item in items), default=0),
+            "active_day_keys": active_day_keys,
+            "attachment_only_count": sum(
+                int(item.get("attachment_only_count", 0)) for item in items
+            ),
+            "session_count": sum(int(item.get("session_count", 0)) for item in items),
+            "pii_redaction_count": sum(
+                int(item.get("pii_redaction_count", 0)) for item in items
+            ),
+            "one_sided": len(participant_ids) < 2,
+            "sampled": any(bool(item.get("sampled", False)) for item in items),
+        }
 
     def _collect_preview_chunk_json_inputs(self, project_id: str) -> list[str]:
         return [self._format_preview_chunk_input(chunk) for chunk in self._collect_preview_chunk_results(project_id)]
@@ -2242,6 +2346,12 @@ class Extractor(QObject):
         total_chars = 0
         covered_chars = 0
         limited_units = 0
+        model_input_chars = 0
+        chat_units = 0
+        chat_messages = 0
+        chat_participants = 0
+        chat_active_days = 0
+        chat_one_sided_units = 0
         for _season_id, unit in self._collect_text_units_from_run_plan(run_plan):
             source_root = (
                 project_tree.knowledge_base
@@ -2252,6 +2362,13 @@ class Extractor(QObject):
             total_chunks += len(plan.chunk_ids)
             total_chars += plan.total_chars
             covered_chars += plan.covered_chars
+            model_input_chars += plan.model_input_chars
+            if unit.content_form == ContentForm.CHAT_LOG:
+                chat_units += 1
+                chat_messages += plan.message_count
+                chat_participants += plan.participant_count
+                chat_active_days += plan.active_days
+                chat_one_sided_units += int(plan.one_sided)
             if any("chunk_limit_reached" in warning for warning in plan.warnings):
                 limited_units += 1
         coverage_percent = (
@@ -2263,6 +2380,12 @@ class Extractor(QObject):
             "covered_chars": covered_chars,
             "coverage_percent": coverage_percent,
             "limited_units": limited_units,
+            "model_input_chars": model_input_chars,
+            "chat_units": chat_units,
+            "chat_messages": chat_messages,
+            "chat_participants": chat_participants,
+            "chat_active_days": chat_active_days,
+            "chat_one_sided_units": chat_one_sided_units,
         }
 
     def _image_unit_handler(self, preset: CloudModelPreset) -> ImageUnitHandler:
@@ -2365,17 +2488,22 @@ class Extractor(QObject):
 
         text_handler = handler or self._text_unit_handler(preset)
         text_backend = cloud_model_provider(preset.provider).backend_for("text")
-        text_prompt_purpose = (
-            "preview_text_unit_extraction"
-            if extraction_stage == ExtractionArtifactStage.PREVIEW
-            else "formal_text_unit_extraction"
-        )
         project_paths = ensure_project_tree(project_id)
         extracted_chunks: list[ChunkExtractionResult] = []
         created_chunk_count = 0
         remaining_chunks = chunk_limit
         total_units = len(unit_inputs)
         for index, (season_id, unit) in enumerate(unit_inputs, start=1):
+            text_prompt_purpose = (
+                "preview_chat_log_extraction"
+                if unit.content_form == ContentForm.CHAT_LOG
+                and extraction_stage == ExtractionArtifactStage.PREVIEW
+                else "formal_chat_log_extraction"
+                if unit.content_form == ContentForm.CHAT_LOG
+                else "preview_text_unit_extraction"
+                if extraction_stage == ExtractionArtifactStage.PREVIEW
+                else "formal_text_unit_extraction"
+            )
             if cancelled is not None and cancelled():
                 raise ExtractionStoppedError(t("extractor.full.cancelled"))
             if remaining_chunks is not None and remaining_chunks <= 0:
@@ -3187,6 +3315,30 @@ class Extractor(QObject):
         api_key: str,
         context_window_tokens: int | None,
     ) -> tuple[bool, dict[str, int]]:
+        expected_chunk_ids = {
+            self._manifest_string(item.get("chunk_id"))
+            for item in chunk_inputs
+            if self._manifest_string(item.get("chunk_id"))
+        }
+        successful_chunk_ids = {chunk.chunk_id for chunk in episode_chunks}
+        if (
+            expected_chunk_ids
+            and expected_chunk_ids.issubset(successful_chunk_ids)
+            and all(chunk.chat_metadata for chunk in episode_chunks)
+        ):
+            self.merge_episode_content(
+                project_id,
+                season_id,
+                episode_id,
+                extraction_run_id=extraction_run_id,
+            )
+            self.generate_episode_summary(
+                project_id,
+                season_id,
+                episode_id,
+                extraction_run_id=extraction_run_id,
+            )
+            return (True, {})
         reusable_content = self._load_reusable_episode_content(
             project_id,
             season_id,
@@ -3326,6 +3478,8 @@ class Extractor(QObject):
                 "character_state_changes",
                 "insight_summary",
                 "evidence_refs",
+                "chat_observations",
+                "chat_metadata",
             )
         }
 
@@ -3345,6 +3499,8 @@ class Extractor(QObject):
                 "conflicts",
                 "character_state_changes",
                 "evidence_refs",
+                "chat_observations",
+                "chat_metadata",
             )
         }
 
@@ -3485,6 +3641,16 @@ class Extractor(QObject):
         payload = result.payload
         source_trace = self._source_trace_from_chunks(episode_chunks)
         media_types = self._media_types_from_source_trace(source_trace)
+        chat_observations = self._deduplicate_chat_observations(
+            [
+                observation.model_dump(mode="json")
+                for chunk in episode_chunks
+                for observation in chunk.chat_observations
+            ]
+        )
+        chat_metadata = self._merge_chat_metadata(
+            [chunk.chat_metadata for chunk in episode_chunks if chunk.chat_metadata]
+        )
         episode_content = {
             "season_id": season_id,
             "episode_id": episode_id,
@@ -3533,6 +3699,8 @@ class Extractor(QObject):
             "full_context_view": payload.get("full_context_view")
             if isinstance(payload.get("full_context_view"), dict)
             else {},
+            "chat_observations": chat_observations,
+            "chat_metadata": chat_metadata,
         }
         kb.save_episode_content(project_id, season_id, episode_id, episode_content)
         return result.token_usage
@@ -3675,6 +3843,32 @@ class Extractor(QObject):
         context_window_tokens: int | None,
         include_previous_season_backgrounds: bool = True,
     ) -> tuple[bool, dict[str, int]]:
+        expected_episode_ids = self._season_episode_ids_from_manifest(manifest, season_id)
+        chat_only = bool(expected_episode_ids)
+        for episode_id in expected_episode_ids:
+            try:
+                episode_content = kb.load_episode_content(project_id, season_id, episode_id)
+            except (OSError, ValueError, json.JSONDecodeError):
+                chat_only = False
+                break
+            if not kb.is_full_artifact_payload_for_run(
+                episode_content,
+                extraction_run_id,
+            ) or not episode_content.get("chat_metadata"):
+                chat_only = False
+                break
+        if chat_only:
+            self.merge_season_content(
+                project_id,
+                season_id,
+                extraction_run_id=extraction_run_id,
+            )
+            self.generate_season_summary(
+                project_id,
+                season_id,
+                extraction_run_id=extraction_run_id,
+            )
+            return (True, {})
         reusable_content = self._load_reusable_season_content(
             project_id,
             manifest,
@@ -3891,6 +4085,22 @@ class Extractor(QObject):
             previous_season_backgrounds=previous_season_backgrounds,
         )
         media_types = self._media_types_from_source_trace(source_trace)
+        chat_observations = self._deduplicate_chat_observations(
+            [
+                item
+                for episode_content in episode_contents
+                for item in episode_content.get("chat_observations", [])
+                if isinstance(item, dict)
+            ]
+        )
+        chat_metadata = self._merge_chat_metadata(
+            [
+                metadata
+                for episode_content in episode_contents
+                if isinstance((metadata := episode_content.get("chat_metadata")), dict)
+                and metadata
+            ]
+        )
         season_content = {
             "season_id": season_id,
             "extraction_stage": kb.FULL_EXTRACTION_STAGE,
@@ -3951,6 +4161,8 @@ class Extractor(QObject):
             "world_context": payload.get("world_context"),
             "episode_refs": self._coerce_string_list(payload.get("episode_refs")),
             "evidence_refs": self._coerce_string_list(payload.get("evidence_refs")),
+            "chat_observations": chat_observations,
+            "chat_metadata": chat_metadata,
         }
         kb.save_season_content(project_id, season_id, season_content)
         return result.token_usage
