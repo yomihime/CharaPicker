@@ -7,10 +7,13 @@ from pathlib import Path
 from typing import Any
 
 from core.extraction_ai import (
+    FormalExtractionJsonError,
     FormalExtractionJsonResult,
+    FormalExtractionOutputTruncatedError,
     build_formal_text_json_request,
     call_formal_text_json_model,
 )
+from core.failure_classification import FailureCategory, classify_failure
 from core.extraction_plan import (
     EvidenceRef,
     ExtractionUnit,
@@ -25,7 +28,7 @@ from core.timed_text_parser import (
     build_timed_text_document,
     parse_timed_text,
 )
-from utils.ai_model_middleware import ModelBackend, ModelCallRequest
+from utils.ai_model_middleware import ModelBackend, ModelCallError, ModelCallRequest
 from utils.chunker import TextChunkingResult, chunk_text_with_ranges
 from utils.media_types import SUPPORTED_TIMED_TEXT_SUFFIXES
 
@@ -40,10 +43,12 @@ ModelJsonCall = Callable[[ModelCallRequest], FormalExtractionJsonResult]
 
 @dataclass(frozen=True, slots=True)
 class TextUnitHandlerConfig:
-    max_input_chars: int = 12_000
+    max_input_chars: int = 6_000
     overlap_chars: int = 400
     max_chunks_per_unit: int = 128
-    max_output_tokens: int = 2_048
+    max_output_tokens: int = 4_096
+    min_adaptive_chunk_chars: int = 1_500
+    max_adaptive_split_depth: int = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +77,16 @@ class TextUnitExecutionResult:
     token_usage: dict[str, int] = field(default_factory=dict)
     created_chunk_count: int = 0
     reused_chunk_count: int = 0
+    failed_chunks: list[TextChunkFailure] = field(default_factory=list)
+    adaptive_split_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class TextChunkFailure:
+    chunk_id: str
+    start_offset: int
+    end_offset: int
+    error: Exception
 
 
 class TextUnitHandler:
@@ -140,17 +155,57 @@ class TextUnitHandler:
         prepared_chunks, chunk_warnings = self._prepare_chunks(parsed, chunk_limit=chunk_limit)
         warnings = [*parsed.warnings, *chunk_warnings]
         output: list[ChunkExtractionResult] = []
+        failures: list[TextChunkFailure] = []
         existing_chunks = existing_chunks or {}
         reused_chunk_count = 0
         created_chunk_count = 0
+        adaptive_split_count = 0
+        stop_requested = False
         usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-        for text_chunk in prepared_chunks:
-            chunk_id = f"{unit.unit_id}_text_{text_chunk.index:04d}"
+
+        def add_usage(token_usage: dict[str, int]) -> None:
+            for key in usage_total:
+                value = token_usage.get(key)
+                if isinstance(value, int):
+                    usage_total[key] += value
+
+        def execute_chunk(
+            text_chunk: PreparedTextChunk,
+            chunk_id: str,
+            *,
+            split_depth: int = 0,
+            inherited_warnings: list[str] | None = None,
+        ) -> None:
+            nonlocal adaptive_split_count, created_chunk_count, reused_chunk_count, stop_requested
+            if stop_requested:
+                return
             existing_chunk = existing_chunks.get(chunk_id)
             if existing_chunk is not None:
                 output.append(existing_chunk)
                 reused_chunk_count += 1
-                continue
+                return
+
+            descendant_prefix = f"{chunk_id}_"
+            has_existing_descendant = any(
+                existing_id.startswith(descendant_prefix) for existing_id in existing_chunks
+            )
+            if has_existing_descendant:
+                split_chunks = self._split_prepared_chunk(parsed.text, text_chunk)
+                if split_chunks is not None:
+                    execute_chunk(
+                        split_chunks[0],
+                        f"{chunk_id}_a",
+                        split_depth=split_depth + 1,
+                        inherited_warnings=inherited_warnings,
+                    )
+                    execute_chunk(
+                        split_chunks[1],
+                        f"{chunk_id}_b",
+                        split_depth=split_depth + 1,
+                        inherited_warnings=inherited_warnings,
+                    )
+                    return
+
             source_locator = self._source_locator(text_chunk)
             evidence_guidance = self._evidence_guidance(text_chunk)
             request = build_formal_text_json_request(
@@ -187,11 +242,85 @@ class TextUnitHandler:
                     "timed_text_format": parsed.timed_text_format,
                 },
             )
-            result = self._model_call(request)
-            for key in usage_total:
-                value = result.token_usage.get(key)
-                if isinstance(value, int):
-                    usage_total[key] += value
+            try:
+                result = self._model_call(request)
+            except FormalExtractionOutputTruncatedError as exc:
+                add_usage(self._exception_token_usage(exc))
+                split_chunks = (
+                    self._split_prepared_chunk(parsed.text, text_chunk)
+                    if split_depth < self.config.max_adaptive_split_depth
+                    else None
+                )
+                if split_chunks is None:
+                    failures.append(
+                        TextChunkFailure(
+                            chunk_id=chunk_id,
+                            start_offset=text_chunk.start_offset,
+                            end_offset=text_chunk.end_offset,
+                            error=exc,
+                        )
+                    )
+                    return
+                adaptive_split_count += 1
+                split_warning = (
+                    f"text_chunk_adaptively_split:chunk_id={chunk_id}:"
+                    f"depth={split_depth + 1}"
+                )
+                warnings.append(split_warning)
+                child_warnings = [*(inherited_warnings or []), split_warning]
+                execute_chunk(
+                    split_chunks[0],
+                    f"{chunk_id}_a",
+                    split_depth=split_depth + 1,
+                    inherited_warnings=child_warnings,
+                )
+                execute_chunk(
+                    split_chunks[1],
+                    f"{chunk_id}_b",
+                    split_depth=split_depth + 1,
+                    inherited_warnings=child_warnings,
+                )
+                return
+            except FormalExtractionJsonError as exc:
+                add_usage(self._exception_token_usage(exc))
+                failures.append(
+                    TextChunkFailure(
+                        chunk_id=chunk_id,
+                        start_offset=text_chunk.start_offset,
+                        end_offset=text_chunk.end_offset,
+                        error=exc,
+                    )
+                )
+                return
+            except ModelCallError as exc:
+                add_usage(self._exception_token_usage(exc))
+                failures.append(
+                    TextChunkFailure(
+                        chunk_id=chunk_id,
+                        start_offset=text_chunk.start_offset,
+                        end_offset=text_chunk.end_offset,
+                        error=exc,
+                    )
+                )
+                if classify_failure(exc).category != FailureCategory.PROVIDER_POLICY_REFUSAL:
+                    stop_requested = True
+                return
+            except (OSError, ValueError) as exc:
+                failures.append(
+                    TextChunkFailure(
+                        chunk_id=chunk_id,
+                        start_offset=text_chunk.start_offset,
+                        end_offset=text_chunk.end_offset,
+                        error=exc,
+                    )
+                )
+                stop_requested = True
+                return
+
+            add_usage(result.token_usage)
+            result_warnings = list(inherited_warnings or [])
+            if text_chunk.index == 1:
+                result_warnings = [*warnings, *result_warnings]
             chunk_result = self._chunk_result(
                     unit=unit,
                     season_id=season_id,
@@ -208,18 +337,29 @@ class TextUnitHandler:
                     run_type=run_type,
                     payload=result.payload,
                     result=result,
-                    warnings=warnings if text_chunk.index == 1 else [],
+                    warnings=list(dict.fromkeys(result_warnings)),
                 )
             output.append(chunk_result)
             created_chunk_count += 1
             if on_chunk_ready is not None:
                 on_chunk_ready(chunk_result)
+
+        for text_chunk in prepared_chunks:
+            if stop_requested:
+                break
+            execute_chunk(
+                text_chunk,
+                f"{unit.unit_id}_text_{text_chunk.index:04d}",
+            )
+
         return TextUnitExecutionResult(
             chunks=output,
             warnings=warnings,
             token_usage=usage_total,
             created_chunk_count=created_chunk_count,
             reused_chunk_count=reused_chunk_count,
+            failed_chunks=failures,
+            adaptive_split_count=adaptive_split_count,
         )
 
     def parse_material(self, path: Path, *, unit_kind: str = "") -> ParsedTextMaterial:
@@ -594,6 +734,86 @@ class TextUnitHandler:
         if not path.is_file():
             raise ValueError(f"text source does not exist: {unit.material_ref.relative_path}")
         return path
+
+    def _split_prepared_chunk(
+        self,
+        source_text: str,
+        chunk: PreparedTextChunk,
+    ) -> tuple[PreparedTextChunk, PreparedTextChunk] | None:
+        if chunk.timed_segments:
+            if len(chunk.timed_segments) < 2:
+                return None
+            split_index = len(chunk.timed_segments) // 2
+            left_segments = chunk.timed_segments[:split_index]
+            right_segments = chunk.timed_segments[split_index:]
+            return (
+                self._prepared_timed_chunk(
+                    source_text,
+                    left_segments,
+                    chunk.index,
+                    chunk.timed_text_format,
+                ),
+                self._prepared_timed_chunk(
+                    source_text,
+                    right_segments,
+                    chunk.index,
+                    chunk.timed_text_format,
+                ),
+            )
+
+        text_length = len(chunk.text)
+        minimum = self.config.min_adaptive_chunk_chars
+        if text_length < minimum * 2:
+            return None
+        lower = minimum
+        upper = text_length - minimum
+        midpoint = text_length // 2
+        candidates: list[int] = []
+        for marker in ("\n\n", "\n", "。", "！", "？", ". ", "! ", "? ", " "):
+            before = chunk.text.rfind(marker, lower, midpoint + 1)
+            if before >= lower:
+                candidates.append(before + len(marker))
+            after = chunk.text.find(marker, midpoint, upper)
+            if after >= midpoint:
+                candidates.append(after + len(marker))
+            if candidates:
+                break
+        split_at = min(candidates, key=lambda value: abs(value - midpoint)) if candidates else midpoint
+        if split_at < minimum or text_length - split_at < minimum:
+            return None
+        absolute_split = chunk.start_offset + split_at
+        return (
+            PreparedTextChunk(
+                index=chunk.index,
+                text=chunk.text[:split_at],
+                start_offset=chunk.start_offset,
+                end_offset=absolute_split,
+            ),
+            PreparedTextChunk(
+                index=chunk.index,
+                text=chunk.text[split_at:],
+                start_offset=absolute_split,
+                end_offset=chunk.end_offset,
+            ),
+        )
+
+    @staticmethod
+    def _exception_token_usage(exc: Exception) -> dict[str, int]:
+        totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        attempts = getattr(exc, "attempt_metadata", [])
+        if not isinstance(attempts, list):
+            return totals
+        for attempt in attempts:
+            if not isinstance(attempt, dict):
+                continue
+            token_usage = attempt.get("token_usage")
+            if not isinstance(token_usage, dict):
+                continue
+            for key in totals:
+                value = token_usage.get(key)
+                if isinstance(value, int):
+                    totals[key] += value
+        return totals
 
     def _decode_text(self, raw: bytes, path: Path) -> tuple[str, str]:
         for encoding in TEXT_DECODE_ENCODINGS:

@@ -136,8 +136,8 @@ FULL_EXTRACTION_RUN_TYPE = "formal_extraction"
 FORMAL_VIDEO_CHUNK_PROMPT = "formal_contextual_video_chunk_extraction"
 PREVIEW_VIDEO_CHUNK_PROMPT = "preview_video_chunk_extraction"
 FULL_EXTRACTION_MIN_OUTPUT_TOKENS_PER_MINUTE = PREVIEW_MIN_OUTPUT_TOKENS_PER_MINUTE
-TEXT_UNIT_DEFAULT_INPUT_CHARS = 12_000
-TEXT_UNIT_MAX_OUTPUT_TOKENS = 2_048
+TEXT_UNIT_DEFAULT_INPUT_CHARS = 6_000
+TEXT_UNIT_MAX_OUTPUT_TOKENS = 4_096
 PREVIEW_TEXT_CANDIDATE_KINDS = frozenset(
     {
         PreviewCandidateKind.TIMED_TEXT,
@@ -2176,15 +2176,19 @@ class Extractor(QObject):
 
     def _text_unit_handler(self, preset: CloudModelPreset) -> TextUnitHandler:
         context_tokens = context_window_budget_tokens(preset)
+        max_output_tokens = min(
+            TEXT_UNIT_MAX_OUTPUT_TOKENS,
+            max(1_024, context_tokens // 4),
+        )
         max_input_chars = TEXT_UNIT_DEFAULT_INPUT_CHARS
         if context_tokens is not None:
-            reserved_tokens = TEXT_UNIT_MAX_OUTPUT_TOKENS + 1_000
+            reserved_tokens = max_output_tokens + 1_000
             available_input_tokens = max(1_000, context_tokens - reserved_tokens)
             max_input_chars = min(TEXT_UNIT_DEFAULT_INPUT_CHARS, available_input_tokens * 3)
         return TextUnitHandler(
             TextUnitHandlerConfig(
                 max_input_chars=max_input_chars,
-                max_output_tokens=TEXT_UNIT_MAX_OUTPUT_TOKENS,
+                max_output_tokens=max_output_tokens,
             )
         )
 
@@ -2261,6 +2265,7 @@ class Extractor(QObject):
         extraction_stage: ExtractionArtifactStage,
         chunk_limit: int | None = None,
         handler: TextUnitHandler | None = None,
+        emit_event: Callable[[dict], None] | None = None,
         emit_progress: Callable[[int], None] | None = None,
         progress_base: int = 0,
         progress_span: int = 0,
@@ -2363,11 +2368,91 @@ class Extractor(QObject):
                 )
                 continue
 
-            if not result.chunks:
-                stats["skipped_chunks"] += 1
-                continue
             for key in usage_total:
                 usage_total[key] += result.token_usage.get(key, 0)
+            if result.adaptive_split_count and emit_event is not None:
+                emit_event(
+                    InsightEvent(
+                        title=t("extractor.chunk.title"),
+                        description=t(
+                            "extractor.text.adaptiveSplit",
+                            name=Path(unit.material_ref.relative_path).name,
+                            count=result.adaptive_split_count,
+                        ),
+                        status=InsightStatus.WARNING,
+                        meta={
+                            "media_type": MediaType.TEXT.value,
+                            "content_form": unit.content_form.value,
+                            "unit_id": unit.unit_id,
+                            "relative_path": unit.material_ref.relative_path,
+                            "adaptive_split_count": result.adaptive_split_count,
+                            "stage": extraction_stage.value,
+                        },
+                    ).model_dump(mode="json")
+                )
+            if result.failed_chunks:
+                stats["failed_chunks"] += len(result.failed_chunks)
+                for failure in result.failed_chunks:
+                    LOGGER.warning(
+                        "Text extraction chunk failed; project_id=%s unit_id=%s chunk_id=%s "
+                        "source_path=%s text_range=%s:%s",
+                        project_id,
+                        unit.unit_id,
+                        failure.chunk_id,
+                        unit.material_ref.relative_path,
+                        failure.start_offset,
+                        failure.end_offset,
+                        exc_info=(
+                            failure.error.__class__,
+                            failure.error,
+                            failure.error.__traceback__,
+                        ),
+                    )
+                    self._record_unit_failure_sample(
+                        project_id,
+                        run_plan,
+                        unit,
+                        prompt_purpose=text_prompt_purpose,
+                        provider=preset.provider,
+                        backend=text_backend,
+                        model_name=preset.model_name,
+                        extraction_stage=extraction_stage,
+                        season_id=season_id,
+                        chunk_id=failure.chunk_id,
+                        exc=failure.error,
+                        metadata={
+                            "text_range": {
+                                "start_offset": failure.start_offset,
+                                "end_offset": failure.end_offset,
+                            }
+                        },
+                    )
+                if emit_event is not None:
+                    emit_event(
+                        InsightEvent(
+                            title=t("extractor.chunk.title"),
+                            description=t(
+                                "extractor.text.partialFailure",
+                                name=Path(unit.material_ref.relative_path).name,
+                                count=len(result.failed_chunks),
+                            ),
+                            status=InsightStatus.WARNING,
+                            meta={
+                                "media_type": MediaType.TEXT.value,
+                                "content_form": unit.content_form.value,
+                                "unit_id": unit.unit_id,
+                                "relative_path": unit.material_ref.relative_path,
+                                "failed_chunk_count": len(result.failed_chunks),
+                                "stage": extraction_stage.value,
+                            },
+                        ).model_dump(mode="json")
+                    )
+
+            if not result.chunks:
+                if result.failed_chunks:
+                    continue
+                stats["skipped_chunks"] += 1
+                continue
             for chunk in result.chunks:
                 if extraction_stage == ExtractionArtifactStage.PREVIEW:
                     self.save_preview_chunk_extraction_result(project_id, chunk)
@@ -6497,6 +6582,7 @@ class Extractor(QObject):
                 run_plan,
                 preset=preset,
                 extraction_stage=ExtractionArtifactStage.FULL,
+                emit_event=emit_event,
                 emit_progress=emit_progress,
                 progress_base=non_video_progress_base,
                 progress_span=text_progress_span,
@@ -6746,6 +6832,7 @@ class Extractor(QObject):
                 preset=preset,
                 extraction_stage=ExtractionArtifactStage.PREVIEW,
                 chunk_limit=1,
+                emit_event=emit_event,
             )
             return created, usage, chunks
 
@@ -6786,6 +6873,7 @@ class Extractor(QObject):
                 preset=preset,
                 extraction_stage=ExtractionArtifactStage.PREVIEW,
                 chunk_limit=1,
+                emit_event=emit_event,
             )
             return created, usage, chunks
 

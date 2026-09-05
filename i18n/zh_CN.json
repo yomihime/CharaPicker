@@ -788,6 +788,8 @@
   "extractor.preview.unitRunning": "正在预览{kind}素材 {current}/{total}：{name}",
   "extractor.preview.unitUnsupported": "素材 {name} 暂时无法预览：{reason}",
   "extractor.preview.unitNoResult": "{kind}素材 {name} 未生成可用结果，已继续尝试其它素材。",
+  "extractor.text.adaptiveSplit": "文本素材 {name} 的模型输出过长，已自动拆分并重试 {count} 次。",
+  "extractor.text.partialFailure": "文本素材 {name} 仍有 {count} 个拆分范围提取失败；其余成功结果已保留。",
   "extractor.preview.kind.timedText": "字幕/台本",
   "extractor.preview.kind.transcript": "转写文本",
   "extractor.preview.kind.text": "文本",

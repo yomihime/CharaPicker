@@ -788,6 +788,8 @@
   "extractor.preview.unitRunning": "Previewing {kind} material {current}/{total}: {name}",
   "extractor.preview.unitUnsupported": "Material {name} cannot be previewed yet: {reason}",
   "extractor.preview.unitNoResult": "The {kind} material {name} produced no usable result. Trying other material.",
+  "extractor.text.adaptiveSplit": "The model output for text material {name} was too long. The text was split and retried {count} times.",
+  "extractor.text.partialFailure": "Text material {name} still has {count} failed split ranges; all other successful results were kept.",
   "extractor.preview.kind.timedText": "subtitle/script",
   "extractor.preview.kind.transcript": "transcript",
   "extractor.preview.kind.text": "text",

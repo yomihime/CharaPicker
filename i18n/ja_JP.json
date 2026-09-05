@@ -788,6 +788,8 @@
   "extractor.preview.unitRunning": "{kind}素材をプレビュー中 {current}/{total}：{name}",
   "extractor.preview.unitUnsupported": "素材 {name} はまだプレビューできません：{reason}",
   "extractor.preview.unitNoResult": "{kind}素材 {name} から利用可能な結果を生成できませんでした。ほかの素材を試します。",
+  "extractor.text.adaptiveSplit": "テキスト素材 {name} のモデル出力が長すぎたため、自動分割して {count} 回再試行しました。",
+  "extractor.text.partialFailure": "テキスト素材 {name} には抽出に失敗した分割範囲が {count} 件残っています。その他の成功結果は保持しました。",
   "extractor.preview.kind.timedText": "字幕・台本",
   "extractor.preview.kind.transcript": "文字起こし",
   "extractor.preview.kind.text": "テキスト",
