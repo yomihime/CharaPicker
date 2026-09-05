@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
+from threading import Event
 
-from PyQt6.QtCore import QObject, QThread, QSize, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, QTimer, QSize, pyqtSignal
 from PyQt6.QtGui import QIcon
 from qfluentwidgets import (
     FluentIcon as FIF,
@@ -38,6 +39,7 @@ from utils.theme import apply_theme_preference
 
 
 LOGGER = logging.getLogger(__name__)
+FULL_TEXT_PLAN_CONFIRM_CHUNKS = 32
 
 
 class PreviewWorker(QObject):
@@ -91,7 +93,9 @@ class FullExtractionWorker(QObject):
     insightGenerated = pyqtSignal(dict)
     progressChanged = pyqtSignal(int)
     tokenUsageChanged = pyqtSignal(dict)
+    detailChanged = pyqtSignal(dict)
     succeeded = pyqtSignal(int)
+    cancelled = pyqtSignal(str)
     failed = pyqtSignal(str)
     finished = pyqtSignal()
 
@@ -107,6 +111,10 @@ class FullExtractionWorker(QObject):
         self.config = config
         self.cloud_preset = cloud_preset
         self.fast_concurrency = fast_concurrency
+        self._cancel_event = Event()
+
+    def cancel(self) -> None:
+        self._cancel_event.set()
 
     def run(self) -> None:
         progress = ProgressGuard(self.progressChanged.emit)
@@ -118,13 +126,15 @@ class FullExtractionWorker(QObject):
                 emit_event=lambda event: self.insightGenerated.emit(event),
                 emit_progress=progress.update,
                 emit_token_usage=lambda usage: self.tokenUsageChanged.emit(usage),
+                emit_detail=lambda detail: self.detailChanged.emit(detail),
+                cancelled=self._cancel_event.is_set,
             )
             progress.succeed()
             self.succeeded.emit(len(chunks))
         except ExtractionStoppedError as exc:
             progress.fail()
             LOGGER.warning("Full extraction worker stopped; reason=%s", exc)
-            self.failed.emit(str(exc))
+            self.cancelled.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
             progress.fail()
             LOGGER.error("Full extraction worker failed", exc_info=True)
@@ -146,6 +156,7 @@ class MainWindow(FluentWindow):
         self._extraction_thread: QThread | None = None
         self._preview_worker: PreviewWorker | None = None
         self._full_extraction_worker: FullExtractionWorker | None = None
+        self._close_after_extraction = False
         if startup_snapshot is None:
             project_scan = scan_project_configs()
             initial_project_configs = project_scan.configs
@@ -202,6 +213,7 @@ class MainWindow(FluentWindow):
 
     def _connect_signals(self) -> None:
         self.project_page.extractionRequested.connect(self.run_extraction)
+        self.project_page.extractionCancelRequested.connect(self._cancel_extraction)
         self.project_page.configSaved.connect(self.save_config)
         self.project_page.projectChanged.connect(self.character_card_page.set_project)
         self.settings_page.languageChanged.connect(self.show_language_changed)
@@ -369,7 +381,7 @@ class MainWindow(FluentWindow):
             return
         self.switchTo(self.project_page)
         self.project_page.clear_events()
-        self.project_page.set_extraction_running(True)
+        self.project_page.set_extraction_running(True, cancellable=False)
         if cloud_preset is not None:
             LOGGER.info(
                 "Preview will use current cloud UI settings; preset=%s provider=%s model=%s "
@@ -388,9 +400,9 @@ class MainWindow(FluentWindow):
         self._preview_worker.tokenUsageChanged.connect(self.project_page.set_token_usage)
         self._preview_worker.succeeded.connect(lambda _content: self._on_preview_succeeded(config))
         self._preview_worker.failed.connect(self._on_preview_failed)
-        self._preview_worker.finished.connect(self._clear_extraction_worker)
         self._preview_worker.finished.connect(self._extraction_thread.quit)
         self._preview_worker.finished.connect(self._preview_worker.deleteLater)
+        self._extraction_thread.finished.connect(self._clear_extraction_worker)
         self._extraction_thread.finished.connect(self._extraction_thread.deleteLater)
         self._extraction_thread.start()
 
@@ -405,9 +417,11 @@ class MainWindow(FluentWindow):
             fast_concurrency,
         )
         cloud_preset = self.model_page.current_cloud_video_preset()
+        if cloud_preset is not None and not self._confirm_full_text_plan(config, cloud_preset):
+            return
         self.switchTo(self.project_page)
         self.project_page.clear_events()
-        self.project_page.set_extraction_running(True)
+        self.project_page.set_extraction_running(True, cancellable=True)
         if cloud_preset is not None:
             LOGGER.info(
                 "Full extraction will use current cloud UI settings; preset=%s provider=%s model=%s "
@@ -429,13 +443,48 @@ class MainWindow(FluentWindow):
         self._full_extraction_worker.insightGenerated.connect(self.project_page.append_event)
         self._full_extraction_worker.progressChanged.connect(self.project_page.set_progress)
         self._full_extraction_worker.tokenUsageChanged.connect(self.project_page.set_token_usage)
+        self._full_extraction_worker.detailChanged.connect(self.project_page.set_extraction_detail)
         self._full_extraction_worker.succeeded.connect(lambda count: self._on_full_extraction_succeeded(config, count))
+        self._full_extraction_worker.cancelled.connect(self._on_full_extraction_cancelled)
         self._full_extraction_worker.failed.connect(self._on_full_extraction_failed)
-        self._full_extraction_worker.finished.connect(self._clear_extraction_worker)
         self._full_extraction_worker.finished.connect(self._extraction_thread.quit)
         self._full_extraction_worker.finished.connect(self._full_extraction_worker.deleteLater)
+        self._extraction_thread.finished.connect(self._clear_extraction_worker)
         self._extraction_thread.finished.connect(self._extraction_thread.deleteLater)
         self._extraction_thread.start()
+
+    def _confirm_full_text_plan(
+        self,
+        config: ProjectConfig,
+        preset: CloudModelPreset,
+    ) -> bool:
+        try:
+            plan = self.extractor.inspect_text_extraction_plan(config.project_id, preset)
+        except (OSError, ValueError):
+            LOGGER.warning(
+                "Text extraction preflight failed; project_id=%s",
+                config.project_id,
+                exc_info=True,
+            )
+            return True
+        total_chunks = int(plan["total_chunks"])
+        limited_units = int(plan["limited_units"])
+        if total_chunks < FULL_TEXT_PLAN_CONFIRM_CHUNKS and limited_units <= 0:
+            return True
+        dialog = MessageBox(
+            t("app.full.textPlan.dialog.title"),
+            t(
+                "app.full.textPlan.dialog.content",
+                chunks=total_chunks,
+                covered=int(plan["covered_chars"]),
+                total=int(plan["total_chars"]),
+                percent=plan["coverage_percent"],
+            ),
+            self,
+        )
+        dialog.yesButton.setText(t("app.full.textPlan.dialog.continue"))
+        dialog.cancelButton.setText(t("app.full.textPlan.dialog.cancel"))
+        return bool(dialog.exec())
 
     def _on_preview_succeeded(self, config: ProjectConfig) -> None:
         InfoBar.info(
@@ -479,11 +528,64 @@ class MainWindow(FluentWindow):
             duration=6000,
         )
 
+    def _on_full_extraction_cancelled(self, message: str) -> None:
+        InfoBar.info(
+            title=t("app.full.cancelled.title"),
+            content=message,
+            parent=self,
+            position=InfoBarPosition.TOP_RIGHT,
+            duration=4500,
+        )
+
+    def _cancel_extraction(self) -> None:
+        worker = self._full_extraction_worker
+        if worker is None:
+            return
+        LOGGER.info("Full extraction cancellation requested")
+        worker.cancel()
+        self.project_page.set_extraction_canceling()
+
     def _clear_extraction_worker(self) -> None:
         self.project_page.set_extraction_running(False)
         self._preview_worker = None
         self._full_extraction_worker = None
         self._extraction_thread = None
+        if self._close_after_extraction:
+            self._close_after_extraction = False
+            QTimer.singleShot(0, self.close)
+
+    def closeEvent(self, event) -> None:  # noqa: ANN001
+        thread = self._extraction_thread
+        if thread is None or not thread.isRunning():
+            super().closeEvent(event)
+            return
+        if self._close_after_extraction:
+            event.ignore()
+            return
+        can_cancel = self._full_extraction_worker is not None
+        dialog = MessageBox(
+            t("app.extraction.closeWhileRunning.title"),
+            t(
+                "app.extraction.closeWhileRunning.content"
+                if can_cancel
+                else "app.extraction.closeWhileRunning.previewContent"
+            ),
+            self,
+        )
+        dialog.yesButton.setText(
+            t(
+                "app.extraction.closeWhileRunning.stopAndExit"
+                if can_cancel
+                else "app.extraction.closeWhileRunning.exitAfterComplete"
+            )
+        )
+        dialog.cancelButton.setText(t("app.extraction.closeWhileRunning.keepRunning"))
+        if not dialog.exec():
+            event.ignore()
+            return
+        self._close_after_extraction = True
+        self._cancel_extraction()
+        event.ignore()
 
     def show_language_changed(self, _locale: str) -> None:
         LOGGER.info("Language preference changed; locale=%s", _locale)

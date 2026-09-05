@@ -877,6 +877,7 @@ class SourceListRow(QWidget):
 
 class ProjectPage(QWidget):
     extractionRequested = pyqtSignal(ProjectConfig, int)
+    extractionCancelRequested = pyqtSignal()
     configSaved = pyqtSignal(ProjectConfig)
     projectChanged = pyqtSignal(object)
 
@@ -1134,6 +1135,8 @@ class ProjectPage(QWidget):
 
         progress_header = QHBoxLayout()
         progress_header.addWidget(BodyLabel(t("project.progress.label"), insight_card))
+        self.progress_detail_label = CaptionLabel("", insight_card)
+        progress_header.addWidget(self.progress_detail_label)
         progress_header.addStretch(1)
         self.token_usage_label = CaptionLabel(t("project.extraction.tokenUsage.empty"), insight_card)
         progress_header.addWidget(self.token_usage_label, 0, Qt.AlignmentFlag.AlignRight)
@@ -1187,8 +1190,11 @@ class ProjectPage(QWidget):
         actions = QHBoxLayout()
         actions.addStretch(1)
         self.save_button = PushButton(t("project.save"), self)
+        self.cancel_extraction_button = PushButton(t("project.extraction.cancel"), self)
+        self.cancel_extraction_button.hide()
         self.preview_button = PrimaryPushButton(t("project.preview"), self)
         actions.addWidget(self.save_button)
+        actions.addWidget(self.cancel_extraction_button)
         actions.addWidget(self.preview_button)
         root.addLayout(actions)
 
@@ -1200,6 +1206,7 @@ class ProjectPage(QWidget):
         self.clean_raw_button.clicked.connect(self._clean_selected_raw_sources)
         self.remove_source_button.clicked.connect(self._remove_selected_sources)
         self.save_button.clicked.connect(self._emit_save)
+        self.cancel_extraction_button.clicked.connect(self._request_extraction_cancel)
         self.preview_button.clicked.connect(self._emit_extraction)
         self.mode_combo.currentIndexChanged.connect(self._sync_extraction_button_text)
         self.download_ffmpeg_button.clicked.connect(self._download_ffmpeg)
@@ -1259,11 +1266,39 @@ class ProjectPage(QWidget):
 
     def clear_events(self) -> None:
         self.progress.setValue(0)
+        self.progress_detail_label.clear()
         self.token_usage_label.setText(t("project.extraction.tokenUsage.empty"))
         self.stream_panel.clear_events()
 
     def set_progress(self, value: int) -> None:
         self.progress.setValue(max(0, min(100, int(value))))
+
+    def set_extraction_detail(self, detail: dict[str, object]) -> None:
+        if detail.get("kind") != "text_chunk":
+            return
+        processed = int(detail.get("processed") or 0)
+        total = int(detail.get("total") or 0)
+        eta_seconds = int(detail.get("eta_seconds") or 0)
+        if eta_seconds >= 3600:
+            eta = t(
+                "project.extraction.eta.hoursMinutes",
+                hours=eta_seconds // 3600,
+                minutes=(eta_seconds % 3600) // 60,
+            )
+        elif eta_seconds >= 60:
+            eta = t("project.extraction.eta.minutes", minutes=max(1, eta_seconds // 60))
+        elif eta_seconds > 0:
+            eta = t("project.extraction.eta.seconds", seconds=eta_seconds)
+        else:
+            eta = t("project.extraction.eta.pending")
+        self.progress_detail_label.setText(
+            t(
+                "project.extraction.progress.textChunk",
+                processed=processed,
+                total=total,
+                eta=eta,
+            )
+        )
 
     def set_token_usage(self, token_usage: dict[str, int] | None) -> None:
         usage = token_usage if isinstance(token_usage, dict) else {}
@@ -1286,11 +1321,27 @@ class ProjectPage(QWidget):
             )
         )
 
-    def set_extraction_running(self, running: bool) -> None:
+    def set_extraction_running(self, running: bool, *, cancellable: bool = False) -> None:
         self._extraction_running = running
         self.preview_button.setEnabled(self._has_project() and not running)
         self.mode_combo.setEnabled(self._has_project() and not running)
         self.skip_provider_rejected_chunk_check.setEnabled(self._has_project() and not running)
+        self.cancel_extraction_button.setVisible(running and cancellable)
+        self.cancel_extraction_button.setEnabled(running and cancellable)
+        self.cancel_extraction_button.setText(t("project.extraction.cancel"))
+        if not running:
+            self.progress_detail_label.clear()
+
+    def set_extraction_canceling(self) -> None:
+        self.cancel_extraction_button.setEnabled(False)
+        self.cancel_extraction_button.setText(t("project.extraction.canceling"))
+        self.progress_detail_label.setText(t("project.extraction.progress.canceling"))
+
+    def _request_extraction_cancel(self) -> None:
+        if not self._extraction_running or not self.cancel_extraction_button.isEnabled():
+            return
+        self.set_extraction_canceling()
+        self.extractionCancelRequested.emit()
 
     def apply_theme_colors(self) -> None:
         if isDarkTheme():

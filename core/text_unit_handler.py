@@ -82,11 +82,41 @@ class TextUnitExecutionResult:
 
 
 @dataclass(frozen=True, slots=True)
+class TextUnitPlan:
+    chunk_ids: list[str]
+    total_chars: int
+    covered_chars: int
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def coverage_percent(self) -> float:
+        if self.total_chars <= 0:
+            return 100.0
+        return min(100.0, round(self.covered_chars * 100 / self.total_chars, 1))
+
+
+@dataclass(frozen=True, slots=True)
 class TextChunkFailure:
     chunk_id: str
     start_offset: int
     end_offset: int
     error: Exception
+
+
+@dataclass(frozen=True, slots=True)
+class TextChunkProgress:
+    chunk_id: str
+    status: str
+    processed_chunks: int
+    total_chunks: int
+    created_chunks: int
+    reused_chunks: int
+    failed_chunks: int
+    token_usage: dict[str, int] = field(default_factory=dict)
+
+
+class TextUnitExtractionCancelled(RuntimeError):
+    pass
 
 
 class TextUnitHandler:
@@ -120,15 +150,37 @@ class TextUnitHandler:
         chunk_limit: int | None = None,
     ) -> list[str]:
         """Return deterministic chunk ids without making model requests."""
+        return self.plan_unit(
+            source_root=source_root,
+            unit=unit,
+            chunk_limit=chunk_limit,
+        ).chunk_ids
+
+    def plan_unit(
+        self,
+        *,
+        source_root: Path,
+        unit: ExtractionUnit,
+        chunk_limit: int | None = None,
+    ) -> TextUnitPlan:
+        """Describe deterministic text coverage without making model requests."""
         if not self.supports(unit):
             raise ValueError(f"unsupported text extraction unit: {unit.unit_kind}")
         source_path = self._source_path(source_root, unit)
         parsed = self.parse_material(source_path, unit_kind=unit.unit_kind)
-        prepared_chunks, _warnings = self._prepare_chunks(parsed, chunk_limit=chunk_limit)
-        return [
-            f"{unit.unit_id}_text_{text_chunk.index:04d}"
-            for text_chunk in prepared_chunks
-        ]
+        prepared_chunks, chunk_warnings = self._prepare_chunks(parsed, chunk_limit=chunk_limit)
+        return TextUnitPlan(
+            chunk_ids=[
+                f"{unit.unit_id}_text_{text_chunk.index:04d}"
+                for text_chunk in prepared_chunks
+            ],
+            total_chars=len(parsed.text),
+            covered_chars=max(
+                (text_chunk.end_offset for text_chunk in prepared_chunks),
+                default=0,
+            ),
+            warnings=[*parsed.warnings, *chunk_warnings],
+        )
 
     def execute(
         self,
@@ -146,6 +198,8 @@ class TextUnitHandler:
         chunk_limit: int | None = None,
         existing_chunks: dict[str, ChunkExtractionResult] | None = None,
         on_chunk_ready: Callable[[ChunkExtractionResult], None] | None = None,
+        on_chunk_progress: Callable[[TextChunkProgress], None] | None = None,
+        cancelled: Callable[[], bool] | None = None,
     ) -> TextUnitExecutionResult:
         if not self.supports(unit):
             raise ValueError(f"unsupported text extraction unit: {unit.unit_kind}")
@@ -161,6 +215,8 @@ class TextUnitHandler:
         created_chunk_count = 0
         adaptive_split_count = 0
         stop_requested = False
+        processed_chunk_count = 0
+        planned_leaf_count = len(prepared_chunks)
         usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
         def add_usage(token_usage: dict[str, int]) -> None:
@@ -169,6 +225,28 @@ class TextUnitHandler:
                 if isinstance(value, int):
                     usage_total[key] += value
 
+        def ensure_not_cancelled() -> None:
+            if cancelled is not None and cancelled():
+                raise TextUnitExtractionCancelled("text extraction cancelled")
+
+        def report_progress(chunk_id: str, status: str) -> None:
+            nonlocal processed_chunk_count
+            processed_chunk_count += 1
+            if on_chunk_progress is None:
+                return
+            on_chunk_progress(
+                TextChunkProgress(
+                    chunk_id=chunk_id,
+                    status=status,
+                    processed_chunks=processed_chunk_count,
+                    total_chunks=planned_leaf_count,
+                    created_chunks=created_chunk_count,
+                    reused_chunks=reused_chunk_count,
+                    failed_chunks=len(failures),
+                    token_usage=dict(usage_total),
+                )
+            )
+
         def execute_chunk(
             text_chunk: PreparedTextChunk,
             chunk_id: str,
@@ -176,13 +254,16 @@ class TextUnitHandler:
             split_depth: int = 0,
             inherited_warnings: list[str] | None = None,
         ) -> None:
-            nonlocal adaptive_split_count, created_chunk_count, reused_chunk_count, stop_requested
+            nonlocal adaptive_split_count, created_chunk_count, planned_leaf_count
+            nonlocal reused_chunk_count, stop_requested
+            ensure_not_cancelled()
             if stop_requested:
                 return
             existing_chunk = existing_chunks.get(chunk_id)
             if existing_chunk is not None:
                 output.append(existing_chunk)
                 reused_chunk_count += 1
+                report_progress(chunk_id, "reused")
                 return
 
             descendant_prefix = f"{chunk_id}_"
@@ -192,6 +273,7 @@ class TextUnitHandler:
             if has_existing_descendant:
                 split_chunks = self._split_prepared_chunk(parsed.text, text_chunk)
                 if split_chunks is not None:
+                    planned_leaf_count += 1
                     execute_chunk(
                         split_chunks[0],
                         f"{chunk_id}_a",
@@ -260,8 +342,10 @@ class TextUnitHandler:
                             error=exc,
                         )
                     )
+                    report_progress(chunk_id, "failed")
                     return
                 adaptive_split_count += 1
+                planned_leaf_count += 1
                 split_warning = (
                     f"text_chunk_adaptively_split:chunk_id={chunk_id}:"
                     f"depth={split_depth + 1}"
@@ -291,6 +375,7 @@ class TextUnitHandler:
                         error=exc,
                     )
                 )
+                report_progress(chunk_id, "failed")
                 return
             except ModelCallError as exc:
                 add_usage(self._exception_token_usage(exc))
@@ -302,6 +387,7 @@ class TextUnitHandler:
                         error=exc,
                     )
                 )
+                report_progress(chunk_id, "failed")
                 if classify_failure(exc).category != FailureCategory.PROVIDER_POLICY_REFUSAL:
                     stop_requested = True
                 return
@@ -314,6 +400,7 @@ class TextUnitHandler:
                         error=exc,
                     )
                 )
+                report_progress(chunk_id, "failed")
                 stop_requested = True
                 return
 
@@ -343,6 +430,7 @@ class TextUnitHandler:
             created_chunk_count += 1
             if on_chunk_ready is not None:
                 on_chunk_ready(chunk_result)
+            report_progress(chunk_id, "created")
 
         for text_chunk in prepared_chunks:
             if stop_requested:

@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import math
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections.abc import Callable
 from datetime import datetime
@@ -86,7 +87,12 @@ from core.preview_sampling import (
 )
 from core.refusal_samples import ExtractionFailureSampleRequest, record_extraction_failure_sample
 from core.transcript_provider import TranscriptArtifactRequest, TranscriptProvider
-from core.text_unit_handler import TextUnitHandler, TextUnitHandlerConfig
+from core.text_unit_handler import (
+    TextChunkProgress,
+    TextUnitExtractionCancelled,
+    TextUnitHandler,
+    TextUnitHandlerConfig,
+)
 from core.video_unit_handler import VideoUnitHandler, VideoUnitHandlerConfig
 from utils.ai_model_middleware import (
     ModelBackend,
@@ -1972,6 +1978,10 @@ class Extractor(QObject):
             "aggregate_total": 0,
             "aggregate_reusable": 0,
             "aggregate_pending": 0,
+            "text_total_chars": 0,
+            "text_covered_chars": 0,
+            "text_coverage_percent": 100.0,
+            "text_limited_units": 0,
             "handlers": {},
         }
         expected_ids_by_episode: dict[tuple[str, str], list[str]] = {}
@@ -2062,7 +2072,7 @@ class Extractor(QObject):
                 else project_paths.materials
             )
             try:
-                chunk_ids = text_handler.planned_chunk_ids(
+                text_plan = text_handler.plan_unit(
                     source_root=source_root,
                     unit=unit,
                 )
@@ -2074,6 +2084,11 @@ class Extractor(QObject):
                 expected_ids_by_episode.setdefault(key, [])
                 pending_episode_keys.add(key)
                 continue
+            chunk_ids = text_plan.chunk_ids
+            inventory["text_total_chars"] += text_plan.total_chars
+            inventory["text_covered_chars"] += text_plan.covered_chars
+            if any("chunk_limit_reached" in warning for warning in text_plan.warnings):
+                inventory["text_limited_units"] += 1
             expected_trace = self._source_trace_for_unit(unit).model_dump(mode="json")
             for chunk_id in chunk_ids:
                 inspect_chunk(
@@ -2112,6 +2127,11 @@ class Extractor(QObject):
         inventory["pending_chunks"] = (
             inventory["missing_chunks"] + inventory["invalid_chunks"]
         )
+        if inventory["text_total_chars"]:
+            inventory["text_coverage_percent"] = round(
+                inventory["text_covered_chars"] * 100 / inventory["text_total_chars"],
+                1,
+            )
         season_ids: set[str] = set()
         pending_aggregate_seasons: set[str] = set()
         for (season_id, episode_id), expected_chunk_ids in expected_ids_by_episode.items():
@@ -2192,6 +2212,42 @@ class Extractor(QObject):
             )
         )
 
+    def inspect_text_extraction_plan(
+        self,
+        project_id: str,
+        preset: CloudModelPreset,
+    ) -> dict[str, int | float]:
+        """Estimate text request count and coverage without writing extraction artifacts."""
+        run_plan = self.prepare_formal_extraction_run_plan(project_id)
+        project_tree = ensure_project_tree(project_id)
+        handler = self._text_unit_handler(preset)
+        total_chunks = 0
+        total_chars = 0
+        covered_chars = 0
+        limited_units = 0
+        for _season_id, unit in self._collect_text_units_from_run_plan(run_plan):
+            source_root = (
+                project_tree.knowledge_base
+                if unit.handler_options.get("storage_root") == "knowledge_base"
+                else project_tree.materials
+            )
+            plan = handler.plan_unit(source_root=source_root, unit=unit)
+            total_chunks += len(plan.chunk_ids)
+            total_chars += plan.total_chars
+            covered_chars += plan.covered_chars
+            if any("chunk_limit_reached" in warning for warning in plan.warnings):
+                limited_units += 1
+        coverage_percent = (
+            round(covered_chars * 100 / total_chars, 1) if total_chars else 100.0
+        )
+        return {
+            "total_chunks": total_chunks,
+            "total_chars": total_chars,
+            "covered_chars": covered_chars,
+            "coverage_percent": coverage_percent,
+            "limited_units": limited_units,
+        }
+
     def _image_unit_handler(self, preset: CloudModelPreset) -> ImageUnitHandler:
         return ImageUnitHandler(ImageUnitHandlerConfig(provider=preset.provider))
 
@@ -2267,6 +2323,9 @@ class Extractor(QObject):
         handler: TextUnitHandler | None = None,
         emit_event: Callable[[dict], None] | None = None,
         emit_progress: Callable[[int], None] | None = None,
+        emit_token_usage: Callable[[dict[str, int]], None] | None = None,
+        emit_detail: Callable[[dict[str, Any]], None] | None = None,
+        cancelled: Callable[[], bool] | None = None,
         progress_base: int = 0,
         progress_span: int = 0,
     ) -> tuple[int, dict[str, int], list[ChunkExtractionResult], dict[str, int]]:
@@ -2300,8 +2359,48 @@ class Extractor(QObject):
         remaining_chunks = chunk_limit
         total_units = len(unit_inputs)
         for index, (season_id, unit) in enumerate(unit_inputs, start=1):
+            if cancelled is not None and cancelled():
+                raise ExtractionStoppedError(t("extractor.full.cancelled"))
             if remaining_chunks is not None and remaining_chunks <= 0:
                 break
+            completed_usage = dict(usage_total)
+            unit_started_at = time.monotonic()
+
+            def handle_chunk_progress(progress: TextChunkProgress) -> None:
+                combined_usage = {
+                    key: completed_usage[key] + progress.token_usage.get(key, 0)
+                    for key in completed_usage
+                }
+                if emit_token_usage is not None and any(combined_usage.values()):
+                    emit_token_usage(combined_usage)
+                if emit_progress is not None and progress_span > 0:
+                    unit_fraction = progress.processed_chunks / max(1, progress.total_chunks)
+                    overall_fraction = ((index - 1) + unit_fraction) / total_units
+                    emit_progress(progress_base + int(overall_fraction * progress_span))
+                if emit_detail is None:
+                    return
+                requested_chunks = progress.created_chunks + progress.failed_chunks
+                elapsed_seconds = max(0.0, time.monotonic() - unit_started_at)
+                remaining = max(0, progress.total_chunks - progress.processed_chunks)
+                eta_seconds = (
+                    int(elapsed_seconds / requested_chunks * remaining)
+                    if requested_chunks > 0 and remaining > 0
+                    else 0
+                )
+                emit_detail(
+                    {
+                        "kind": "text_chunk",
+                        "source_path": unit.material_ref.relative_path,
+                        "chunk_id": progress.chunk_id,
+                        "status": progress.status,
+                        "processed": progress.processed_chunks,
+                        "total": progress.total_chunks,
+                        "created": progress.created_chunks,
+                        "reused": progress.reused_chunks,
+                        "failed": progress.failed_chunks,
+                        "eta_seconds": eta_seconds,
+                    }
+                )
             try:
                 existing_chunks = (
                     self._load_reusable_unit_chunks(
@@ -2344,7 +2443,11 @@ class Extractor(QObject):
                         if extraction_stage == ExtractionArtifactStage.FULL
                         else None
                     ),
+                    on_chunk_progress=handle_chunk_progress,
+                    cancelled=cancelled,
                 )
+            except TextUnitExtractionCancelled as exc:
+                raise ExtractionStoppedError(t("extractor.full.cancelled")) from exc
             except (ModelCallError, OSError, ValueError) as exc:
                 stats["failed_chunks"] += 1
                 LOGGER.warning(
@@ -6235,6 +6338,8 @@ class Extractor(QObject):
         emit_event: Callable[[dict], None] | None = None,
         emit_progress: Callable[[int], None] | None = None,
         emit_token_usage: Callable[[dict[str, int]], None] | None = None,
+        emit_detail: Callable[[dict[str, Any]], None] | None = None,
+        cancelled: Callable[[], bool] | None = None,
     ) -> list[ChunkExtractionResult]:
         emit_event = emit_event or self.insightGenerated.emit
         emit_progress = emit_progress or self.progressChanged.emit
@@ -6467,6 +6572,20 @@ class Extractor(QObject):
                 ),
                 meta=inventory,
             )
+            if inventory["text_limited_units"]:
+                self._emit_full_event(
+                    emit_event,
+                    title=t("extractor.full.textCoverage.title"),
+                    description=t(
+                        "extractor.full.textCoverage.limited",
+                        covered=inventory["text_covered_chars"],
+                        total=inventory["text_total_chars"],
+                        percent=inventory["text_coverage_percent"],
+                        limited=inventory["text_limited_units"],
+                    ),
+                    status=InsightStatus.WARNING,
+                    meta=inventory,
+                )
         created_count = 0
         extraction_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         extracted_chunks: list[ChunkExtractionResult] = []
@@ -6584,6 +6703,9 @@ class Extractor(QObject):
                 extraction_stage=ExtractionArtifactStage.FULL,
                 emit_event=emit_event,
                 emit_progress=emit_progress,
+                emit_token_usage=emit_token_usage,
+                emit_detail=emit_detail,
+                cancelled=cancelled,
                 progress_base=non_video_progress_base,
                 progress_span=text_progress_span,
             )
