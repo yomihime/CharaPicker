@@ -47,6 +47,7 @@ def _validate_metadata_mapping() -> None:
         'anime',
         'manga',
         'novel',
+        'chat_log',
         'script',
         'setting_book',
         'audio_drama',

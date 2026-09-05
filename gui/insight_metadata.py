@@ -17,6 +17,7 @@ CONTENT_FORM_LABEL_KEYS = {
     'anime': 'insight.contentForm.anime',
     'manga': 'insight.contentForm.manga',
     'novel': 'insight.contentForm.novel',
+    'chat_log': 'insight.contentForm.chatLog',
     'script': 'insight.contentForm.script',
     'setting_book': 'insight.contentForm.settingBook',
     'audio_drama': 'insight.contentForm.audioDrama',

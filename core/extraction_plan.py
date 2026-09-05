@@ -24,6 +24,7 @@ class ContentForm(str, Enum):
     ANIME = "anime"
     MANGA = "manga"
     NOVEL = "novel"
+    CHAT_LOG = "chat_log"
     SCRIPT = "script"
     SETTING_BOOK = "setting_book"
     AUDIO_DRAMA = "audio_drama"

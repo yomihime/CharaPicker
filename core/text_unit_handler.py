@@ -6,6 +6,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from core.chat_log_parser import (
+    ChatMessage,
+    parse_qq_chat_export,
+    render_chat_messages,
+)
 from core.extraction_ai import (
     FormalExtractionJsonError,
     FormalExtractionJsonResult,
@@ -36,6 +41,7 @@ from utils.media_types import SUPPORTED_TIMED_TEXT_SUFFIXES
 TEXT_DOCUMENT_UNIT_KINDS = frozenset({"document_text", "controlled_json_text"})
 TIMED_TEXT_UNIT_KINDS = frozenset({"subtitle_text"})
 TRANSCRIPT_TEXT_UNIT_KINDS = frozenset({"transcript_text"})
+CHAT_LOG_UNIT_KINDS = frozenset({"chat_log_text"})
 TEXT_DOCUMENT_SUFFIXES = frozenset({".txt", ".md", ".json"})
 TEXT_DECODE_ENCODINGS = ("utf-8-sig", "utf-8", "gb18030", "shift_jis")
 ModelJsonCall = Callable[[ModelCallRequest], FormalExtractionJsonResult]
@@ -46,6 +52,7 @@ class TextUnitHandlerConfig:
     max_input_chars: int = 6_000
     overlap_chars: int = 400
     max_chunks_per_unit: int = 128
+    max_chat_chunks_per_unit: int = 4_096
     max_output_tokens: int = 4_096
     min_adaptive_chunk_chars: int = 1_500
     max_adaptive_split_depth: int = 3
@@ -58,6 +65,8 @@ class ParsedTextMaterial:
     warnings: list[str] = field(default_factory=list)
     timed_text_format: str = ""
     timed_segments: list[TimedTextSegment] = field(default_factory=list)
+    chat_format: str = ""
+    chat_messages: list[ChatMessage] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +77,7 @@ class PreparedTextChunk:
     end_offset: int
     timed_text_format: str = ""
     timed_segments: list[TimedTextSegment] = field(default_factory=list)
+    chat_messages: list[ChatMessage] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +145,8 @@ class TextUnitHandler:
         if unit.unit_kind in TEXT_DOCUMENT_UNIT_KINDS:
             return True
         if unit.unit_kind in TRANSCRIPT_TEXT_UNIT_KINDS:
+            return True
+        if unit.unit_kind in CHAT_LOG_UNIT_KINDS:
             return True
         return (
             unit.unit_kind in TIMED_TEXT_UNIT_KINDS
@@ -322,6 +334,7 @@ class TextUnitHandler:
                     "content_form": unit.content_form.value,
                     "unit_kind": unit.unit_kind,
                     "timed_text_format": parsed.timed_text_format,
+                    "chat_format": parsed.chat_format,
                 },
             )
             try:
@@ -419,6 +432,7 @@ class TextUnitHandler:
                         section=f"chunk_{text_chunk.index:04d}",
                     ),
                     timed_segments=text_chunk.timed_segments,
+                    chat_messages=text_chunk.chat_messages,
                     extraction_stage=extraction_stage,
                     extraction_run_id=extraction_run_id,
                     run_type=run_type,
@@ -461,6 +475,15 @@ class TextUnitHandler:
             warnings.append(f"text_decoded_with_fallback:{encoding}")
         if unit_kind in TRANSCRIPT_TEXT_UNIT_KINDS:
             return self._parse_transcript_material(text, encoding=encoding, warnings=warnings)
+        if unit_kind in CHAT_LOG_UNIT_KINDS:
+            document = parse_qq_chat_export(text)
+            return ParsedTextMaterial(
+                text=text,
+                encoding=encoding,
+                warnings=[*warnings, *document.warnings],
+                chat_format=document.format_name,
+                chat_messages=document.messages,
+            )
         if suffix in SUPPORTED_TIMED_TEXT_SUFFIXES:
             document = parse_timed_text(path, text)
             return ParsedTextMaterial(
@@ -533,6 +556,8 @@ class TextUnitHandler:
         *,
         chunk_limit: int | None,
     ) -> tuple[list[PreparedTextChunk], list[str]]:
+        if parsed.chat_messages:
+            return self._chunk_chat_messages(parsed, chunk_limit=chunk_limit)
         if parsed.timed_segments:
             return self._chunk_timed_segments(parsed, chunk_limit=chunk_limit)
         chunking = self.chunk_material(parsed.text, chunk_limit=chunk_limit)
@@ -547,6 +572,65 @@ class TextUnitHandler:
                 for chunk in chunking.chunks
             ],
             chunking.warnings,
+        )
+
+    def _chunk_chat_messages(
+        self,
+        parsed: ParsedTextMaterial,
+        *,
+        chunk_limit: int | None,
+    ) -> tuple[list[PreparedTextChunk], list[str]]:
+        max_chunks = self.config.max_chat_chunks_per_unit
+        if chunk_limit is not None:
+            max_chunks = min(max_chunks, max(1, chunk_limit))
+        chunks: list[PreparedTextChunk] = []
+        warnings: list[str] = []
+        current: list[ChatMessage] = []
+        for message_position, message in enumerate(parsed.chat_messages):
+            candidate = [*current, message]
+            candidate_text = render_chat_messages(candidate)
+            if current and len(candidate_text) > self.config.max_input_chars:
+                chunks.append(self._prepared_chat_chunk(current, len(chunks) + 1))
+                if len(chunks) >= max_chunks:
+                    remaining_messages = len(parsed.chat_messages) - message_position
+                    warnings.append(
+                        f"chat_log_chunk_limit_reached:max_chunks={max_chunks}:"
+                        f"remaining_messages={remaining_messages}:"
+                        f"remaining_chars={len(parsed.text) - message.start_offset}"
+                    )
+                    return chunks, warnings
+                current = [message]
+            else:
+                current = candidate
+            rendered_current = render_chat_messages(current)
+            if len(rendered_current) > self.config.max_input_chars:
+                warnings.append(
+                    f"chat_message_exceeds_budget:index={message.index}:"
+                    f"chars={len(rendered_current)}"
+                )
+        if current:
+            if len(chunks) >= max_chunks:
+                warnings.append(
+                    f"chat_log_chunk_limit_reached:max_chunks={max_chunks}:"
+                    f"remaining_messages={len(current)}"
+                )
+            else:
+                chunks.append(self._prepared_chat_chunk(current, len(chunks) + 1))
+        if len(chunks) > 1:
+            warnings.append(f"chat_log_split_into_chunks:count={len(chunks)}")
+        return chunks, warnings
+
+    @staticmethod
+    def _prepared_chat_chunk(
+        messages: list[ChatMessage],
+        index: int,
+    ) -> PreparedTextChunk:
+        return PreparedTextChunk(
+            index=index,
+            text=render_chat_messages(messages),
+            start_offset=messages[0].start_offset,
+            end_offset=messages[-1].end_offset,
+            chat_messages=list(messages),
         )
 
     def _chunk_timed_segments(
@@ -628,6 +712,7 @@ class TextUnitHandler:
         chunk_id: str,
         text_range: TextRange,
         timed_segments: list[TimedTextSegment],
+        chat_messages: list[ChatMessage],
         extraction_stage: ExtractionArtifactStage,
         extraction_run_id: str,
         run_type: str,
@@ -669,6 +754,16 @@ class TextUnitHandler:
             if source_lines:
                 evidence_locator["source_line_start"] = source_lines[0]
                 evidence_locator["source_line_end"] = source_lines[-1]
+        if chat_messages:
+            evidence_locator.update(
+                {
+                    "chat_format": "qq_chat_exporter",
+                    "message_index_start": chat_messages[0].index,
+                    "message_index_end": chat_messages[-1].index,
+                    "message_time_start": chat_messages[0].timestamp,
+                    "message_time_end": chat_messages[-1].timestamp,
+                }
+            )
         evidence = EvidenceRef(
             evidence_id=f"evidence_{chunk_id}",
             material_ref=material_ref,
@@ -679,6 +774,7 @@ class TextUnitHandler:
                 "media_type": MediaType.TEXT.value,
                 "unit_kind": unit.unit_kind,
                 "speaker_policy": "explicit_only",
+                "chat_format": "qq_chat_exporter" if chat_messages else "",
             },
         )
         source_trace = SourceTrace(
@@ -708,6 +804,7 @@ class TextUnitHandler:
                 "units": 1,
                 "text_ranges": 1,
                 "timed_text_segments": len(timed_segments),
+                "chat_messages": len(chat_messages),
                 "transcript_segments": (
                     len(timed_segments) if unit.unit_kind == "transcript_text" else 0
                 ),
@@ -761,6 +858,12 @@ class TextUnitHandler:
 
     @staticmethod
     def _source_locator(chunk: PreparedTextChunk) -> str:
+        if chunk.chat_messages:
+            return (
+                f"messages={chunk.chat_messages[0].index}-{chunk.chat_messages[-1].index};"
+                f"time={chunk.chat_messages[0].timestamp}-{chunk.chat_messages[-1].timestamp};"
+                f"text={chunk.start_offset}:{chunk.end_offset}"
+            )
         if not chunk.timed_segments:
             return f"text={chunk.start_offset}:{chunk.end_offset}"
         parts: list[str] = []
@@ -779,6 +882,11 @@ class TextUnitHandler:
 
     @staticmethod
     def _evidence_guidance(chunk: PreparedTextChunk) -> str:
+        if chunk.chat_messages:
+            return (
+                "这是按消息边界整理的聊天记录。只依据当前消息提取，严格使用显式发送者和时间；"
+                "不得把接收方、关系、动机或现实身份当作已确认事实。"
+            )
         if not chunk.timed_segments:
             return "只依据当前文本范围提取；证据不足时保留不确定性。"
         if chunk.timed_text_format == "transcript":
@@ -828,6 +936,20 @@ class TextUnitHandler:
         source_text: str,
         chunk: PreparedTextChunk,
     ) -> tuple[PreparedTextChunk, PreparedTextChunk] | None:
+        if chunk.chat_messages:
+            if len(chunk.chat_messages) < 2:
+                return None
+            split_index = len(chunk.chat_messages) // 2
+            return (
+                self._prepared_chat_chunk(
+                    chunk.chat_messages[:split_index],
+                    chunk.index,
+                ),
+                self._prepared_chat_chunk(
+                    chunk.chat_messages[split_index:],
+                    chunk.index,
+                ),
+            )
         if chunk.timed_segments:
             if len(chunk.timed_segments) < 2:
                 return None

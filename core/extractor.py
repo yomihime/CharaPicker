@@ -386,6 +386,23 @@ class Extractor(QObject):
             )
             if actual is None:
                 return False
+            expected_content_form = self._manifest_string(expected.get("content_form"))
+            actual_content_form = self._manifest_string(actual.get("content_form"))
+            if (
+                expected_content_form
+                and actual_content_form
+                and expected_content_form != actual_content_form
+            ):
+                return False
+            expected_metadata = expected.get("metadata", {})
+            actual_metadata = actual.get("metadata", {})
+            if isinstance(expected_metadata, dict) and isinstance(actual_metadata, dict):
+                expected_parser_version = expected_metadata.get("chat_parser_version")
+                if (
+                    expected_parser_version is not None
+                    and actual_metadata.get("chat_parser_version") != expected_parser_version
+                ):
+                    return False
             expected_fingerprint = self._manifest_string(expected.get("fingerprint"))
             actual_fingerprint = self._manifest_string(actual.get("fingerprint"))
             if (

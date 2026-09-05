@@ -5,6 +5,7 @@ from hashlib import sha1
 from pathlib import Path
 from typing import Any
 
+from core.chat_log_parser import QQ_CHAT_PARSER_VERSION, is_qq_chat_export_path
 from core.extraction_plan import (
     ContentForm,
     EpisodePlan,
@@ -37,6 +38,7 @@ TIMED_TEXT_ALIGNMENT_AMBIGUOUS = "timed_text_episode_alignment_ambiguous"
 TIMED_TEXT_ALIGNMENT_UNMATCHED = "timed_text_episode_alignment_unmatched"
 PREPROCESSED_TEXT_CONTENT_FORMS = {
     ContentForm.NOVEL.value: ContentForm.NOVEL,
+    ContentForm.CHAT_LOG.value: ContentForm.CHAT_LOG,
     ContentForm.SCRIPT.value: ContentForm.SCRIPT,
     ContentForm.SETTING_BOOK.value: ContentForm.SETTING_BOOK,
 }
@@ -393,7 +395,7 @@ def _single_material_episode(
         season_id=GENERIC_MATERIAL_SEASON_ID,
         episode_id=episode_id,
         content_form=content_form,
-        unit_kind=_material_unit_kind(path, media_type),
+        unit_kind=_material_unit_kind(path, media_type, content_form=content_form),
         metadata=_standalone_material_metadata(timed_text_alignment_failure),
         preprocessing_index=preprocessing_index,
     )
@@ -457,6 +459,9 @@ def _material_unit(
         "support_reason": support.reason,
         **(metadata or {}),
     }
+    if content_form == ContentForm.CHAT_LOG:
+        unit_metadata["chat_format"] = "qq_chat_exporter"
+        unit_metadata["chat_parser_version"] = QQ_CHAT_PARSER_VERSION
     if path.suffix.lower() in TIMED_TEXT_SUFFIXES:
         unit_metadata["timed_text_supported"] = (
             path.suffix.lower() in SUPPORTED_TIMED_TEXT_SUFFIXES
@@ -483,6 +488,14 @@ def _material_unit(
         "preview_support": support.preview_support.value,
         "formal_support": support.formal_support.value,
     }
+    if content_form == ContentForm.CHAT_LOG:
+        handler_options.update(
+            {
+                "chat_format": "qq_chat_exporter",
+                "chat_parser_version": QQ_CHAT_PARSER_VERSION,
+                "message_boundary_chunking": True,
+            }
+        )
     if media_type == MediaType.AUDIO:
         handler_options["transcript_candidate"] = True
     if path.suffix.lower() in TIMED_TEXT_SUFFIXES:
@@ -527,6 +540,8 @@ def _material_content_form(
         return ContentForm.IMAGE_SET
     if path.suffix.lower() in TIMED_TEXT_SUFFIXES:
         return ContentForm.SCRIPT
+    if media_type == MediaType.TEXT and is_qq_chat_export_path(path):
+        return ContentForm.CHAT_LOG
     normalized_name = path.stem.lower()
     if any(token in normalized_name for token in ("script", "screenplay", "台本", "剧本")):
         return ContentForm.SCRIPT
@@ -535,8 +550,15 @@ def _material_content_form(
     return ContentForm.NOVEL
 
 
-def _material_unit_kind(path: Path, media_type: MediaType) -> str:
+def _material_unit_kind(
+    path: Path,
+    media_type: MediaType,
+    *,
+    content_form: ContentForm = ContentForm.UNKNOWN,
+) -> str:
     if media_type == MediaType.TEXT:
+        if content_form == ContentForm.CHAT_LOG:
+            return "chat_log_text"
         return _text_unit_kind(path)
     if media_type == MediaType.AUDIO:
         return "audio_source"
