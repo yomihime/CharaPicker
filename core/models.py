@@ -148,6 +148,7 @@ class ProjectConfig(BaseModel):
     target_characters: list[str] = Field(default_factory=list)
     extraction_mode: ExtractionMode = ExtractionMode.PREVIEW
     source_paths: list[str] = Field(default_factory=list)
+    chat_source_paths: list[str] = Field(default_factory=list)
     source_processing: SourceProcessingConfig = Field(default_factory=SourceProcessingConfig)
     include_previous_season_background: bool = True
     allow_provider_rejected_chunk_skip: bool = True

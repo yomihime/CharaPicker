@@ -96,6 +96,12 @@ JSON_FIXTURE = json.dumps(
     ensure_ascii=False,
 )
 JSONL_FIXTURE = "\n".join(json.dumps(item, ensure_ascii=False) for item in JSON_MESSAGES)
+GENERIC_GROUP_FIXTURE = """2026-09-05 12:00:00 甲
+大家好
+2026-09-05 12:01:00 乙
+收到
+[2026-09-05 12:02:00] 丙: 我也来了
+"""
 
 
 def _chat_unit() -> ExtractionUnit:
@@ -163,6 +169,37 @@ def _assert_parser() -> None:
     assert "[邮箱]" in rendered
     assert "reply=m000001" in rendered
     assert redactions == 1
+
+    generic_document = parse_chat_export(GENERIC_GROUP_FIXTURE, suffix=".txt")
+    assert generic_document.format_name == "generic_chat_text"
+    assert [message.sender for message in generic_document.messages] == ["甲", "乙", "丙"]
+    assert [message.content for message in generic_document.messages] == [
+        "大家好",
+        "收到",
+        "我也来了",
+    ]
+    assert len({message.participant_id for message in generic_document.messages}) == 3
+
+    unstructured = parse_chat_export("第一段没有发送者\n" + "密" * 4_500, suffix=".txt")
+    assert unstructured.format_name == "generic_chat_text"
+    assert "chat_sender_boundaries_unrecognized" in unstructured.warnings
+    assert len(unstructured.messages) == 4
+    assert max(len(message.content) for message in unstructured.messages) <= 2_000
+
+    generic_json = parse_chat_export(
+        json.dumps(
+            {
+                "messages": [
+                    {"author": "甲", "datetime": "2026-09-05 12:00", "message": "你好"},
+                    {"author": "乙", "datetime": "2026-09-05 12:01", "message": "你好"},
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        suffix=".json",
+    )
+    assert generic_json.format_name == "generic_chat_json"
+    assert [message.sender for message in generic_json.messages] == ["甲", "乙"]
 
     preview_source = jsonl_document.messages * 80
     preview_source = [

@@ -19,6 +19,8 @@ from utils.material_preprocessing import (
 )
 from utils.media_types import VIDEO_SUFFIXES
 from utils.paths import ensure_project_tree
+from utils.source_importer import source_relative_targets
+from utils.state_manager import load_project_config
 
 
 FORMAL_VIDEO_SCHEMA_VERSION = 1
@@ -76,8 +78,14 @@ def scan_source_directory(source_root: str) -> dict[str, Any]:
 
 
 def scan_formal_materials(project_id: str) -> list[EpisodePlan]:
-    materials_root = ensure_project_tree(project_id).materials
+    paths = ensure_project_tree(project_id)
+    materials_root = paths.materials
     preprocessing_index = preprocessing_material_metadata_index(materials_root)
+    explicit_content_form_hints: dict[str, str] = {}
+    if paths.config.is_file():
+        config = load_project_config(paths.config)
+        for relative_target in source_relative_targets(config.chat_source_paths):
+            explicit_content_form_hints[relative_target.as_posix()] = ContentForm.CHAT_LOG.value
     video_scan = _scan_formal_video_materials(project_id)
     episodes: list[EpisodePlan] = []
     for season in video_scan.get("seasons", []):
@@ -101,6 +109,7 @@ def scan_formal_materials(project_id: str) -> list[EpisodePlan]:
         materials_root,
         episodes,
         preprocessing_index=preprocessing_index,
+        explicit_content_form_hints=explicit_content_form_hints,
     )
 
 

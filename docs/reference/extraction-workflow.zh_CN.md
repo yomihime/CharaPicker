@@ -1,6 +1,6 @@
 # 提取工作流技术说明（zh_CN）
 
-最近核对日期：2026-07-20。
+最近核对日期：2026-09-06。
 
 本文面向用户、研究者和想理解 CharaPicker 设计的人，说明长篇视频素材如何被提取、压缩、组织，并最终用于生成角色卡。
 
@@ -48,6 +48,8 @@ ZIP、CBZ、EPUB、文本型 PDF、7z、RAR 和 CBR 会先作为容器保存在 
 通用 ZIP/7z/RAR 只派生图片、音频和文本叶子；其中的视频返回 `container_video_requires_explicit_import`，不会进入 `materials/`。视频必须作为独立素材显式导入，CBZ/CBR 则继续保持仅图片页边界。非原始处理方案只有在存在直接视频时才需要 FFmpeg；缺少 FFmpeg 时，项目页允许取消、忽略全部视频并继续处理容器及其它直接素材，或下载 FFmpeg 后自动执行原请求。middleware 在真正处理视频前仍会复核工具状态，避免竞态绕过。
 
 导入和处理后，系统会在项目目录下维护可处理素材。正式提取开始时，系统会扫描 `materials/` 并生成 `FormalExtractionRunPlan`，写入 `knowledge_base/extraction_runs/{run_id}/plan.json`。完整提取会沿用最近一次非 FAST 的线性 run 作为补全索引；洁净提取则在清理后建立新 run。run plan 记录 `MaterialRef`、`ExtractionUnit`、媒体类型、内容形态、派生成果和内部编号的映射；后续流程使用稳定编号，例如 `season_001`、`episode_001`、`chunk_0001`，不会反复依赖原始文件名推断。`source_manifest.json` 只作为旧观察索引或调试产物，不再作为正式提取输入契约。
+
+即时通讯导出文本可通过项目页的“添加聊天记录”显式导入。该入口当前接受 TXT、Markdown、JSON 和 JSONL，并把选择保存为项目级 `chat_log` 内容形态提示；因此不依赖 QQ、微信或第三方导出器的品牌标记。已知 QQChatExporter 结构继续使用专用解析；其它格式会尝试识别常见的时间、发送者、正文边界和常见 JSON 字段。无法可靠识别边界时仍按受限长度保留正文并发出 warning，不会静默退回小说提取；这类结果的参与者关系可信度会低于结构明确的群聊记录。
 
 预览链路从同一份 run plan 构建通用候选，并按成本稳定选择：字幕/现成 transcript、普通文本、静态图片、需要先转写的音频、视频。预览最多生成 2 个 chunk，每个候选首轮只取 1 个；若某个候选失败或没有结果，会继续尝试后续素材，但总尝试数限制为 4，防止失败素材放大预览成本。不支持的 VTT/LRC、BMP/GIF 或模型能力不匹配会以带 `media_type`、`content_form`、`unit_id` 和来源路径的 warning 进入洞察流，不阻断其它候选。
 

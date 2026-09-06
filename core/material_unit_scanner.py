@@ -5,7 +5,11 @@ from hashlib import sha1
 from pathlib import Path
 from typing import Any
 
-from core.chat_log_parser import QQ_CHAT_PARSER_VERSION, is_qq_chat_export_path
+from core.chat_log_parser import (
+    GENERIC_CHAT_PARSER_VERSION,
+    QQ_CHAT_PARSER_VERSION,
+    is_qq_chat_export_path,
+)
 from core.extraction_plan import (
     ContentForm,
     EpisodePlan,
@@ -49,6 +53,7 @@ def extend_episode_plans(
     episodes: list[EpisodePlan],
     *,
     preprocessing_index: dict[str, dict[str, object]] | None = None,
+    explicit_content_form_hints: dict[str, str] | None = None,
 ) -> list[EpisodePlan]:
     source_metadata_index = (
         preprocessing_index
@@ -83,6 +88,7 @@ def extend_episode_plans(
         [path for path in material_paths if path not in associated_paths],
         timed_text_alignment_failures=timed_text_alignment_failures,
         preprocessing_index=source_metadata_index,
+        explicit_content_form_hints=explicit_content_form_hints or {},
     )
     return [*video_episodes, *standalone_episodes]
 
@@ -263,6 +269,7 @@ def _standalone_material_episodes(
     *,
     timed_text_alignment_failures: dict[Path, dict[str, Any]] | None = None,
     preprocessing_index: dict[str, dict[str, object]],
+    explicit_content_form_hints: dict[str, str],
 ) -> list[EpisodePlan]:
     image_paths = [path for path in material_paths if path.suffix.lower() in IMAGE_SUFFIXES]
     other_paths = [path for path in material_paths if path not in image_paths]
@@ -282,6 +289,10 @@ def _standalone_material_episodes(
             path,
             timed_text_alignment_failure=alignment_failures.get(path),
             preprocessing_index=preprocessing_index,
+            explicit_content_form_hint=explicit_content_form_hints.get(
+                _relative_material_path(materials_root, path),
+                "",
+            ),
         )
         for path in other_paths
     )
@@ -377,6 +388,7 @@ def _single_material_episode(
     *,
     timed_text_alignment_failure: dict[str, Any] | None = None,
     preprocessing_index: dict[str, dict[str, object]],
+    explicit_content_form_hint: str = "",
 ) -> EpisodePlan:
     media_type = _material_media_type(path)
     relative_path = _relative_material_path(materials_root, path)
@@ -384,6 +396,7 @@ def _single_material_episode(
     content_form = _material_content_form(
         path,
         media_type,
+        explicit_hint=explicit_content_form_hint,
         preprocessed_hint=_string(
             preprocessing_metadata.get("preprocessed_content_form_hint")
         ),
@@ -460,8 +473,13 @@ def _material_unit(
         **(metadata or {}),
     }
     if content_form == ContentForm.CHAT_LOG:
-        unit_metadata["chat_format"] = "qq_chat_exporter"
-        unit_metadata["chat_parser_version"] = QQ_CHAT_PARSER_VERSION
+        qq_chat_export = is_qq_chat_export_path(path)
+        unit_metadata["chat_format"] = (
+            "qq_chat_exporter" if qq_chat_export else "generic_chat_export"
+        )
+        unit_metadata["chat_parser_version"] = (
+            QQ_CHAT_PARSER_VERSION if qq_chat_export else GENERIC_CHAT_PARSER_VERSION
+        )
     if path.suffix.lower() in TIMED_TEXT_SUFFIXES:
         unit_metadata["timed_text_supported"] = (
             path.suffix.lower() in SUPPORTED_TIMED_TEXT_SUFFIXES
@@ -491,8 +509,8 @@ def _material_unit(
     if content_form == ContentForm.CHAT_LOG:
         handler_options.update(
             {
-                "chat_format": "qq_chat_exporter",
-                "chat_parser_version": QQ_CHAT_PARSER_VERSION,
+                "chat_format": unit_metadata["chat_format"],
+                "chat_parser_version": unit_metadata["chat_parser_version"],
                 "message_boundary_chunking": True,
             }
         )
@@ -529,8 +547,12 @@ def _material_content_form(
     path: Path,
     media_type: MediaType,
     *,
+    explicit_hint: str = "",
     preprocessed_hint: str = "",
 ) -> ContentForm:
+    controlled_explicit_hint = PREPROCESSED_TEXT_CONTENT_FORMS.get(explicit_hint)
+    if controlled_explicit_hint is not None and media_type == MediaType.TEXT:
+        return controlled_explicit_hint
     controlled_hint = PREPROCESSED_TEXT_CONTENT_FORMS.get(preprocessed_hint)
     if controlled_hint is not None and media_type == MediaType.TEXT:
         return controlled_hint
@@ -571,8 +593,8 @@ def _text_unit_kind(path: Path) -> str:
         return "subtitle_text"
     if suffix == ".lrc":
         return "lyrics_text"
-        if suffix == ".json":
-            return "controlled_json_text"
+    if suffix == ".json":
+        return "controlled_json_text"
     return "document_text"
 
 
