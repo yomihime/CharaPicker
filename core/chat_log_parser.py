@@ -12,6 +12,7 @@ from typing import Any
 QQ_CHAT_EXPORTER_MARKER = "[QQChatExporter"
 QQ_CHAT_EXPORT_TITLE = "QQ聊天记录导出文件"
 QQ_CHAT_PARSER_VERSION = 2
+GENERIC_CHAT_PARSER_VERSION = 1
 CHAT_LOG_DETECT_BYTES = 64 * 1024
 CHAT_LOG_ENCODINGS = ("utf-8-sig", "utf-8", "gb18030")
 MESSAGE_HEADER_PATTERN = re.compile(
@@ -25,6 +26,19 @@ ATTACHMENT_PATTERN = re.compile(
 )
 HEADER_FIELD_PATTERN = re.compile(
     r"(?m)^(?P<key>聊天名称|聊天类型|导出时间|消息总数|时间范围):\s*(?P<value>.+?)\s*$"
+)
+GENERIC_INLINE_MESSAGE_PATTERN = re.compile(
+    r"^(?:(?:\[(?P<bracket_time>[^\]]{4,40})\]|(?P<plain_time>"
+    r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?))\s*)?"
+    r"(?P<sender>[^:：\r\n]{1,120})[:：]\s*(?P<content>.*)$"
+)
+GENERIC_TIME_FIRST_HEADER_PATTERN = re.compile(
+    r"^(?P<timestamp>\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?)"
+    r"\s+(?P<sender>\S.{0,119})$"
+)
+GENERIC_SENDER_FIRST_HEADER_PATTERN = re.compile(
+    r"^(?P<sender>\S.{0,119}?)\s+(?P<timestamp>"
+    r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?)$"
 )
 
 
@@ -130,10 +144,159 @@ def looks_like_qq_chat_export_jsonl(text: str) -> bool:
 def parse_chat_export(text: str, *, suffix: str = ".txt") -> ChatLogDocument:
     normalized_suffix = suffix.lower()
     if normalized_suffix == ".json":
-        return parse_qq_chat_export_json(text)
+        if looks_like_qq_chat_export_json_text(text):
+            return parse_qq_chat_export_json(text)
+        return parse_generic_chat_json(text)
     if normalized_suffix == ".jsonl":
-        return parse_qq_chat_export_jsonl(text)
-    return parse_qq_chat_export(text)
+        if looks_like_qq_chat_export_jsonl(text):
+            return parse_qq_chat_export_jsonl(text)
+        return parse_generic_chat_jsonl(text)
+    if looks_like_qq_chat_export(text):
+        return parse_qq_chat_export(text)
+    return parse_generic_chat_text(text)
+
+
+def parse_generic_chat_text(text: str) -> ChatLogDocument:
+    records: list[dict[str, Any]] = []
+    pending_header: tuple[str, str, int] | None = None
+    offset = 0
+    recognized_boundaries = 0
+    for line in text.splitlines(keepends=True):
+        line_start = offset
+        offset += len(line)
+        stripped = line.strip()
+        if not stripped:
+            continue
+        header = GENERIC_TIME_FIRST_HEADER_PATTERN.match(stripped)
+        if header is None:
+            header = GENERIC_SENDER_FIRST_HEADER_PATTERN.match(stripped)
+        if header is not None:
+            pending_header = (
+                header.group("sender").strip(),
+                header.group("timestamp").strip(),
+                line_start,
+            )
+            recognized_boundaries += 1
+            continue
+        inline = GENERIC_INLINE_MESSAGE_PATTERN.match(stripped)
+        if inline is not None and not _looks_like_url_label(inline.group("sender")):
+            records.append(
+                {
+                    "sender": inline.group("sender").strip(),
+                    "timestamp": (
+                        inline.group("bracket_time")
+                        or inline.group("plain_time")
+                        or "unknown-time"
+                    ).strip(),
+                    "content": inline.group("content").strip() or "[空消息]",
+                    "start_offset": line_start,
+                    "end_offset": offset,
+                }
+            )
+            pending_header = None
+            recognized_boundaries += 1
+            continue
+        if pending_header is not None:
+            sender, timestamp, start_offset = pending_header
+            records.append(
+                {
+                    "sender": sender,
+                    "timestamp": timestamp,
+                    "content": stripped,
+                    "start_offset": start_offset,
+                    "end_offset": offset,
+                }
+            )
+            pending_header = None
+            continue
+        if records:
+            records[-1]["content"] = f"{records[-1]['content']}\n{stripped}"
+            records[-1]["end_offset"] = offset
+        else:
+            records.append(
+                {
+                    "sender": "unknown",
+                    "timestamp": "unknown-time",
+                    "content": stripped,
+                    "start_offset": line_start,
+                    "end_offset": offset,
+                }
+            )
+
+    if pending_header is not None:
+        sender, timestamp, start_offset = pending_header
+        records.append(
+            {
+                "sender": sender,
+                "timestamp": timestamp,
+                "content": "[空消息]",
+                "start_offset": start_offset,
+                "end_offset": len(text),
+            }
+        )
+    if recognized_boundaries == 0:
+        records = _unstructured_chat_records(text)
+    if not records:
+        raise ValueError("chat export does not contain readable messages")
+    warnings = ["generic_chat_format_fallback"]
+    if recognized_boundaries == 0:
+        warnings.append("chat_sender_boundaries_unrecognized")
+    return ChatLogDocument(
+        format_name="generic_chat_text",
+        messages=_generic_records_to_messages(records),
+        warnings=warnings,
+    )
+
+
+def parse_generic_chat_json(text: str) -> ChatLogDocument:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError("chat JSON is invalid") from exc
+    if isinstance(payload, dict):
+        for key in ("messages", "data", "items", "records"):
+            candidate = payload.get(key)
+            if isinstance(candidate, list):
+                payload = candidate
+                break
+    if not isinstance(payload, list):
+        raise ValueError("chat JSON must contain a message array")
+    records = [
+        record
+        for item in payload
+        if isinstance(item, dict) and (record := _generic_json_record(item)) is not None
+    ]
+    if not records:
+        raise ValueError("chat JSON does not contain readable messages")
+    return ChatLogDocument(
+        format_name="generic_chat_json",
+        messages=_generic_records_to_messages(records),
+        warnings=["generic_chat_format_fallback"],
+    )
+
+
+def parse_generic_chat_jsonl(text: str) -> ChatLogDocument:
+    records: list[dict[str, Any]] = []
+    warnings = ["generic_chat_format_fallback"]
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            warnings.append(f"chat_jsonl_line_invalid:line={line_number}")
+            continue
+        if isinstance(payload, dict):
+            record = _generic_json_record(payload)
+            if record is not None:
+                records.append(record)
+    if not records:
+        raise ValueError("chat JSONL does not contain readable messages")
+    return ChatLogDocument(
+        format_name="generic_chat_jsonl",
+        messages=_generic_records_to_messages(records),
+        warnings=warnings,
+    )
 
 
 def parse_qq_chat_export(text: str) -> ChatLogDocument:
@@ -412,6 +575,114 @@ def _json_reply_to_id(elements: list[Any]) -> str:
 def _participant_id(value: str) -> str:
     digest = hashlib.sha256(value.strip().encode("utf-8")).hexdigest()[:12]
     return f"participant_{digest}"
+
+
+def _generic_json_record(payload: dict[str, Any]) -> dict[str, Any] | None:
+    sender_payload = payload.get("sender")
+    if isinstance(sender_payload, dict):
+        sender = _first_string(
+            sender_payload.get("name"),
+            sender_payload.get("nickname"),
+            sender_payload.get("display_name"),
+            sender_payload.get("id"),
+        )
+    else:
+        sender = _first_string(sender_payload)
+    sender = _first_string(
+        sender,
+        payload.get("sender_name"),
+        payload.get("username"),
+        payload.get("nickname"),
+        payload.get("author"),
+        payload.get("from"),
+        payload.get("user"),
+        "unknown",
+    )
+    content_payload = payload.get("content")
+    if isinstance(content_payload, dict):
+        content = _first_string(
+            content_payload.get("text"),
+            content_payload.get("content"),
+            content_payload.get("body"),
+        )
+    else:
+        content = _first_string(content_payload)
+    content = _first_string(
+        content,
+        payload.get("text"),
+        payload.get("message"),
+        payload.get("body"),
+    )
+    if not content:
+        return None
+    return {
+        "sender": sender,
+        "timestamp": _first_string(
+            payload.get("time"),
+            payload.get("timestamp"),
+            payload.get("datetime"),
+            payload.get("date"),
+            "unknown-time",
+        ),
+        "content": _normalize_message_content(content),
+        "source_message_id": _first_string(
+            payload.get("id"),
+            payload.get("message_id"),
+            payload.get("msg_id"),
+        ),
+    }
+
+
+def _generic_records_to_messages(records: list[dict[str, Any]]) -> list[ChatMessage]:
+    messages: list[ChatMessage] = []
+    for index, record in enumerate(records, start=1):
+        sender = _first_string(record.get("sender"), "unknown")
+        content = _first_string(record.get("content"), "[空消息]")
+        messages.append(
+            ChatMessage(
+                index=index,
+                sender=sender,
+                timestamp=_first_string(record.get("timestamp"), "unknown-time"),
+                content=content,
+                start_offset=_integer(record.get("start_offset"), index - 1),
+                end_offset=_integer(record.get("end_offset"), index),
+                participant_id=_participant_id(sender),
+                source_message_id=_first_string(record.get("source_message_id"), str(index)),
+                attachment_types=_attachment_types(content),
+            )
+        )
+    return messages
+
+
+def _unstructured_chat_records(text: str, *, max_record_chars: int = 2_000) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        line_start = offset
+        offset += len(line)
+        content = line.strip()
+        if not content:
+            continue
+        for chunk_start in range(0, len(content), max_record_chars):
+            chunk = content[chunk_start : chunk_start + max_record_chars]
+            records.append(
+                {
+                    "sender": "unknown",
+                    "timestamp": "unknown-time",
+                    "content": chunk,
+                    "start_offset": line_start + chunk_start,
+                    "end_offset": min(offset, line_start + chunk_start + len(chunk)),
+                }
+            )
+    return records
+
+
+def _looks_like_url_label(value: str) -> bool:
+    return value.strip().casefold() in {"http", "https", "file"}
+
+
+def _integer(value: object, default: int) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else default
 
 
 def _attachment_types(content: str) -> tuple[str, ...]:

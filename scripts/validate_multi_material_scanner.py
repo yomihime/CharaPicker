@@ -17,7 +17,7 @@ from core import knowledge_base as kb  # noqa: E402
 from core import source_scanner  # noqa: E402
 from core.extraction_plan import ContentForm, MediaType  # noqa: E402
 from core.extractor import Extractor  # noqa: E402
-from core.models import ProjectPaths  # noqa: E402
+from core.models import ProjectConfig, ProjectPaths  # noqa: E402
 
 
 @contextmanager
@@ -74,6 +74,16 @@ def _assert_multi_material_scan() -> None:
         _write_fixture(paths.materials / "episode01.srt", b"1\n00:00:00,000 --> 00:00:01,000\nHi")
         _write_fixture(paths.materials / "novel.md", b"chapter one")
         _write_fixture(paths.materials / "setting_notes.txt", b"character setting")
+        explicit_chat_source = paths.root / "external_group.txt"
+        _write_fixture(explicit_chat_source, "甲: 你好\n乙: 收到".encode("utf-8"))
+        _write_fixture(paths.materials / explicit_chat_source.name, explicit_chat_source.read_bytes())
+        paths.config.write_text(
+            ProjectConfig(
+                project_id=project_id,
+                chat_source_paths=[str(explicit_chat_source)],
+            ).model_dump_json(indent=2),
+            encoding="utf-8",
+        )
         _write_fixture(
             paths.materials / "qq_chat.txt",
             (
@@ -157,6 +167,12 @@ def _assert_multi_material_scan() -> None:
         assert standalone_units["novel.md"].content_form == ContentForm.NOVEL
         assert standalone_units["novel.md"].material_ref.text_range is not None
         assert standalone_units["setting_notes.txt"].content_form == ContentForm.SETTING_BOOK
+        assert standalone_units["external_group.txt"].content_form == ContentForm.CHAT_LOG
+        assert standalone_units["external_group.txt"].unit_kind == "chat_log_text"
+        assert (
+            standalone_units["external_group.txt"].handler_options["chat_format"]
+            == "generic_chat_export"
+        )
         assert standalone_units["qq_chat.txt"].content_form == ContentForm.CHAT_LOG
         assert standalone_units["qq_chat.txt"].unit_kind == "chat_log_text"
         assert standalone_units["qq_chat.txt"].handler_options["chat_format"] == "qq_chat_exporter"

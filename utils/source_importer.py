@@ -77,6 +77,20 @@ def source_raw_targets(project_id: str, source_paths: list[str]) -> list[Path]:
     return [raw_target for _, raw_target in source_raw_target_pairs(project_id, source_paths)]
 
 
+def source_relative_targets(source_paths: list[str]) -> list[Path]:
+    relative_targets: list[Path] = []
+    for source_path in source_paths:
+        source = Path(source_path).expanduser()
+        if not source.exists():
+            if is_project_input_supported_source(source):
+                relative_targets.append(Path(source.name))
+            continue
+        relative_targets.extend(
+            target.relative_target for target in _expand_source_paths([source_path])
+        )
+    return relative_targets
+
+
 def source_raw_target_pairs(project_id: str, source_paths: list[str]) -> list[tuple[Path, Path]]:
     raw_root = project_paths(project_id).raw
     pairs: list[tuple[Path, Path]] = []

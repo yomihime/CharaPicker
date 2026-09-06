@@ -134,6 +134,7 @@ FAST_EXTRACTION_MAX_CONCURRENCY = 500
 SOURCE_KIND_ROLE = int(Qt.ItemDataRole.UserRole)
 SOURCE_PATH_ROLE = int(Qt.ItemDataRole.UserRole) + 1
 SOURCE_STATUS_ROLE = int(Qt.ItemDataRole.UserRole) + 2
+SOURCE_CHAT_ROLE = int(Qt.ItemDataRole.UserRole) + 3
 PROCESSING_PRESETS = [
     SourceProcessingPreset.ORIGINAL,
     SourceProcessingPreset.SEGMENT_TRANSCODE,
@@ -952,12 +953,20 @@ class ProjectPage(QWidget):
         source_actions.setSpacing(10)
         source_actions.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.add_file_button = PushButton(t("project.source.addFile"), form_card)
+        self.add_chat_button = PushButton(t("project.source.addChat"), form_card)
         self.add_folder_button = PushButton(t("project.source.addFolder"), form_card)
         self.remove_source_button = PushButton(t("project.source.remove"), form_card)
         self.clean_raw_button = PushButton(t("project.source.cleanRaw"), form_card)
-        for button in (self.add_file_button, self.add_folder_button, self.remove_source_button, self.clean_raw_button):
+        for button in (
+            self.add_file_button,
+            self.add_chat_button,
+            self.add_folder_button,
+            self.remove_source_button,
+            self.clean_raw_button,
+        ):
             button.setMinimumWidth(112)
         source_actions.addWidget(self.add_file_button)
+        source_actions.addWidget(self.add_chat_button)
         source_actions.addWidget(self.add_folder_button)
         source_actions.addWidget(self.remove_source_button)
         source_actions.addWidget(self.clean_raw_button)
@@ -1202,6 +1211,7 @@ class ProjectPage(QWidget):
         self.new_project_button.clicked.connect(self._add_project)
         self.delete_project_button.clicked.connect(self._delete_project)
         self.add_file_button.clicked.connect(self._add_files)
+        self.add_chat_button.clicked.connect(self._add_chat_files)
         self.add_folder_button.clicked.connect(self._add_folder)
         self.clean_raw_button.clicked.connect(self._clean_selected_raw_sources)
         self.remove_source_button.clicked.connect(self._remove_selected_sources)
@@ -1234,6 +1244,13 @@ class ProjectPage(QWidget):
             for index in range(self.sources_list.count())
             if self.sources_list.item(index).data(SOURCE_KIND_ROLE) == SOURCE_KIND_EXTERNAL
         ]
+        chat_sources = [
+            self.sources_list.item(index).data(SOURCE_PATH_ROLE)
+            or self.sources_list.item(index).text()
+            for index in range(self.sources_list.count())
+            if self.sources_list.item(index).data(SOURCE_KIND_ROLE) == SOURCE_KIND_EXTERNAL
+            and self.sources_list.item(index).data(SOURCE_CHAT_ROLE) is True
+        ]
         mode = self._current_extraction_mode()
         return ProjectConfig(
             project_id=project.project_id,
@@ -1241,7 +1258,9 @@ class ProjectPage(QWidget):
             target_characters=list(project.target_characters),
             extraction_mode=mode,
             source_paths=sources,
+            chat_source_paths=chat_sources,
             source_processing=self._current_processing_config(),
+            include_previous_season_background=project.include_previous_season_background,
             allow_provider_rejected_chunk_skip=self.skip_provider_rejected_chunk_check.isChecked(),
             raw_cleaned_paths=project.raw_cleaned_paths,
             created_at=project.created_at,
@@ -1412,6 +1431,8 @@ class ProjectPage(QWidget):
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return
             fast_concurrency = dialog.concurrency()
+        self._upsert_project(config)
+        save_project_config(config)
         self.extractionRequested.emit(config, fast_concurrency)
 
     def _confirm_clean_extraction(self) -> bool:
@@ -2123,6 +2144,7 @@ class ProjectPage(QWidget):
         self.mode_combo.setEnabled(extraction_controls_enabled)
         self.skip_provider_rejected_chunk_check.setEnabled(extraction_controls_enabled)
         self.add_file_button.setEnabled(source_controls_enabled)
+        self.add_chat_button.setEnabled(source_controls_enabled)
         self.add_folder_button.setEnabled(source_controls_enabled)
         self.remove_source_button.setEnabled(source_controls_enabled)
         self.clean_raw_button.setEnabled(source_controls_enabled)
@@ -2152,8 +2174,13 @@ class ProjectPage(QWidget):
         self._apply_processing_config(project.source_processing)
         self._sync_extraction_button_text()
         self.sources_list.clear()
+        chat_sources = set(project.chat_source_paths)
         for source_path in project.source_paths:
-            self._add_source_item(source_path, SOURCE_KIND_EXTERNAL)
+            self._add_source_item(
+                source_path,
+                SOURCE_KIND_EXTERNAL,
+                is_chat=source_path in chat_sources,
+            )
         self._refresh_project_sources(project.project_id)
         self.clear_events()
         self.projectChanged.emit(project)
@@ -2232,33 +2259,66 @@ class ProjectPage(QWidget):
         if path:
             self._append_sources([path])
 
-    def _append_sources(self, paths: list[str]) -> None:
+    def _add_chat_files(self) -> None:
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            t("project.fileDialog.chatFiles"),
+            "",
+            t("project.fileDialog.chatFilter"),
+        )
+        self._append_sources(paths, is_chat=True)
+
+    def _append_sources(self, paths: list[str], *, is_chat: bool = False) -> None:
         existing = {
-            self.sources_list.item(index).data(SOURCE_PATH_ROLE) or self.sources_list.item(index).text()
+            self.sources_list.item(index).data(SOURCE_PATH_ROLE)
+            or self.sources_list.item(index).text(): self.sources_list.item(index)
             for index in range(self.sources_list.count())
         }
         for path in paths:
-            if path and path not in existing:
-                self._add_source_item(path, SOURCE_KIND_EXTERNAL)
-                existing.add(path)
+            if not path:
+                continue
+            existing_item = existing.get(path)
+            if existing_item is not None:
+                if is_chat and existing_item.data(SOURCE_KIND_ROLE) == SOURCE_KIND_EXTERNAL:
+                    existing_item.setData(SOURCE_CHAT_ROLE, True)
+                    self._refresh_source_item(existing_item)
+                continue
+            self._add_source_item(path, SOURCE_KIND_EXTERNAL, is_chat=is_chat)
+            existing[path] = self.sources_list.item(self.sources_list.count() - 1)
 
-    def _add_source_item(self, source_path: str, source_kind: str) -> None:
-        display_text = self._source_display_text(source_path, source_kind)
+    def _add_source_item(
+        self,
+        source_path: str,
+        source_kind: str,
+        *,
+        is_chat: bool = False,
+    ) -> None:
+        display_text = self._source_display_text(source_path, source_kind, is_chat=is_chat)
         status = self._source_status(source_path, source_kind)
         item = QListWidgetItem("")
         item.setSizeHint(QSize(0, 26))
         item.setData(SOURCE_KIND_ROLE, source_kind)
         item.setData(SOURCE_PATH_ROLE, source_path)
         item.setData(SOURCE_STATUS_ROLE, status)
+        item.setData(SOURCE_CHAT_ROLE, is_chat)
         item.setToolTip(t(f"project.source.status.{status}"))
         self.sources_list.addItem(item)
         self.sources_list.setItemWidget(item, SourceListRow(display_text, status, self.sources_list))
 
-    def _source_display_text(self, source_path: str, source_kind: str) -> str:
+    def _source_display_text(
+        self,
+        source_path: str,
+        source_kind: str,
+        *,
+        is_chat: bool = False,
+    ) -> str:
         project = self._selected_project()
         if project is None:
             return source_path
-        return source_display_text(project.project_id, source_path, source_kind)
+        display_text = source_display_text(project.project_id, source_path, source_kind)
+        if is_chat:
+            return t("project.source.chatDisplay", path=display_text)
+        return display_text
 
     def _source_status(self, source_path: str, source_kind: str) -> str:
         project = self._selected_project()
@@ -2293,15 +2353,24 @@ class ProjectPage(QWidget):
 
     def _refresh_source_status_rows(self) -> None:
         for row in range(self.sources_list.count()):
-            item = self.sources_list.item(row)
-            source_path = item.data(SOURCE_PATH_ROLE) or item.text()
-            source_kind = item.data(SOURCE_KIND_ROLE)
-            status = self._source_status(source_path, source_kind)
-            display_text = self._source_display_text(source_path, source_kind)
-            item.setText("")
-            item.setData(SOURCE_STATUS_ROLE, status)
-            item.setToolTip(t(f"project.source.status.{status}"))
-            self.sources_list.setItemWidget(item, SourceListRow(display_text, status, self.sources_list))
+            self._refresh_source_item(self.sources_list.item(row))
+
+    def _refresh_source_item(self, item: QListWidgetItem) -> None:
+        source_path = item.data(SOURCE_PATH_ROLE) or item.text()
+        source_kind = item.data(SOURCE_KIND_ROLE)
+        status = self._source_status(source_path, source_kind)
+        display_text = self._source_display_text(
+            source_path,
+            source_kind,
+            is_chat=item.data(SOURCE_CHAT_ROLE) is True,
+        )
+        item.setText("")
+        item.setData(SOURCE_STATUS_ROLE, status)
+        item.setToolTip(t(f"project.source.status.{status}"))
+        self.sources_list.setItemWidget(
+            item,
+            SourceListRow(display_text, status, self.sources_list),
+        )
 
     def _clean_selected_raw_sources(self) -> None:
         if self._raw_cleanup_thread is not None:

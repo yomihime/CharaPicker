@@ -21,11 +21,11 @@
 - `character_card_constants.py`：集中保存角色卡固定文件名、预览卡保留 ID 和 stale warning reason 等跨模块共享常量。
 - `knowledge_base.py`：集中管理 `projects/{project_id}/knowledge_base/` 下常用产物的路径、原子 JSON 读写和结构校验。
 - `source_scanner.py`：保留旧视频目录扫描、正式扫描入口、预览视频 chunk 收集和预览 chunk 标识生成；正式扫描一次性加载预处理来源索引，把非视频 unit 扩展委托给 `material_unit_scanner.py`。
-- `material_unit_scanner.py`：把文本、字幕、音频、图片和 GIF 映射为正式 run plan unit，负责唯一字幕关联与失败 warning、漫画/图集页组自然排序、稳定 ID、页码/章节 metadata、受控预处理 content-form/page hint、不支持状态和来源 metadata 回填；只扫描 `materials/`，不扫描 cache、解析容器或执行模型提取。
+- `material_unit_scanner.py`：把文本、聊天记录、字幕、音频、图片和 GIF 映射为正式 run plan unit，负责显式聊天 content-form hint、唯一字幕关联与失败 warning、漫画/图集页组自然排序、稳定 ID、页码/章节 metadata、受控预处理 content-form/page hint、不支持状态和来源 metadata 回填；只扫描 `materials/`，不扫描 cache、解析容器或执行模型提取。
 - `preview_sampling.py`：从 `FormalExtractionRunPlan` 构建通用预览候选，按字幕/现成 transcript、普通文本、图片、需转写音频、视频的成本顺序稳定排序；负责生成单 unit 的隔离执行计划，不执行模型调用或知识库写入。
 - `formal_dispatch.py`：从 `FormalExtractionRunPlan` 构建正式提取分发表，首批覆盖 `video`、`text`、`image`、`audio -> transcript` 和补充型 `native_media` 视听线索机会；在提供当前模型 handler 时，会在分派前过滤模型级 native media 不支持状态，并把 VTT/LRC、BMP/GIF、模型不支持图片/音频等情况整理为可解释 unsupported unit；不执行模型调用或聚合。
 - `timed_text_parser.py`：使用标准库解析首批支持的 `.srt` 和 `.ass`，保留开始/结束时间、源行号、原始文本和 ASS 显式 speaker；不推断未知说话人，不把字幕当成 transcript 派生成果。
-- `text_unit_handler.py`：负责普通 `.txt`、`.md`、受控 `.json`、首批 `.srt` / `.ass` 以及派生 `episode_transcript.json` 文本 unit 的解码、结构校验、预算分块、文本/时间范围 evidence、文本模型请求和 `ChunkExtractionResult` 构建；字幕与 transcript evidence 保留 segment 定位，speaker 只接受素材中的显式字段。
+- `text_unit_handler.py`：负责普通 `.txt`、`.md`、受控 `.json`、聊天记录 `.txt` / `.md` / `.json` / `.jsonl`、首批 `.srt` / `.ass` 以及派生 `episode_transcript.json` 文本 unit 的解码、结构校验、预算分块、文本/时间范围 evidence、文本模型请求和 `ChunkExtractionResult` 构建；聊天记录优先使用已知格式解析，显式导入的未知格式使用保守通用回退并保留 warning；字幕与 transcript evidence 保留 segment 定位，speaker 只接受素材中的显式字段。
 - `image_unit_handler.py`：负责 `.png`、`.jpg` / `.jpeg`、`.webp` 静态图片的文件上限与签名校验、图片模型请求、每张图片内部输出预算、页码/可选区域 evidence 和 `ChunkExtractionResult` 构建；不接管 BMP/GIF，也不复用视频每分钟输出口径。
 - `native_media_insight_handler.py`：负责原生音频理解和原生视频/视频音轨理解的 provider、backend 与具体模型能力判断、音频/视频模型请求和补充型 `ChunkExtractionResult` 构建；只保存听觉摘要、画面摘要、语气、环境声、音乐、画外声音等视听线索，不生成或覆盖 transcript。
 - `failure_classification.py`：把供应商策略拒绝、模型文本拒绝、能力不支持、输出截断、JSON 解析、网络/鉴权、用户覆盖回退和人工复核需求分开；只有前两类进入安全误拒绝 prompt 调优候选队列。
